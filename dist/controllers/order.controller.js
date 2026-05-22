@@ -856,6 +856,17 @@ class OrderController {
             ...(walletAffiliateUserId && { affiliateUser: walletAffiliateUserId, affiliateCommission: walletAffiliateCommission }),
         });
         logger_1.logger.info(`✅ Order created: ${order._id}`);
+        // Re-activate any closed conversations between the customer and each vendor in this order
+        try {
+            const vendorIds = [...new Set(orderItems.map((i) => i.vendor.toString()))];
+            const customerId = req.user.id;
+            for (const vendorId of vendorIds) {
+                await Conversation_1.default.updateMany({ participants: { $all: [customerId, vendorId] }, isActive: false }, { isActive: true });
+            }
+        }
+        catch (convActivateErr) {
+            logger_1.logger.error('Error re-activating conversations on order create:', convActivateErr);
+        }
         let paymentData = null;
         // ✅ WALLET PAYMENT ONLY (Paystack/Flutterwave blocked above)
         if (paymentMethod === types_1.PaymentMethod.WALLET) {
@@ -942,6 +953,7 @@ class OrderController {
             const vendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
             await notification_service_1.notificationService.orderPlaced(order._id.toString(), order.orderNumber, order.total, req.user.id, vendorIds);
             await notification_service_1.notificationService.paymentCompleted(order._id.toString(), order.orderNumber, order.total, req.user.id);
+            (0, notification_service_1.emitNewOrder)({ orderId: order._id.toString(), orderNumber: order.orderNumber, vendorIds });
         }
         catch (error) {
             logger_1.logger.error('Error sending order notifications:', error);
@@ -1404,7 +1416,9 @@ class OrderController {
         const subtotal = cartToUse ? cartToUse.subtotal : snapshot.subtotal;
         const discount = cartToUse ? cartToUse.discount : snapshot.discount;
         const tax = 0;
-        const total = subtotal - discount + totalShippingCost + tax;
+        const baseTotal = subtotal - discount + totalShippingCost + tax;
+        const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
+        const total = Math.round(baseTotal + serviceCharge);
         const orderNumber = reference; // Use the payment reference as order number
         // Step 6: Check for duplicate — prevent double-creation if user retries
         const existingOrder = await Order_1.default.findOne({ orderNumber });
@@ -1467,6 +1481,7 @@ class OrderController {
             discount,
             shippingCost: totalShippingCost,
             tax,
+            serviceCharge,
             total,
             status: isDigitalOnly ? types_1.OrderStatus.DELIVERED : types_1.OrderStatus.PENDING,
             paymentStatus: types_1.PaymentStatus.COMPLETED,
@@ -1482,6 +1497,17 @@ class OrderController {
             ...(affiliateUserId && { affiliateUser: affiliateUserId, affiliateCommission: affiliateCommissionAmount }),
         });
         logger_1.logger.info(`✅ Order created with verified payment: ${order._id}`);
+        // Re-activate any closed conversations between the customer and each vendor
+        try {
+            const vendorIds = [...new Set(orderItems.map((i) => i.vendor.toString()))];
+            const customerId = req.user.id;
+            for (const vendorId of vendorIds) {
+                await Conversation_1.default.updateMany({ participants: { $all: [customerId, vendorId], isActive: false } }, { isActive: true });
+            }
+        }
+        catch (convActivateErr) {
+            logger_1.logger.error('Error re-activating conversations on order create:', convActivateErr);
+        }
         // Step 8: Clear cart
         if (cartToUse) {
             cartToUse.items = [];
@@ -1531,6 +1557,7 @@ class OrderController {
             const vendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
             await notification_service_1.notificationService.orderPlaced(order._id.toString(), order.orderNumber, order.total, req.user.id, vendorIds);
             await notification_service_1.notificationService.paymentCompleted(order._id.toString(), order.orderNumber, order.total, req.user.id);
+            (0, notification_service_1.emitNewOrder)({ orderId: order._id.toString(), orderNumber: order.orderNumber, vendorIds });
         }
         catch (error) {
             logger_1.logger.error('Error sending order notifications:', error);
@@ -1896,22 +1923,143 @@ class OrderController {
     async checkActiveOrderWith(req, res) {
         const { counterpartyId } = req.params;
         const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'];
-        let hasActiveOrder = false;
-        if (req.user?.role === 'vendor') {
-            hasActiveOrder = !!(await Order_1.default.findOne({
-                'items.vendor': req.user.id,
+        const userId = req.user.id;
+        // Always check both directions — a vendor can also be a buyer
+        const [asSeller, asBuyer] = await Promise.all([
+            // counterparty placed an order with me as vendor
+            Order_1.default.findOne({
+                'items.vendor': userId,
                 user: counterpartyId,
                 status: { $in: ACTIVE_STATUSES },
-            }).select('_id').lean());
-        }
-        else {
-            hasActiveOrder = !!(await Order_1.default.findOne({
-                user: req.user?.id,
+            }).select('_id').lean(),
+            // I placed an order with counterparty as vendor
+            Order_1.default.findOne({
+                user: userId,
                 'items.vendor': counterpartyId,
                 status: { $in: ACTIVE_STATUSES },
-            }).select('_id').lean());
+            }).select('_id').lean(),
+        ]);
+        res.json({ success: true, data: { hasActiveOrder: !!(asSeller || asBuyer) } });
+    }
+    /**
+     * Return all user IDs the current user has active orders with — bulk version of checkActiveOrderWith
+     * GET /orders/active-partners
+     */
+    async getActivePartners(req, res) {
+        const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'];
+        const userId = req.user.id;
+        // Always check both directions — a vendor can also be a buyer
+        const [asSeller, asBuyer] = await Promise.all([
+            // Orders where this user is a vendor → return buyer IDs
+            Order_1.default.find({ 'items.vendor': userId, status: { $in: ACTIVE_STATUSES } })
+                .select('user').lean(),
+            // Orders where this user is the buyer → return vendor IDs
+            Order_1.default.find({ user: userId, status: { $in: ACTIVE_STATUSES } })
+                .select('items.vendor').lean(),
+        ]);
+        const sellerPartners = asSeller.map((o) => o.user.toString());
+        const buyerPartners = asBuyer.flatMap((o) => o.items.map((i) => i.vendor.toString()));
+        const partnerIds = [...new Set([...sellerPartners, ...buyerPartners])];
+        res.json({ success: true, data: { partnerIds } });
+    }
+    /**
+     * Return count of active orders for the current user (tab badge)
+     * GET /orders/active-count
+     */
+    async getActiveOrderCount(req, res) {
+        const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'];
+        const userId = req.user.id;
+        const role = req.user.role;
+        // Vendors see their incoming orders; customers see their placed orders
+        // A vendor who also shops uses the vendor count for the tab badge
+        let count = 0;
+        if (role === 'vendor') {
+            count = await Order_1.default.countDocuments({
+                'items.vendor': userId,
+                status: { $in: ACTIVE_STATUSES },
+            });
         }
-        res.json({ success: true, data: { hasActiveOrder } });
+        else {
+            count = await Order_1.default.countDocuments({
+                user: userId,
+                status: { $in: ACTIVE_STATUSES },
+            });
+        }
+        res.json({ success: true, data: { count } });
+    }
+    /**
+     * Get active orders with a counterparty (for chat order context card)
+     * GET /orders/active-with/:counterpartyId
+     */
+    async getActiveOrdersWith(req, res) {
+        const { counterpartyId } = req.params;
+        const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'];
+        const userId = req.user.id;
+        // Always check both directions — a vendor can also be a buyer
+        const [asSeller, asBuyer] = await Promise.all([
+            // counterparty placed an order with me as vendor → show my items
+            Order_1.default.find({
+                'items.vendor': userId,
+                user: counterpartyId,
+                status: { $in: ACTIVE_STATUSES },
+            }).select('orderNumber status items').lean(),
+            // I placed an order with counterparty as vendor → show their items
+            Order_1.default.find({
+                user: userId,
+                'items.vendor': counterpartyId,
+                status: { $in: ACTIVE_STATUSES },
+            }).select('orderNumber status items').lean(),
+        ]);
+        const formatAsSeller = (o) => {
+            const myItems = o.items.filter((i) => i.vendor?.toString() === userId);
+            return {
+                _id: o._id,
+                orderNumber: o.orderNumber,
+                status: o.status,
+                isSeller: true,
+                items: myItems.map((i) => ({
+                    name: i.productName,
+                    image: i.productImage,
+                    quantity: i.quantity,
+                    price: i.price,
+                })),
+                vendorTotal: myItems.reduce((s, i) => s + i.price * i.quantity, 0),
+            };
+        };
+        const formatAsBuyer = (o) => {
+            const theirItems = o.items.filter((i) => i.vendor?.toString() === counterpartyId);
+            return {
+                _id: o._id,
+                orderNumber: o.orderNumber,
+                status: o.status,
+                isSeller: false,
+                items: theirItems.map((i) => ({
+                    name: i.productName,
+                    image: i.productImage,
+                    quantity: i.quantity,
+                    price: i.price,
+                })),
+                vendorTotal: theirItems.reduce((s, i) => s + i.price * i.quantity, 0),
+            };
+        };
+        // Merge, dedup by _id (an order can't appear in both queries), sort newest first
+        const seen = new Set();
+        const orders = [];
+        for (const o of asSeller) {
+            const id = o._id.toString();
+            if (!seen.has(id)) {
+                seen.add(id);
+                orders.push(formatAsSeller(o));
+            }
+        }
+        for (const o of asBuyer) {
+            const id = o._id.toString();
+            if (!seen.has(id)) {
+                seen.add(id);
+                orders.push(formatAsBuyer(o));
+            }
+        }
+        res.json({ success: true, data: { orders } });
     }
     /**
      * Get user orders
@@ -2494,6 +2642,32 @@ class OrderController {
             throw new error_1.AppError('Not authorized', 403);
         }
         logger_1.logger.info('✅ Vendor has items in order');
+        // Once ShipBubble has a tracking number, statuses beyond 'processing' are
+        // driven by ShipBubble webhooks — block manual overrides to avoid conflicts
+        const vendorShipmentForGuard = order.vendorShipments?.find((s) => {
+            const vid = typeof s.vendor === 'object'
+                ? (s.vendor._id?.toString() ?? s.vendor.toString())
+                : s.vendor?.toString();
+            return vid === req.user?.id;
+        });
+        const shipbubbleOwnedStatuses = ['shipped', 'in_transit', 'delivered'];
+        if (vendorShipmentForGuard?.trackingNumber && shipbubbleOwnedStatuses.includes(status)) {
+            res.status(400).json({
+                success: false,
+                message: 'This shipment is now tracked by ShipBubble. Status updates beyond processing are automatic.',
+            });
+            return;
+        }
+        // Guard: if the vendor's shipment is already at this status, do nothing
+        const currentVendorStatus = vendorShipmentForGuard?.status || order.status;
+        if (currentVendorStatus === status) {
+            res.json({
+                success: true,
+                message: 'Order is already at this status',
+                data: { order },
+            });
+            return;
+        }
         // Update status
         const oldStatus = order.status;
         const vendorShipmentsList = order.vendorShipments;
@@ -2539,6 +2713,11 @@ class OrderController {
         else {
             // Single-vendor order: update the order status directly
             order.status = status;
+            // Keep the single vendorShipment entry in sync so the mobile app's
+            // vendorStatus = shipment.status || order.status expression sees the new value
+            if (vendorShipmentsList && vendorShipmentsList.length === 1) {
+                vendorShipmentsList[0].status = status;
+            }
         }
         await order.save();
         logger_1.logger.info('✅ Order status updated:', {
@@ -2546,12 +2725,58 @@ class OrderController {
             to: order.status,
             isMultiVendor,
         });
-        // Notify customer about status change
+        // If vendor is cancelling — refund the customer for this vendor's items
+        if (status === 'cancelled' && order.paymentStatus === types_1.PaymentStatus.COMPLETED) {
+            try {
+                const customerId = order.user._id
+                    ? order.user._id.toString()
+                    : order.user.toString();
+                // Calculate refund: this vendor's items subtotal + their shipment's shipping cost
+                const vendorItemsForRefund = order.items.filter((item) => item.vendor.toString() === req.user?.id);
+                const itemsTotal = vendorItemsForRefund.reduce((sum, item) => sum + item.price * item.quantity, 0);
+                const shipmentCost = vendorShipmentForGuard?.shippingCost || 0;
+                const refundAmount = itemsTotal + shipmentCost;
+                if (refundAmount > 0) {
+                    const wallet = await Additional_1.Wallet.findOne({ user: customerId });
+                    if (wallet) {
+                        wallet.balance += refundAmount;
+                        wallet.transactions.push({
+                            type: types_1.TransactionType.CREDIT,
+                            amount: refundAmount,
+                            purpose: types_1.WalletPurpose.REFUND,
+                            reference: `REF-${order.orderNumber}-${req.user.id.slice(-6)}`,
+                            description: `Refund for vendor cancellation on order ${order.orderNumber}`,
+                            relatedOrder: order._id,
+                            status: 'completed',
+                            timestamp: new Date(),
+                        });
+                        await wallet.save();
+                        logger_1.logger.info(`✅ Refund of ₦${refundAmount} issued to customer ${customerId}`);
+                    }
+                    // Notify customer about the refund
+                    await notification_service_1.notificationService.refundIssued(customerId, order.orderNumber, refundAmount);
+                }
+            }
+            catch (refundError) {
+                logger_1.logger.error('❌ Failed to process vendor-cancel refund:', refundError.message);
+            }
+        }
+        // Notify customer about status change + push real-time socket event
         try {
             const customerId = order.user._id
                 ? order.user._id.toString()
                 : order.user.toString();
             await notification_service_1.notificationService.orderStatusUpdated(order._id.toString(), order.orderNumber, status, customerId);
+            const vendorIds = order.vendorShipments
+                ?.map((s) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()))
+                .filter(Boolean) ?? [];
+            (0, notification_service_1.emitOrderStatusUpdate)({
+                orderId: order._id.toString(),
+                orderNumber: order.orderNumber,
+                status: order.status,
+                customerId,
+                vendorIds,
+            });
         }
         catch (error) {
             logger_1.logger.error('Error sending status update notification:', error);
@@ -2563,7 +2788,7 @@ class OrderController {
                 : shipment.vendor?.toString();
             return shipVendorId === req.user?.id;
         });
-        const shouldCreateShipment = (status === 'confirmed' || status === 'processing' || status === 'shipped') &&
+        const shouldCreateShipment = status === 'processing' &&
             !order.isDigital &&
             order.deliveryType !== 'pickup' &&
             (!vendorShipment?.trackingNumber);
@@ -2689,10 +2914,13 @@ class OrderController {
             throw new error_1.AppError('You are not authorized to complete this order', 403);
         }
         // Verify order is in a completable state
-        if (order.status !== types_1.OrderStatus.IN_TRANSIT && order.status !== types_1.OrderStatus.DELIVERED) {
-            throw new error_1.AppError(`Order cannot be completed from status "${order.status}". Must be "in_transit" or "delivered".`, 400);
+        const completableStatuses = [types_1.OrderStatus.SHIPPED, types_1.OrderStatus.IN_TRANSIT, types_1.OrderStatus.DELIVERED];
+        if (!completableStatuses.includes(order.status)) {
+            throw new error_1.AppError(`Order cannot be completed from status "${order.status}". Must be shipped or further.`, 400);
         }
         order.status = types_1.OrderStatus.DELIVERED;
+        order.deliveredAt = order.deliveredAt || new Date();
+        order.fundsReleased = true;
         await order.save();
         // Credit vendor wallets with their earnings
         try {
@@ -2727,6 +2955,8 @@ class OrderController {
                 });
                 await vendorWallet.save();
                 logger_1.logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for order ${order.orderNumber} (commission: ₦${commission} at ${Math.round(commissionRate * 100)}%, original: ₦${amount})`);
+                // Notify vendor their funds have been released
+                notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, amount, vendorAmount).catch(() => { });
             }
             // Handle affiliate commission if applicable
             if (order.affiliateUser && order.affiliateCommission) {
@@ -2774,18 +3004,24 @@ class OrderController {
         catch (error) {
             logger_1.logger.error('Error awarding points on delivery:', error);
         }
-        // Deactivate any conversations tied to this order between the customer and vendors
+        // Deactivate conversation for each vendor in this order — only if no other active order exists
         try {
+            const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'];
             const vendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
-            await Conversation_1.default.updateMany({
-                participants: { $all: [userId] },
-                $or: vendorIds.map((vendorId) => ({ participants: vendorId })),
-                isActive: true,
-            }, { isActive: false });
-            logger_1.logger.info(`Deactivated conversations for completed order ${order.orderNumber}`);
+            for (const vendorId of vendorIds) {
+                const otherActive = await Order_1.default.findOne({
+                    _id: { $ne: order._id },
+                    user: userId,
+                    'items.vendor': vendorId,
+                    status: { $in: ACTIVE_STATUSES },
+                }).select('_id').lean();
+                if (!otherActive) {
+                    await Conversation_1.default.updateMany({ participants: { $all: [userId, vendorId] } }, { isActive: false });
+                }
+            }
         }
-        catch (convError) {
-            logger_1.logger.error(`Error deactivating conversations for order ${order.orderNumber}:`, convError);
+        catch (convErr) {
+            logger_1.logger.error('Error deactivating conversations on order complete:', convErr);
         }
         logger_1.logger.info(`Order ${order.orderNumber} completed by customer ${userId}`);
         res.json({
@@ -2819,9 +3055,10 @@ class OrderController {
         });
         if (!shipment)
             throw new error_1.AppError('Vendor shipment not found in this order', 404);
-        if (shipment.status === 'delivered')
-            throw new error_1.AppError('This shipment is already marked as received', 400);
+        if (shipment.paidAt)
+            throw new error_1.AppError('This shipment has already been received and payment released', 400);
         shipment.status = 'delivered';
+        shipment.paidAt = new Date();
         // Credit this vendor's wallet
         const vendorItems = order.items.filter((item) => {
             const iVendorId = typeof item.vendor === 'object' ? item.vendor._id?.toString() : item.vendor?.toString();
@@ -2850,6 +3087,8 @@ class OrderController {
             });
             await vendorWallet.save();
             logger_1.logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for shipment in order ${order.orderNumber}`);
+            // Notify vendor their funds have been released
+            notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, vendorSubtotal, vendorAmount).catch(() => { });
         }
         catch (walletError) {
             logger_1.logger.error('Error crediting vendor wallet on vendor shipment completion:', walletError);
@@ -2858,6 +3097,27 @@ class OrderController {
         const allDelivered = shipments.every((s) => s.status === 'delivered' || s.status === 'cancelled');
         if (allDelivered) {
             order.status = types_1.OrderStatus.DELIVERED;
+            order.deliveredAt = order.deliveredAt || new Date();
+            order.fundsReleased = true;
+            // Award purchase points now that all shipments are confirmed received
+            try {
+                const { rewardController } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
+                await rewardController.awardOrderPoints(order._id.toString());
+                logger_1.logger.info(`✅ Points awarded on full shipment receipt for order ${order.orderNumber}`);
+                // Unlock vendor referral points for first-sale vendors
+                const uniqueVendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
+                for (const vId of uniqueVendorIds) {
+                    const vProfile = await VendorProfile_1.default.findOne({ user: vId });
+                    if (vProfile && !vProfile.referralRewarded && vProfile.referredBy) {
+                        await rewardController.unlockVendorReferralPoints(vId);
+                        vProfile.referralRewarded = true;
+                        await vProfile.save();
+                    }
+                }
+            }
+            catch (pointsError) {
+                logger_1.logger.error('Error awarding points on full shipment receipt:', pointsError);
+            }
             // Handle affiliate commission
             if (order.affiliateUser && order.affiliateCommission) {
                 try {
@@ -2882,17 +3142,24 @@ class OrderController {
                     logger_1.logger.error('Error crediting affiliate commission on full delivery:', affiliateErr);
                 }
             }
-            // Deactivate conversations
+            // Deactivate conversation — only if no other active order exists with each vendor
             try {
-                const vendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
-                await Conversation_1.default.updateMany({
-                    participants: { $all: [userId] },
-                    $or: vendorIds.map((vId) => ({ participants: vId })),
-                    isActive: true,
-                }, { isActive: false });
+                const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'];
+                const uniqueVendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
+                for (const vId of uniqueVendorIds) {
+                    const otherActive = await Order_1.default.findOne({
+                        _id: { $ne: order._id },
+                        user: userId,
+                        'items.vendor': vId,
+                        status: { $in: ACTIVE_STATUSES },
+                    }).select('_id').lean();
+                    if (!otherActive) {
+                        await Conversation_1.default.updateMany({ participants: { $all: [userId, vId] } }, { isActive: false });
+                    }
+                }
             }
             catch (convErr) {
-                logger_1.logger.error('Error deactivating conversations after full delivery:', convErr);
+                logger_1.logger.error('Error deactivating conversations on full delivery:', convErr);
             }
         }
         await order.save();

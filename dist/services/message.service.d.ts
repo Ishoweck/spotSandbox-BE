@@ -17,7 +17,12 @@ declare class MessageService {
     /**
      * Send a message
      */
-    sendMessage(senderId: string, receiverId: string, message: string, messageType?: 'text' | 'image' | 'file', fileUrl?: string, orderId?: string, senderDisplayName?: string): Promise<{
+    sendMessage(senderId: string, receiverId: string, message: string, messageType?: 'text' | 'image' | 'file', fileUrl?: string, orderId?: string, senderDisplayName?: string, replyTo?: {
+        messageId: string;
+        message: string;
+        senderName: string;
+        messageType: string;
+    }): Promise<{
         message: import("mongoose").Document<unknown, {}, import("../models/Additional").IChatMessage, {}, {}> & import("../models/Additional").IChatMessage & Required<{
             _id: import("mongoose").Types.ObjectId;
         }> & {
@@ -46,6 +51,7 @@ declare class MessageService {
             };
             unreadCount: number;
             orderId: import("mongoose").Types.ObjectId;
+            isActive: boolean;
             updatedAt: any;
         }[];
         total: number;

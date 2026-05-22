@@ -18,9 +18,8 @@ export class ShipBubbleWebhookService {
    * OR directly simulates the webhook if ShipBubble sandbox is not configured
    */
   async simulateWebhook(params: WebhookSimulatorParams) {
-    // ✅ Allow simulation in development mode OR sandbox mode
     const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
-    
+
     if (!this.isSandbox && !isDevelopment) {
       throw new Error('Webhook simulation is only available in sandbox or development mode');
     }
@@ -35,13 +34,17 @@ export class ShipBubbleWebhookService {
       NODE_ENV: process.env.NODE_ENV,
     });
 
+    // In development, always simulate directly — no API key or public URL needed
+    if (isDevelopment) {
+      logger.info('🔧 Dev mode: using direct simulation (bypassing ShipBubble API)');
+      return await this.simulateWebhookDirectly(params);
+    }
+
+    // In sandbox mode (staging/CI), call ShipBubble's simulator which posts to your webhook URL
     try {
-      // ✅ Try to call ShipBubble API first
       const response = await axios.post(
         `${this.baseUrl}/shipping/labels/webhooks/${params.orderId}`,
-        {
-          status_code: params.statusCode,
-        },
+        { status_code: params.statusCode },
         {
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
@@ -55,20 +58,22 @@ export class ShipBubbleWebhookService {
 
       return response.data;
     } catch (error: any) {
-      // ✅ If ShipBubble returns "No sandbox webhook url set", simulate directly
-      if (error.response?.data?.message?.includes('No sandbox webhook url') || 
-          error.response?.data?.message?.includes('webhook url')) {
+      // Fallback if sandbox webhook URL not configured on ShipBubble dashboard
+      if (
+        error.response?.data?.message?.includes('No sandbox webhook url') ||
+        error.response?.data?.message?.includes('webhook url')
+      ) {
         logger.warn('⚠️ ShipBubble sandbox webhook not configured, simulating directly...');
         return await this.simulateWebhookDirectly(params);
       }
-      
+
       logger.error('❌ Webhook simulation failed:', {
         error: error.message,
         status: error.response?.status,
         data: error.response?.data,
       });
       logger.info('🧪 ============================================\n');
-      
+
       throw error;
     }
   }

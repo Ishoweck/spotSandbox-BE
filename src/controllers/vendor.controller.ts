@@ -379,7 +379,9 @@ export class VendorController {
    * Get vendor profile
    */
   async getVendorProfile(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id }).populate(
+    const userId = req.user?.id;
+
+    const vendorProfile = await VendorProfile.findOne({ user: userId }).populate(
       'user',
       'firstName lastName email'
     );
@@ -388,9 +390,23 @@ export class VendorController {
       throw new AppError('Vendor profile not found', 404);
     }
 
+    const products = await Product.find({ vendor: userId, status: 'active' }).select('averageRating totalReviews');
+    const totalWeightedRating = products.reduce((sum: number, p: any) =>
+      sum + ((p.averageRating || 0) * (p.totalReviews || 0)), 0);
+    const totalProductReviews = products.reduce((sum: number, p: any) => sum + (p.totalReviews || 0), 0);
+    const computedAverageRating = totalProductReviews > 0
+      ? Math.round((totalWeightedRating / totalProductReviews) * 10) / 10
+      : (vendorProfile.averageRating || 0);
+
     res.json({
       success: true,
-      data: { vendorProfile },
+      data: {
+        vendorProfile: {
+          ...vendorProfile.toObject(),
+          averageRating: computedAverageRating,
+          totalReviews: totalProductReviews || vendorProfile.totalReviews || 0,
+        },
+      },
     });
   }
 
@@ -1064,6 +1080,22 @@ export class VendorController {
     });
   }
 
+  async toggleMyStoreStatus(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id });
+    if (!vendorProfile) {
+      throw new AppError('Vendor profile not found', 404);
+    }
+
+    vendorProfile.isActive = !vendorProfile.isActive;
+    await vendorProfile.save();
+
+    res.json({
+      success: true,
+      message: `Store ${vendorProfile.isActive ? 'opened' : 'closed'} successfully`,
+      data: { isActive: vendorProfile.isActive },
+    });
+  }
+
   /**
    * Get public vendor profile
    */
@@ -1095,6 +1127,15 @@ export class VendorController {
 
     const computedTotalSales = allProductSales.reduce((sum: number, p: any) => sum + (p.totalSales || 0), 0);
 
+    // Compute rating from individual product reviews (VendorProfile.averageRating is not
+    // updated when reviews are posted, so derive it on-the-fly from the fetched products)
+    const totalWeightedRating = products.reduce((sum: number, p: any) =>
+      sum + ((p.averageRating || 0) * (p.totalReviews || 0)), 0);
+    const totalProductReviews = products.reduce((sum: number, p: any) => sum + (p.totalReviews || 0), 0);
+    const computedAverageRating = totalProductReviews > 0
+      ? Math.round((totalWeightedRating / totalProductReviews) * 10) / 10
+      : (vendorProfile.averageRating || 0);
+
     // Recompute response stats if cache is older than STATS_CACHE_HOURS
     const cacheExpiry = new Date(Date.now() - STATS_CACHE_HOURS * 60 * 60 * 1000);
     const statsStale = !vendorProfile.statsComputedAt || vendorProfile.statsComputedAt < cacheExpiry;
@@ -1123,8 +1164,8 @@ export class VendorController {
           businessLogo: vendorProfile.businessLogo,
           businessBanner: vendorProfile.businessBanner,
           businessAddress: vendorProfile.businessAddress,
-          averageRating: vendorProfile.averageRating,
-          totalReviews: vendorProfile.totalReviews,
+          averageRating: computedAverageRating,
+          totalReviews: totalProductReviews || vendorProfile.totalReviews || 0,
           totalSales: computedTotalSales,
           totalOrders: vendorProfile.totalOrders,
           productCount,

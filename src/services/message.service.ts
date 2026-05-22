@@ -30,6 +30,11 @@ class MessageService {
         unreadCount: new Map([[userId1, 0], [userId2, 0]]),
         ...(orderId && { orderId }),
       });
+    } else if (!conversation.isActive) {
+      // Re-activate a previously closed conversation (e.g. new order after a completed one)
+      conversation.isActive = true;
+      if (orderId) conversation.orderId = orderId as any;
+      await conversation.save();
     }
 
     return { conversation, conversationId };
@@ -45,7 +50,8 @@ class MessageService {
     messageType: 'text' | 'image' | 'file' = 'text',
     fileUrl?: string,
     orderId?: string,
-    senderDisplayName?: string
+    senderDisplayName?: string,
+    replyTo?: { messageId: string; message: string; senderName: string; messageType: string }
   ) {
     const { conversation, conversationId } = await this.getOrCreateConversation(senderId, receiverId, orderId);
 
@@ -58,6 +64,7 @@ class MessageService {
       messageType,
       fileUrl,
       orderId,
+      ...(replyTo && { replyTo }),
     });
 
     // Update conversation with last message
@@ -119,7 +126,6 @@ class MessageService {
         { participants: userId },
         ...(adminIds.length > 0 ? [{ participants: { $nin: adminIds } }] : []),
       ],
-      isActive: true,
     };
 
     const conversations = await Conversation.find(baseQuery)
@@ -149,6 +155,7 @@ class MessageService {
         lastMessage: conv.lastMessage,
         unreadCount: unread,
         orderId: conv.orderId,
+        isActive: conv.isActive,
         updatedAt: (conv as any).updatedAt,
       };
     });
@@ -251,10 +258,9 @@ class MessageService {
    * Get total unread message count across all conversations
    */
   async getUnreadCount(userId: string): Promise<number> {
-    const count = await ChatMessage.countDocuments({
-      receiver: userId,
-      read: false,
-      deleted: { $ne: true },
+    const count = await Conversation.countDocuments({
+      participants: userId,
+      [`unreadCount.${userId}`]: { $gt: 0 },
     });
 
     return count;

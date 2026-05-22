@@ -67,6 +67,21 @@ export declare class OrderController {
      */
     checkActiveOrderWith(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
+     * Return all user IDs the current user has active orders with — bulk version of checkActiveOrderWith
+     * GET /orders/active-partners
+     */
+    getActivePartners(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Return count of active orders for the current user (tab badge)
+     * GET /orders/active-count
+     */
+    getActiveOrderCount(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Get active orders with a counterparty (for chat order context card)
+     * GET /orders/active-with/:counterpartyId
+     */
+    getActiveOrdersWith(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
      * Get user orders
      */
     getUserOrders(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;

@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.productController = exports.ProductController = void 0;
 const types_1 = require("../types");
 const Product_1 = __importDefault(require("../models/Product"));
+const Order_1 = __importDefault(require("../models/Order"));
 const Category_1 = __importDefault(require("../models/Category"));
 const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const groq_sdk_1 = __importDefault(require("groq-sdk"));
@@ -349,17 +350,51 @@ class ProductController {
     // NEW: Get Recommended Products
     async getRecommendedProducts(req, res) {
         const limit = parseInt(req.query.limit) || 10;
-        // Get user's browsing history, preferences, etc.
-        // For now, return top-rated in-stock products
-        const products = await Product_1.default.find({
-            status: types_1.ProductStatus.ACTIVE,
-            quantity: { $gt: 0 }
-        })
+        const userId = req.user?.id;
+        let preferredCategoryIds = [];
+        if (userId) {
+            // Pull the user's last 20 orders to find preferred categories
+            const recentOrders = await Order_1.default.find({ user: userId })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .select('items')
+                .lean();
+            const productIds = recentOrders.flatMap((o) => (o.items || []).map((i) => i.product));
+            if (productIds.length > 0) {
+                const purchasedProducts = await Product_1.default.find({ _id: { $in: productIds } })
+                    .select('category')
+                    .lean();
+                const categorySet = new Set(purchasedProducts
+                    .map((p) => p.category?.toString())
+                    .filter(Boolean));
+                preferredCategoryIds = [...categorySet];
+            }
+        }
+        const baseFilter = { status: types_1.ProductStatus.ACTIVE, quantity: { $gt: 0 } };
+        if (preferredCategoryIds.length > 0) {
+            baseFilter.category = { $in: preferredCategoryIds };
+        }
+        let products = await Product_1.default.find(baseFilter)
             .populate('vendor', 'firstName lastName profileImage')
             .populate('category', 'name')
             .sort({ averageRating: -1, totalSales: -1, views: -1 })
             .limit(limit)
             .lean();
+        // If category filter returned fewer than half the limit, top up with global top-rated
+        if (products.length < Math.ceil(limit / 2)) {
+            const exclude = products.map((p) => p._id);
+            const extras = await Product_1.default.find({
+                status: types_1.ProductStatus.ACTIVE,
+                quantity: { $gt: 0 },
+                _id: { $nin: exclude },
+            })
+                .populate('vendor', 'firstName lastName profileImage')
+                .populate('category', 'name')
+                .sort({ averageRating: -1, totalSales: -1, views: -1 })
+                .limit(limit - products.length)
+                .lean();
+            products = [...products, ...extras];
+        }
         const formattedProducts = products.map(this.formatProduct);
         res.json({
             success: true,
@@ -369,8 +404,8 @@ class ProductController {
                 total: products.length,
                 page: 1,
                 limit,
-                hasMore: false
-            }
+                hasMore: false,
+            },
         });
     }
     // NEW: Get Featured Products

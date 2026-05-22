@@ -13,6 +13,7 @@ import { logger } from './utils/logger';
 import { initializeSocket } from './config/socket';
 import { setSocketInstance } from './services/notification.service';
 import { setupDailyBackup } from './utils/backup';
+import { setupOrderAutoComplete } from './utils/order-autocomplete';
 
 // Load environment variables
 dotenv.config();
@@ -117,6 +118,8 @@ server.listen(PORT, () => {
 
   // Start daily database backup scheduler
   setupDailyBackup();
+  // Auto-release vendor funds 7 days after delivery if customer hasn't confirmed
+  setupOrderAutoComplete();
 });
 
 // SET SERVER TIMEOUT

@@ -9,6 +9,22 @@ import { UserRole, AuthRequest } from '../types';
 
 const router = Router();
 
+// Public config endpoint — returns checkout fee tiers (no auth needed)
+router.get('/config', (_req, res: Response) => {
+  res.json({
+    success: true,
+    data: {
+      serviceChargeTiers: [
+        { minOrder: 100001, maxOrder: null,   fee: 2000 },
+        { minOrder: 50001,  maxOrder: 100000, fee: 1500 },
+        { minOrder: 20001,  maxOrder: 50000,  fee: 1000 },
+        { minOrder: 1000,   maxOrder: 20000,  fee: 500  },
+        { minOrder: 0,      maxOrder: 999,    fee: 0    },
+      ],
+    },
+  });
+});
+
 // All order routes require authentication
 router.use(authenticate);
 
@@ -108,6 +124,15 @@ router.get('/my-digital-products', asyncHandler(orderController.getUserDigitalPr
 
 // Check active order with a counterparty (used by chat lock)
 router.get('/check-active-with/:counterpartyId', asyncHandler(orderController.checkActiveOrderWith.bind(orderController)));
+
+// Get count of active orders for the current user (tab badge)
+router.get('/active-count', asyncHandler(orderController.getActiveOrderCount.bind(orderController)));
+
+// Get all user IDs the current user has active orders with (bulk check for conversations list)
+router.get('/active-partners', asyncHandler(orderController.getActivePartners.bind(orderController)));
+
+// Get active orders with a counterparty (used by chat order context card)
+router.get('/active-with/:counterpartyId', asyncHandler(orderController.getActiveOrdersWith.bind(orderController)));
 
 // Customer orders
 router.get('/my-orders', asyncHandler(orderController.getUserOrders.bind(orderController)));

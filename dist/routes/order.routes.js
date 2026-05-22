@@ -9,6 +9,21 @@ const express_validator_1 = require("express-validator");
 const validation_1 = require("../middleware/validation");
 const types_1 = require("../types");
 const router = (0, express_1.Router)();
+// Public config endpoint — returns checkout fee tiers (no auth needed)
+router.get('/config', (_req, res) => {
+    res.json({
+        success: true,
+        data: {
+            serviceChargeTiers: [
+                { minOrder: 100001, maxOrder: null, fee: 2000 },
+                { minOrder: 50001, maxOrder: 100000, fee: 1500 },
+                { minOrder: 20001, maxOrder: 50000, fee: 1000 },
+                { minOrder: 1000, maxOrder: 20000, fee: 500 },
+                { minOrder: 0, maxOrder: 999, fee: 0 },
+            ],
+        },
+    });
+});
 // All order routes require authentication
 router.use(auth_1.authenticate);
 // ✅ Shipping address validation (optional for digital products)
@@ -92,6 +107,12 @@ router.get('/payment/verify/:reference', (0, error_1.asyncHandler)(order_control
 router.get('/my-digital-products', (0, error_1.asyncHandler)(order_controller_1.orderController.getUserDigitalProducts.bind(order_controller_1.orderController)));
 // Check active order with a counterparty (used by chat lock)
 router.get('/check-active-with/:counterpartyId', (0, error_1.asyncHandler)(order_controller_1.orderController.checkActiveOrderWith.bind(order_controller_1.orderController)));
+// Get count of active orders for the current user (tab badge)
+router.get('/active-count', (0, error_1.asyncHandler)(order_controller_1.orderController.getActiveOrderCount.bind(order_controller_1.orderController)));
+// Get all user IDs the current user has active orders with (bulk check for conversations list)
+router.get('/active-partners', (0, error_1.asyncHandler)(order_controller_1.orderController.getActivePartners.bind(order_controller_1.orderController)));
+// Get active orders with a counterparty (used by chat order context card)
+router.get('/active-with/:counterpartyId', (0, error_1.asyncHandler)(order_controller_1.orderController.getActiveOrdersWith.bind(order_controller_1.orderController)));
 // Customer orders
 router.get('/my-orders', (0, error_1.asyncHandler)(order_controller_1.orderController.getUserOrders.bind(order_controller_1.orderController)));
 // Vendor get single order - BEFORE generic :id

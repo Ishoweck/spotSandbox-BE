@@ -74,7 +74,7 @@ export declare class ShipBubbleService {
      * Create shipment (book a shipment after getting rates)
      * ✅ UPDATED TO SUPPORT service_code
      */
-    createShipment(requestToken: string, courierId: string | number, serviceCode?: string, isInvoiceRequired?: boolean): Promise<any>;
+    createShipment(requestToken: string, courierId: string | number, serviceCode: string, isInvoiceRequired?: boolean): Promise<any>;
     /**
      * Track shipment
      */
@@ -82,7 +82,7 @@ export declare class ShipBubbleService {
     /**
      * Cancel shipment
      */
-    cancelShipment(trackingNumber: string): Promise<any>;
+    cancelShipment(orderId: string): Promise<any>;
     /**
      * Clear address cache
      */

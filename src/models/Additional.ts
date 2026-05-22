@@ -261,6 +261,12 @@ export interface IChatMessage extends Document {
   messageType: 'text' | 'image' | 'file' | 'system';
   fileUrl?: string;
   orderId?: Types.ObjectId;
+  replyTo?: {
+    messageId: Types.ObjectId;
+    message: string;
+    senderName: string;
+    messageType: string;
+  };
   read: boolean;
   readAt?: Date;
   deleted: boolean;
@@ -295,6 +301,15 @@ const chatMessageSchema = new Schema<IChatMessage>({
   orderId: {
     type: Schema.Types.ObjectId,
     ref: 'Order',
+  },
+  replyTo: {
+    type: new Schema({
+      messageId: { type: Schema.Types.ObjectId, ref: 'ChatMessage' },
+      message: String,
+      senderName: String,
+      messageType: { type: String, default: 'text' },
+    }, { _id: false }),
+    default: undefined,
   },
   read: {
     type: Boolean,

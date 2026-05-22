@@ -230,4 +230,14 @@ router.put(
   asyncHandler(vendorController.toggleVendorStatus.bind(vendorController))
 );
 
+/**
+ * Vendor toggle their own store open/closed
+ */
+router.patch(
+  '/me/toggle-status',
+  authenticate,
+  authorize(UserRole.VENDOR),
+  asyncHandler(vendorController.toggleMyStoreStatus.bind(vendorController))
+);
+
 export default router;

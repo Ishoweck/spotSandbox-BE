@@ -19,6 +19,7 @@ const logger_1 = require("./utils/logger");
 const socket_1 = require("./config/socket");
 const notification_service_1 = require("./services/notification.service");
 const backup_1 = require("./utils/backup");
+const order_autocomplete_1 = require("./utils/order-autocomplete");
 // Load environment variables
 dotenv_1.default.config();
 // Create Express app
@@ -105,6 +106,8 @@ server.listen(PORT, () => {
     console.log(`WebSocket: ws://localhost:${PORT}`);
     // Start daily database backup scheduler
     (0, backup_1.setupDailyBackup)();
+    // Auto-release vendor funds 7 days after delivery if customer hasn't confirmed
+    (0, order_autocomplete_1.setupOrderAutoComplete)();
 });
 // SET SERVER TIMEOUT
 server.timeout = 180000; // 3 minutes

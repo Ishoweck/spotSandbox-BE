@@ -9,6 +9,7 @@ export declare class WebhookController {
      * Map ShipBubble status to our OrderStatus
      */
     private mapShipBubbleStatus;
+    private deriveMultiVendorOrderStatus;
     /**
      * Refresh order status (for customers/vendors in sandbox testing)
      * This manually triggers a webhook simulation for the user's own order

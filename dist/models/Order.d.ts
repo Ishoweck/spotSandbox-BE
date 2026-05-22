@@ -15,7 +15,9 @@ export interface IVendorShipment {
     shipmentId?: string;
     courier?: string;
     estimatedDelivery?: Date;
-    status: 'pending' | 'confirmed' | 'processing' | 'shipped' | 'in_transit' | 'delivered' | 'cancelled';
+    trackingUrl?: string;
+    paidAt?: Date;
+    status: 'pending' | 'confirmed' | 'processing' | 'created' | 'shipped' | 'in_transit' | 'delivered' | 'cancelled';
 }
 export interface IOrder extends Document {
     orderNumber: string;
@@ -47,6 +49,8 @@ export interface IOrder extends Document {
     cancelReason?: string;
     refundAmount?: number;
     refundReason?: string;
+    deliveredAt?: Date;
+    fundsReleased?: boolean;
     affiliateUser?: Types.ObjectId;
     affiliateCommission?: number;
     statusHistory: {

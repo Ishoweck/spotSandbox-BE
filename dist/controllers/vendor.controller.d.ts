@@ -60,6 +60,7 @@ export declare class VendorController {
      * Toggle vendor active status (Admin only)
      */
     toggleVendorStatus(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    toggleMyStoreStatus(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
      * Get public vendor profile
      */

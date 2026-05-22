@@ -43,6 +43,12 @@ export interface IChatMessage extends Document {
     messageType: 'text' | 'image' | 'file' | 'system';
     fileUrl?: string;
     orderId?: Types.ObjectId;
+    replyTo?: {
+        messageId: Types.ObjectId;
+        message: string;
+        senderName: string;
+        messageType: string;
+    };
     read: boolean;
     readAt?: Date;
     deleted: boolean;

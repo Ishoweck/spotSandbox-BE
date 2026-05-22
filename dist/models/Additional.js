@@ -270,6 +270,15 @@ const chatMessageSchema = new mongoose_1.Schema({
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Order',
     },
+    replyTo: {
+        type: new mongoose_1.Schema({
+            messageId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'ChatMessage' },
+            message: String,
+            senderName: String,
+            messageType: { type: String, default: 'text' },
+        }, { _id: false }),
+        default: undefined,
+    },
     read: {
         type: Boolean,
         default: false,

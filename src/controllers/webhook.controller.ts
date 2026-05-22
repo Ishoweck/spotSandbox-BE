@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest, ApiResponse, OrderStatus } from '../types';
 import Order from '../models/Order';
-import { notificationService } from '../services/notification.service';
+import { notificationService, emitOrderStatusUpdate } from '../services/notification.service';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/error';
 
@@ -68,71 +68,67 @@ export class WebhookController {
         mappedStatus: newStatus,
       });
 
-      // Update order status
-      if (newStatus && order.status !== newStatus) {
-        const oldStatus = order.status;
-        order.status = newStatus;
+      // Map ShipBubble → vendor shipment status
+      const shipmentStatusMap: Record<string, string> = {
+        pending: 'pending',
+        confirmed: 'created',
+        picked_up: 'shipped',
+        in_transit: 'in_transit',
+        delivered: 'delivered',
+        completed: 'delivered',
+        cancelled: 'cancelled',
+      };
+      const mappedShipmentStatus = shipmentStatusMap[status.toLowerCase()] || 'created';
 
-        // Update vendor shipment if exists
-        if ((order as any).vendorShipments) {
-          const shipment = (order as any).vendorShipments.find(
-            (s: any) => s.trackingNumber === order_id || s.shipmentId === order_id
-          );
+      // Update the matching vendor shipment (if any)
+      const vendorShipments: any[] | undefined = (order as any).vendorShipments;
+      const shipment = vendorShipments?.find(
+        (s: any) => s.trackingNumber === order_id || s.shipmentId === order_id
+      );
 
-          if (shipment) {
-            // ✅ Map ShipBubble status to vendor shipment enum values
-            const shipmentStatusMap: Record<string, string> = {
-              pending: 'pending',
-              confirmed: 'created',
-              picked_up: 'shipped',
-              in_transit: 'shipped',
-              delivered: 'delivered',
-              completed: 'delivered',
-              cancelled: 'cancelled',
-            };
-            
-            const mappedShipmentStatus = shipmentStatusMap[status.toLowerCase()] || 'created';
-            shipment.status = mappedShipmentStatus;
-            
-            // Update tracking info
-            if (courier?.tracking_code) {
-              shipment.trackingCode = courier.tracking_code;
-            }
-            
-            if (tracking_url) {
-              shipment.trackingUrl = tracking_url;
-            }
+      if (shipment) {
+        shipment.status = mappedShipmentStatus;
+        if (courier?.tracking_code) shipment.trackingCode = courier.tracking_code;
+        if (tracking_url) shipment.trackingUrl = tracking_url;
+        if (package_status?.length > 0) shipment.packageStatus = package_status;
+        if (events?.length > 0) shipment.events = events;
+        logger.info('✅ Updated vendor shipment:', { status: shipment.status });
+      }
 
-            // Store latest package status
-            if (package_status && package_status.length > 0) {
-              shipment.packageStatus = package_status;
-            }
+      // Derive overall order status:
+      // Multi-vendor → aggregate from ALL shipments; single-vendor → use mapped status directly
+      const derivedStatus = (vendorShipments && vendorShipments.length > 1)
+        ? this.deriveMultiVendorOrderStatus(vendorShipments)
+        : newStatus;
 
-            // Store events
-            if (events && events.length > 0) {
-              shipment.events = events;
-            }
+      const oldStatus = order.status;
+      const orderStatusChanged = derivedStatus != null && order.status !== derivedStatus;
 
-            logger.info('✅ Updated vendor shipment:', {
-              status: shipment.status,
-              trackingCode: shipment.trackingCode,
-            });
-          }
+      if (orderStatusChanged) {
+        order.status = derivedStatus!;
+        if (derivedStatus === 'delivered' && !(order as any).deliveredAt) {
+          (order as any).deliveredAt = new Date();
         }
+      }
 
-        await order.save();
+      // Always save — vendor shipment fields may have changed even if overall status didn't
+      await order.save();
 
-        logger.info('✅ Order status updated:', {
-          from: oldStatus,
-          to: newStatus,
-          orderNumber: order.orderNumber,
-        });
+      logger.info('✅ Webhook processed:', {
+        orderNumber: order.orderNumber,
+        shipmentStatus: mappedShipmentStatus,
+        orderStatusFrom: oldStatus,
+        orderStatusTo: order.status,
+        statusChanged: orderStatusChanged,
+      });
 
-        // Send delivery status notification to customer
+      if (orderStatusChanged) {
+        // Send notification + real-time socket event
         try {
           const customerId = (order.user as any)._id
             ? (order.user as any)._id.toString()
             : order.user.toString();
+
           await notificationService.deliveryStatusUpdate(
             order._id.toString(),
             order.orderNumber,
@@ -142,14 +138,24 @@ export class WebhookController {
           await notificationService.orderStatusUpdated(
             order._id.toString(),
             order.orderNumber,
-            newStatus,
+            derivedStatus!,
             customerId
           );
+
+          const vendorIds = vendorShipments
+            ?.map((s: any) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()))
+            .filter(Boolean) ?? [];
+
+          emitOrderStatusUpdate({
+            orderId: order._id.toString(),
+            orderNumber: order.orderNumber,
+            status: derivedStatus!,
+            customerId,
+            vendorIds,
+          });
         } catch (error) {
           logger.error('Error sending webhook notification:', error);
         }
-      } else {
-        logger.info('ℹ️ No status change needed');
       }
 
       logger.info('📨 ============================================');
@@ -185,12 +191,25 @@ export class WebhookController {
       'pending': OrderStatus.CONFIRMED,
       'confirmed': OrderStatus.PROCESSING,
       'picked_up': OrderStatus.SHIPPED,
-      'in_transit': OrderStatus.SHIPPED,
+      'in_transit': OrderStatus.IN_TRANSIT,
       'completed': OrderStatus.DELIVERED,
       'cancelled': OrderStatus.CANCELLED,
     };
 
     return statusMap[shipBubbleStatus.toLowerCase()] || null;
+  }
+
+  private deriveMultiVendorOrderStatus(shipments: any[]): OrderStatus {
+    const allStatuses = shipments.map((s: any) => s.status as string);
+    const active = allStatuses.filter(s => s !== 'cancelled');
+
+    if (allStatuses.every(s => s === 'cancelled')) return OrderStatus.CANCELLED;
+    if (active.every(s => s === 'delivered')) return OrderStatus.DELIVERED;
+    if (active.every(s => ['in_transit', 'delivered'].includes(s))) return OrderStatus.IN_TRANSIT;
+    if (active.every(s => ['shipped', 'in_transit', 'delivered'].includes(s))) return OrderStatus.SHIPPED;
+    if (active.every(s => ['processing', 'created', 'shipped', 'in_transit', 'delivered'].includes(s))) return OrderStatus.PROCESSING;
+    if (active.every(s => ['confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered'].includes(s))) return OrderStatus.CONFIRMED;
+    return OrderStatus.PENDING;
   }
 
   /**

@@ -15,7 +15,21 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\" -Recurse -Name)",
-      "Bash(grep -n '$regex\\\\|$ne\\\\|$gt\\\\|$lt\\\\|$in\\\\|req\\\\.query\\\\|req\\\\.body\\\\.filter' 'C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\\\\controllers\\\\admin.controller.ts')"
+      "Bash(grep -n '$regex\\\\|$ne\\\\|$gt\\\\|$lt\\\\|$in\\\\|req\\\\.query\\\\|req\\\\.body\\\\.filter' 'C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\\\\controllers\\\\admin.controller.ts')",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\" -Recurse -Depth 2)",
+      "Bash(Select-Object -Property FullName)",
+      "Bash(awk '{print $NF}')",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\" -Force)",
+      "Bash(Select-Object Name, Mode)",
+      "Bash(Wait-Event -Timeout 30)",
+      "Bash(Get-Content \"C:\\\\Users\\\\YUNGFL~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-YungFlash-Downloads-vendorspot-backend\\\\a26a66f5-6576-49ce-a79f-229c4339bb72\\\\tasks\\\\bsflxjjbw.output\" -ErrorAction SilentlyContinue)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\" -Recurse -Directory)",
+      "Bash(Select-Object -First 20)",
+      "Bash(Format-Table FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\" -Recurse -Include \"*.ts\" -File)",
+      "Bash(git rm *)"
     ]
   }
 }

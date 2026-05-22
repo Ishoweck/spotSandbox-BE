@@ -94,67 +94,76 @@ class WebhookController {
                 shipBubbleStatus: status,
                 mappedStatus: newStatus,
             });
-            // Update order status
-            if (newStatus && order.status !== newStatus) {
-                const oldStatus = order.status;
-                order.status = newStatus;
-                // Update vendor shipment if exists
-                if (order.vendorShipments) {
-                    const shipment = order.vendorShipments.find((s) => s.trackingNumber === order_id || s.shipmentId === order_id);
-                    if (shipment) {
-                        // ✅ Map ShipBubble status to vendor shipment enum values
-                        const shipmentStatusMap = {
-                            pending: 'pending',
-                            confirmed: 'created',
-                            picked_up: 'shipped',
-                            in_transit: 'shipped',
-                            delivered: 'delivered',
-                            completed: 'delivered',
-                            cancelled: 'cancelled',
-                        };
-                        const mappedShipmentStatus = shipmentStatusMap[status.toLowerCase()] || 'created';
-                        shipment.status = mappedShipmentStatus;
-                        // Update tracking info
-                        if (courier?.tracking_code) {
-                            shipment.trackingCode = courier.tracking_code;
-                        }
-                        if (tracking_url) {
-                            shipment.trackingUrl = tracking_url;
-                        }
-                        // Store latest package status
-                        if (package_status && package_status.length > 0) {
-                            shipment.packageStatus = package_status;
-                        }
-                        // Store events
-                        if (events && events.length > 0) {
-                            shipment.events = events;
-                        }
-                        logger_1.logger.info('✅ Updated vendor shipment:', {
-                            status: shipment.status,
-                            trackingCode: shipment.trackingCode,
-                        });
-                    }
+            // Map ShipBubble → vendor shipment status
+            const shipmentStatusMap = {
+                pending: 'pending',
+                confirmed: 'created',
+                picked_up: 'shipped',
+                in_transit: 'in_transit',
+                delivered: 'delivered',
+                completed: 'delivered',
+                cancelled: 'cancelled',
+            };
+            const mappedShipmentStatus = shipmentStatusMap[status.toLowerCase()] || 'created';
+            // Update the matching vendor shipment (if any)
+            const vendorShipments = order.vendorShipments;
+            const shipment = vendorShipments?.find((s) => s.trackingNumber === order_id || s.shipmentId === order_id);
+            if (shipment) {
+                shipment.status = mappedShipmentStatus;
+                if (courier?.tracking_code)
+                    shipment.trackingCode = courier.tracking_code;
+                if (tracking_url)
+                    shipment.trackingUrl = tracking_url;
+                if (package_status?.length > 0)
+                    shipment.packageStatus = package_status;
+                if (events?.length > 0)
+                    shipment.events = events;
+                logger_1.logger.info('✅ Updated vendor shipment:', { status: shipment.status });
+            }
+            // Derive overall order status:
+            // Multi-vendor → aggregate from ALL shipments; single-vendor → use mapped status directly
+            const derivedStatus = (vendorShipments && vendorShipments.length > 1)
+                ? this.deriveMultiVendorOrderStatus(vendorShipments)
+                : newStatus;
+            const oldStatus = order.status;
+            const orderStatusChanged = derivedStatus != null && order.status !== derivedStatus;
+            if (orderStatusChanged) {
+                order.status = derivedStatus;
+                if (derivedStatus === 'delivered' && !order.deliveredAt) {
+                    order.deliveredAt = new Date();
                 }
-                await order.save();
-                logger_1.logger.info('✅ Order status updated:', {
-                    from: oldStatus,
-                    to: newStatus,
-                    orderNumber: order.orderNumber,
-                });
-                // Send delivery status notification to customer
+            }
+            // Always save — vendor shipment fields may have changed even if overall status didn't
+            await order.save();
+            logger_1.logger.info('✅ Webhook processed:', {
+                orderNumber: order.orderNumber,
+                shipmentStatus: mappedShipmentStatus,
+                orderStatusFrom: oldStatus,
+                orderStatusTo: order.status,
+                statusChanged: orderStatusChanged,
+            });
+            if (orderStatusChanged) {
+                // Send notification + real-time socket event
                 try {
                     const customerId = order.user._id
                         ? order.user._id.toString()
                         : order.user.toString();
                     await notification_service_1.notificationService.deliveryStatusUpdate(order._id.toString(), order.orderNumber, status.toLowerCase(), customerId);
-                    await notification_service_1.notificationService.orderStatusUpdated(order._id.toString(), order.orderNumber, newStatus, customerId);
+                    await notification_service_1.notificationService.orderStatusUpdated(order._id.toString(), order.orderNumber, derivedStatus, customerId);
+                    const vendorIds = vendorShipments
+                        ?.map((s) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()))
+                        .filter(Boolean) ?? [];
+                    (0, notification_service_1.emitOrderStatusUpdate)({
+                        orderId: order._id.toString(),
+                        orderNumber: order.orderNumber,
+                        status: derivedStatus,
+                        customerId,
+                        vendorIds,
+                    });
                 }
                 catch (error) {
                     logger_1.logger.error('Error sending webhook notification:', error);
                 }
-            }
-            else {
-                logger_1.logger.info('ℹ️ No status change needed');
             }
             logger_1.logger.info('📨 ============================================');
             logger_1.logger.info('📨 WEBHOOK PROCESSED SUCCESSFULLY');
@@ -186,11 +195,28 @@ class WebhookController {
             'pending': types_1.OrderStatus.CONFIRMED,
             'confirmed': types_1.OrderStatus.PROCESSING,
             'picked_up': types_1.OrderStatus.SHIPPED,
-            'in_transit': types_1.OrderStatus.SHIPPED,
+            'in_transit': types_1.OrderStatus.IN_TRANSIT,
             'completed': types_1.OrderStatus.DELIVERED,
             'cancelled': types_1.OrderStatus.CANCELLED,
         };
         return statusMap[shipBubbleStatus.toLowerCase()] || null;
+    }
+    deriveMultiVendorOrderStatus(shipments) {
+        const allStatuses = shipments.map((s) => s.status);
+        const active = allStatuses.filter(s => s !== 'cancelled');
+        if (allStatuses.every(s => s === 'cancelled'))
+            return types_1.OrderStatus.CANCELLED;
+        if (active.every(s => s === 'delivered'))
+            return types_1.OrderStatus.DELIVERED;
+        if (active.every(s => ['in_transit', 'delivered'].includes(s)))
+            return types_1.OrderStatus.IN_TRANSIT;
+        if (active.every(s => ['shipped', 'in_transit', 'delivered'].includes(s)))
+            return types_1.OrderStatus.SHIPPED;
+        if (active.every(s => ['processing', 'created', 'shipped', 'in_transit', 'delivered'].includes(s)))
+            return types_1.OrderStatus.PROCESSING;
+        if (active.every(s => ['confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered'].includes(s)))
+            return types_1.OrderStatus.CONFIRMED;
+        return types_1.OrderStatus.PENDING;
     }
     /**
      * Refresh order status (for customers/vendors in sandbox testing)

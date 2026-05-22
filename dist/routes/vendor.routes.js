@@ -139,5 +139,9 @@ router.put('/admin/verify/:vendorId', (0, auth_1.authorize)(types_1.UserRole.ADM
  * Toggle vendor active status (Admin only)
  */
 router.put('/admin/toggle-status/:vendorId', (0, auth_1.authorize)(types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(vendor_controller_1.vendorController.toggleVendorStatus.bind(vendor_controller_1.vendorController)));
+/**
+ * Vendor toggle their own store open/closed
+ */
+router.patch('/me/toggle-status', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR), (0, error_1.asyncHandler)(vendor_controller_1.vendorController.toggleMyStoreStatus.bind(vendor_controller_1.vendorController)));
 exports.default = router;
 //# sourceMappingURL=vendor.routes.js.map

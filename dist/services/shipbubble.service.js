@@ -375,13 +375,10 @@ class ShipBubbleService {
             });
             const requestBody = {
                 request_token: requestToken,
+                service_code: serviceCode,
                 courier_id: courierId,
                 is_invoice_required: isInvoiceRequired,
             };
-            // ✅ Add service_code if provided
-            if (serviceCode) {
-                requestBody.service_code = serviceCode;
-            }
             logger_1.logger.info('📤 Full request body:', requestBody);
             logger_1.logger.info('📤 Endpoint:', `${SHIPBUBBLE_BASE_URL}/shipping/labels`);
             logger_1.logger.info('📤 Headers:', {
@@ -464,16 +461,16 @@ class ShipBubbleService {
     /**
      * Cancel shipment
      */
-    async cancelShipment(trackingNumber) {
+    async cancelShipment(orderId) {
         try {
-            logger_1.logger.info('🚫 Cancelling shipment:', trackingNumber);
-            const response = await axios_1.default.post(`${SHIPBUBBLE_BASE_URL}/shipping/cancel`, { tracking_number: trackingNumber }, { headers: this.headers });
-            logger_1.logger.info('✅ Shipment cancelled:', trackingNumber);
+            logger_1.logger.info('🚫 Cancelling shipment:', orderId);
+            const response = await axios_1.default.post(`${SHIPBUBBLE_BASE_URL}/shipping/labels/cancel/${orderId}`, {}, { headers: this.headers });
+            logger_1.logger.info('✅ Shipment cancelled:', orderId);
             return response.data;
         }
         catch (error) {
             logger_1.logger.error('❌ ShipBubble cancel error:', {
-                trackingNumber,
+                orderId,
                 message: error.message,
                 status: error.response?.status,
                 data: error.response?.data,

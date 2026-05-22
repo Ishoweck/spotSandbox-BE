@@ -13,7 +13,7 @@ export class MessageController {
    */
   async sendMessage(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const senderId = req.user!.id;
-    const { receiverId, message, messageType, fileUrl, orderId } = req.body;
+    const { receiverId, message, messageType, fileUrl, orderId, replyTo } = req.body;
 
     if (!receiverId) {
       throw new AppError('Receiver ID is required', 400);
@@ -43,7 +43,9 @@ export class MessageController {
       message || '',
       messageType || 'text',
       fileUrl,
-      orderId
+      orderId,
+      undefined,
+      replyTo
     );
 
     // Emit via socket if available

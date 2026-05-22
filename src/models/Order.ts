@@ -18,7 +18,9 @@ export interface IVendorShipment {
   shipmentId?: string;
   courier?: string;
   estimatedDelivery?: Date;
-  status: 'pending' | 'confirmed' | 'processing' | 'shipped' | 'in_transit' | 'delivered' | 'cancelled';
+  trackingUrl?: string;
+  paidAt?: Date;
+  status: 'pending' | 'confirmed' | 'processing' | 'created' | 'shipped' | 'in_transit' | 'delivered' | 'cancelled';
 }
 
 export interface IOrder extends Document {
@@ -56,6 +58,8 @@ export interface IOrder extends Document {
   cancelReason?: string;
   refundAmount?: number;
   refundReason?: string;
+  deliveredAt?: Date;
+  fundsReleased?: boolean;
   affiliateUser?: Types.ObjectId;
   affiliateCommission?: number;
   statusHistory: {
@@ -146,12 +150,14 @@ const vendorShipmentSchema = new Schema<IVendorShipment>({
     default: 0,
   },
   trackingNumber: String,
+  trackingUrl: String,
   shipmentId: String,
   courier: String,
   estimatedDelivery: Date,
+  paidAt: Date,
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'processing', 'shipped', 'in_transit', 'delivered', 'cancelled'],
+    enum: ['pending', 'confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered', 'cancelled'],
     default: 'pending',
   },
 }, { _id: false });
@@ -242,6 +248,8 @@ const orderSchema = new Schema<IOrder>({
   cancelReason: String,
   refundAmount: Number,
   refundReason: String,
+  deliveredAt: Date,
+  fundsReleased: { type: Boolean, default: false },
   affiliateUser: {
     type: Schema.Types.ObjectId,
     ref: 'User',

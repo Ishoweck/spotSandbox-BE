@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest, ApiResponse, ProductStatus } from '../types';
 import Product from '../models/Product';
+import Order from '../models/Order';
 import Category from '../models/Category';
 import VendorProfile from '../models/VendorProfile';
 import Groq from 'groq-sdk';
@@ -375,18 +376,62 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   // NEW: Get Recommended Products
   async getRecommendedProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const limit = parseInt(req.query.limit as string) || 10;
+    const userId = req.user?.id;
 
-    // Get user's browsing history, preferences, etc.
-    // For now, return top-rated in-stock products
-    const products = await Product.find({ 
-      status: ProductStatus.ACTIVE,
-      quantity: { $gt: 0 }
-    })
+    let preferredCategoryIds: any[] = [];
+
+    if (userId) {
+      // Pull the user's last 20 orders to find preferred categories
+      const recentOrders = await Order.find({ user: userId })
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .select('items')
+        .lean();
+
+      const productIds = recentOrders.flatMap((o: any) =>
+        (o.items || []).map((i: any) => i.product)
+      );
+
+      if (productIds.length > 0) {
+        const purchasedProducts = await Product.find({ _id: { $in: productIds } })
+          .select('category')
+          .lean();
+        const categorySet = new Set(
+          purchasedProducts
+            .map((p: any) => p.category?.toString())
+            .filter(Boolean)
+        );
+        preferredCategoryIds = [...categorySet];
+      }
+    }
+
+    const baseFilter: any = { status: ProductStatus.ACTIVE, quantity: { $gt: 0 } };
+    if (preferredCategoryIds.length > 0) {
+      baseFilter.category = { $in: preferredCategoryIds };
+    }
+
+    let products = await Product.find(baseFilter)
       .populate('vendor', 'firstName lastName profileImage')
       .populate('category', 'name')
       .sort({ averageRating: -1, totalSales: -1, views: -1 })
       .limit(limit)
       .lean();
+
+    // If category filter returned fewer than half the limit, top up with global top-rated
+    if (products.length < Math.ceil(limit / 2)) {
+      const exclude = products.map((p: any) => p._id);
+      const extras = await Product.find({
+        status: ProductStatus.ACTIVE,
+        quantity: { $gt: 0 },
+        _id: { $nin: exclude },
+      })
+        .populate('vendor', 'firstName lastName profileImage')
+        .populate('category', 'name')
+        .sort({ averageRating: -1, totalSales: -1, views: -1 })
+        .limit(limit - products.length)
+        .lean();
+      products = [...products, ...extras];
+    }
 
     const formattedProducts = products.map(this.formatProduct);
 
@@ -398,8 +443,8 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
         total: products.length,
         page: 1,
         limit,
-        hasMore: false
-      }
+        hasMore: false,
+      },
     });
   }
 

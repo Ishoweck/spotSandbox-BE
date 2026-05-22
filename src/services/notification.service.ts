@@ -154,8 +154,8 @@ class NotificationService {
     await this.send({
       userId: customerId,
       type: NotificationType.ORDER,
-      title: 'Order Confirmed',
-      message: `Your order #${orderNumber} for ₦${total.toLocaleString()} has been placed successfully.`,
+      title: 'Order Placed! 🎉',
+      message: `Order #${orderNumber} is in! We've notified your vendor and you'll get updates as it moves.`,
       data: { orderId, orderNumber },
       link: `/orders/${orderId}`,
     });
@@ -164,31 +164,34 @@ class NotificationService {
     await this.sendToMany({
       userIds: vendorIds,
       type: NotificationType.ORDER,
-      title: 'New Order Received',
-      message: `You have a new order #${orderNumber}. Please review and process it.`,
+      title: '🛍️ New Order Received',
+      message: `New order #${orderNumber} just came in! Tap to review and confirm.`,
       data: { orderId, orderNumber },
       link: `/vendor/orders/${orderId}`,
     });
   }
 
   async orderStatusUpdated(orderId: string, orderNumber: string, status: string, customerId: string): Promise<void> {
-    const statusMessages: Record<string, string> = {
-      confirmed: 'Your order has been confirmed by the vendor.',
-      processing: 'Your order is being prepared for shipment.',
-      shipped: 'Your order has been shipped! Track your delivery.',
-      in_transit: 'Your order is on the way.',
-      delivered: 'Your order has been delivered. Enjoy!',
-      cancelled: 'Your order has been cancelled.',
-      refunded: 'Your order has been refunded.',
+    const statusConfig: Record<string, { title: string; message: string }> = {
+      confirmed:  { title: 'Order Confirmed ✅',    message: `Your vendor confirmed order #${orderNumber} and is getting it ready for you.` },
+      processing: { title: 'Order Being Packed 📦', message: `Order #${orderNumber} is being packed and prepped for dispatch.` },
+      shipped:    { title: 'Order Shipped 🚚',       message: `Order #${orderNumber} is on its way! Your courier has it — tap to track.` },
+      in_transit: { title: 'Out for Delivery 🚚',   message: `Your order #${orderNumber} is moving — expected delivery coming soon.` },
+      delivered:  { title: 'Order Delivered! 🎉',   message: `Order #${orderNumber} delivered! Hope you love it. Tap to confirm receipt.` },
+      cancelled:  { title: 'Order Cancelled',        message: `Order #${orderNumber} was cancelled. If you paid, a refund is on its way to your wallet.` },
+      refunded:   { title: 'Refund Processed 💸',   message: `Your refund for order #${orderNumber} has been processed and added to your wallet.` },
     };
 
-    const message = statusMessages[status] || `Your order status has been updated to ${status}.`;
+    const { title, message } = statusConfig[status] ?? {
+      title: `Order Update`,
+      message: `Your order #${orderNumber} status has been updated to ${status}.`,
+    };
 
     await this.send({
       userId: customerId,
       type: NotificationType.ORDER,
-      title: `Order ${status.charAt(0).toUpperCase() + status.slice(1)}`,
-      message: `Order #${orderNumber}: ${message}`,
+      title,
+      message,
       data: { orderId, orderNumber, status },
       link: `/orders/${orderId}`,
     });
@@ -201,7 +204,7 @@ class NotificationService {
         userIds: vendorIds,
         type: NotificationType.ORDER,
         title: 'Order Cancelled',
-        message: `Order #${orderNumber} has been cancelled by the customer.`,
+        message: `Order #${orderNumber} was cancelled by the customer. Stock has been restored.`,
         data: { orderId, orderNumber },
         link: `/vendor/orders/${orderId}`,
       });
@@ -211,7 +214,7 @@ class NotificationService {
         userId: customerId,
         type: NotificationType.ORDER,
         title: 'Order Cancelled',
-        message: `Order #${orderNumber} has been cancelled. A refund has been initiated.`,
+        message: `Order #${orderNumber} was cancelled by your vendor. Your refund is headed to your wallet.`,
         data: { orderId, orderNumber },
         link: `/orders/${orderId}`,
       });
@@ -226,8 +229,8 @@ class NotificationService {
     await this.send({
       userId,
       type: NotificationType.PAYMENT,
-      title: 'Payment Successful',
-      message: `Payment of ₦${amount.toLocaleString()} for order #${orderNumber} was successful.`,
+      title: 'Payment Successful 💳',
+      message: `₦${amount.toLocaleString()} received — your order #${orderNumber} is now being processed.`,
       data: { orderId, orderNumber, amount },
       link: `/orders/${orderId}`,
     });
@@ -297,8 +300,8 @@ class NotificationService {
     await this.send({
       userId,
       type: NotificationType.PAYMENT,
-      title: 'Refund Issued',
-      message: `A refund of ₦${amount.toLocaleString()} for order #${orderNumber} has been credited to your wallet.`,
+      title: 'Refund Processed 💸',
+      message: `₦${amount.toLocaleString()} refund for order #${orderNumber} has landed in your VendorSpot wallet.`,
       data: { orderNumber, amount },
       link: '/wallet',
     });
@@ -309,20 +312,23 @@ class NotificationService {
   // ================================================================
 
   async deliveryStatusUpdate(orderId: string, orderNumber: string, status: string, customerId: string): Promise<void> {
-    const statusMessages: Record<string, string> = {
-      picked_up: 'Your package has been picked up by the courier.',
-      in_transit: 'Your package is on the way!',
-      delivered: 'Your package has been delivered!',
-      failed: 'Delivery attempt failed. The courier will try again.',
+    const statusConfig: Record<string, { title: string; message: string }> = {
+      picked_up:  { title: 'Parcel Picked Up 📦',      message: `Order #${orderNumber} picked up! Your courier has it and is heading out.` },
+      in_transit: { title: 'On the Move 🚚',            message: `Order #${orderNumber} is in transit — your courier is on the move!` },
+      delivered:  { title: 'Delivered! 🎉',             message: `Order #${orderNumber} delivered! Tap to confirm receipt and release payment to your vendor.` },
+      failed:     { title: 'Delivery Attempt Failed ⚠️', message: `Delivery attempt for order #${orderNumber} failed. The courier will retry — please verify your address.` },
     };
 
-    const message = statusMessages[status] || `Delivery status updated: ${status}`;
+    const { title, message } = statusConfig[status] ?? {
+      title: 'Delivery Update',
+      message: `Delivery status for order #${orderNumber} updated to: ${status}.`,
+    };
 
     await this.send({
       userId: customerId,
       type: NotificationType.DELIVERY,
-      title: 'Delivery Update',
-      message: `Order #${orderNumber}: ${message}`,
+      title,
+      message,
       data: { orderId, orderNumber, status },
       link: `/orders/${orderId}`,
     });
@@ -487,8 +493,8 @@ class NotificationService {
     await this.send({
       userId: vendorId,
       type: NotificationType.ORDER,
-      title: 'Dispute Filed',
-      message: `A dispute has been filed for order #${orderNumber}. Please review and respond.`,
+      title: '⚠️ Dispute Opened',
+      message: `A dispute was opened on order #${orderNumber}. Please respond within 48 hours.`,
       data: { orderId, orderNumber, disputeId },
       link: `/vendor/disputes`,
     });
@@ -496,21 +502,19 @@ class NotificationService {
     await this.send({
       userId: buyerId,
       type: NotificationType.ORDER,
-      title: 'Dispute Submitted',
-      message: `Your dispute for order #${orderNumber} has been submitted. We'll keep you updated.`,
+      title: 'Dispute Under Review',
+      message: `Your dispute for order #${orderNumber} is under review. We'll update you shortly.`,
       data: { orderId, orderNumber, disputeId },
       link: `/disputes`,
     });
   }
 
   async disputeResolved(orderId: string, orderNumber: string, vendorId: string, buyerId: string, resolution: string, disputeId?: string): Promise<void> {
-    const message = `The dispute for order #${orderNumber} has been resolved: ${resolution}`;
-
     await this.send({
       userId: vendorId,
       type: NotificationType.ORDER,
-      title: 'Dispute Resolved',
-      message,
+      title: '✅ Dispute Resolved',
+      message: `Dispute for order #${orderNumber} resolved: ${resolution}. Tap to see details.`,
       data: { orderId, orderNumber, resolution, disputeId },
       link: `/vendor/disputes`,
     });
@@ -518,8 +522,8 @@ class NotificationService {
     await this.send({
       userId: buyerId,
       type: NotificationType.ORDER,
-      title: 'Dispute Resolved',
-      message,
+      title: '✅ Dispute Resolved',
+      message: `Dispute for order #${orderNumber} resolved: ${resolution}. Tap to see details.`,
       data: { orderId, orderNumber, resolution, disputeId },
       link: `/disputes`,
     });
@@ -666,16 +670,69 @@ class NotificationService {
   // VENDOR SALES NOTIFICATION
   // ================================================================
 
-  async vendorSaleCompleted(vendorId: string, orderNumber: string, amount: number, commission: number): Promise<void> {
+  async vendorSaleCompleted(vendorId: string, orderNumber: string, amount: number, earnings: number): Promise<void> {
     await this.send({
       userId: vendorId,
       type: NotificationType.PAYMENT,
-      title: 'Sale Completed',
-      message: `Order #${orderNumber} completed! ₦${commission.toLocaleString()} has been added to your wallet.`,
-      data: { orderNumber, amount, commission },
+      title: '💰 Payment Released',
+      message: `Order #${orderNumber} confirmed received! ₦${earnings.toLocaleString()} has been credited to your wallet.`,
+      data: { orderNumber, amount, earnings },
       link: '/vendor/wallet',
     });
   }
 }
 
 export const notificationService = new NotificationService();
+
+/**
+ * Emit a real-time new_order event to all vendors when an order is placed.
+ * Called from order.controller after order creation.
+ */
+export const emitNewOrder = (payload: {
+  orderId: string;
+  orderNumber: string;
+  vendorIds: string[];
+}) => {
+  if (!ioInstance) return;
+
+  const data = { orderId: payload.orderId, orderNumber: payload.orderNumber };
+
+  payload.vendorIds.forEach((vendorId) => {
+    ioInstance!.to(`user_${vendorId}`).emit('new_order', data);
+  });
+
+  logger.info(`[Socket] new_order emitted → order ${payload.orderNumber} → ${payload.vendorIds.length} vendors`);
+};
+
+/**
+ * Emit a real-time order status update to the customer and all vendors on that order.
+ * Called from webhook.controller after ShipBubble updates an order.
+ */
+export const emitOrderStatusUpdate = (payload: {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  customerId: string;
+  vendorIds?: string[];
+}) => {
+  if (!ioInstance) return;
+
+  const event = 'order_status_update';
+  const data = {
+    orderId: payload.orderId,
+    orderNumber: payload.orderNumber,
+    status: payload.status,
+  };
+
+  // Notify customer
+  ioInstance.to(`user_${payload.customerId}`).emit(event, data);
+
+  // Notify each vendor
+  if (payload.vendorIds) {
+    payload.vendorIds.forEach((vendorId) => {
+      ioInstance!.to(`user_${vendorId}`).emit(event, data);
+    });
+  }
+
+  logger.info(`[Socket] order_status_update emitted → order ${payload.orderNumber} → ${payload.status}`);
+};

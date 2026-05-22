@@ -112,12 +112,14 @@ const vendorShipmentSchema = new mongoose_1.Schema({
         default: 0,
     },
     trackingNumber: String,
+    trackingUrl: String,
     shipmentId: String,
     courier: String,
     estimatedDelivery: Date,
+    paidAt: Date,
     status: {
         type: String,
-        enum: ['pending', 'confirmed', 'processing', 'shipped', 'in_transit', 'delivered', 'cancelled'],
+        enum: ['pending', 'confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered', 'cancelled'],
         default: 'pending',
     },
 }, { _id: false });
@@ -203,6 +205,8 @@ const orderSchema = new mongoose_1.Schema({
     cancelReason: String,
     refundAmount: Number,
     refundReason: String,
+    deliveredAt: Date,
+    fundsReleased: { type: Boolean, default: false },
     affiliateUser: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'User',

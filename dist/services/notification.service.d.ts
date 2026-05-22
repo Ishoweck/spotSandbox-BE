@@ -69,8 +69,28 @@ declare class NotificationService {
      * can react in real time without waiting for a screen refresh.
      */
     productStockAlert(userIds: string[], productId: string, productName: string, newQuantity: number): Promise<void>;
-    vendorSaleCompleted(vendorId: string, orderNumber: string, amount: number, commission: number): Promise<void>;
+    vendorSaleCompleted(vendorId: string, orderNumber: string, amount: number, earnings: number): Promise<void>;
 }
 export declare const notificationService: NotificationService;
+/**
+ * Emit a real-time new_order event to all vendors when an order is placed.
+ * Called from order.controller after order creation.
+ */
+export declare const emitNewOrder: (payload: {
+    orderId: string;
+    orderNumber: string;
+    vendorIds: string[];
+}) => void;
+/**
+ * Emit a real-time order status update to the customer and all vendors on that order.
+ * Called from webhook.controller after ShipBubble updates an order.
+ */
+export declare const emitOrderStatusUpdate: (payload: {
+    orderId: string;
+    orderNumber: string;
+    status: string;
+    customerId: string;
+    vendorIds?: string[];
+}) => void;
 export {};
 //# sourceMappingURL=notification.service.d.ts.map

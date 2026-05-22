@@ -33,12 +33,19 @@ class MessageService {
                 ...(orderId && { orderId }),
             });
         }
+        else if (!conversation.isActive) {
+            // Re-activate a previously closed conversation (e.g. new order after a completed one)
+            conversation.isActive = true;
+            if (orderId)
+                conversation.orderId = orderId;
+            await conversation.save();
+        }
         return { conversation, conversationId };
     }
     /**
      * Send a message
      */
-    async sendMessage(senderId, receiverId, message, messageType = 'text', fileUrl, orderId, senderDisplayName) {
+    async sendMessage(senderId, receiverId, message, messageType = 'text', fileUrl, orderId, senderDisplayName, replyTo) {
         const { conversation, conversationId } = await this.getOrCreateConversation(senderId, receiverId, orderId);
         // Create the chat message
         const chatMessage = await Additional_1.ChatMessage.create({
@@ -49,6 +56,7 @@ class MessageService {
             messageType,
             fileUrl,
             orderId,
+            ...(replyTo && { replyTo }),
         });
         // Update conversation with last message
         const currentUnread = conversation.unreadCount.get(receiverId) || 0;
@@ -103,7 +111,6 @@ class MessageService {
                 { participants: userId },
                 ...(adminIds.length > 0 ? [{ participants: { $nin: adminIds } }] : []),
             ],
-            isActive: true,
         };
         const conversations = await Conversation_1.default.find(baseQuery)
             .populate('participants', 'firstName lastName avatar role')
@@ -124,6 +131,7 @@ class MessageService {
                 lastMessage: conv.lastMessage,
                 unreadCount: unread,
                 orderId: conv.orderId,
+                isActive: conv.isActive,
                 updatedAt: conv.updatedAt,
             };
         });
@@ -209,10 +217,9 @@ class MessageService {
      * Get total unread message count across all conversations
      */
     async getUnreadCount(userId) {
-        const count = await Additional_1.ChatMessage.countDocuments({
-            receiver: userId,
-            read: false,
-            deleted: { $ne: true },
+        const count = await Conversation_1.default.countDocuments({
+            participants: userId,
+            [`unreadCount.${userId}`]: { $gt: 0 },
         });
         return count;
     }

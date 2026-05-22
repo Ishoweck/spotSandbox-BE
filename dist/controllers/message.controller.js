@@ -16,7 +16,7 @@ class MessageController {
      */
     async sendMessage(req, res) {
         const senderId = req.user.id;
-        const { receiverId, message, messageType, fileUrl, orderId } = req.body;
+        const { receiverId, message, messageType, fileUrl, orderId, replyTo } = req.body;
         if (!receiverId) {
             throw new error_1.AppError('Receiver ID is required', 400);
         }
@@ -34,7 +34,7 @@ class MessageController {
         if (!receiver) {
             throw new error_1.AppError('Receiver not found', 404);
         }
-        const result = await message_service_1.messageService.sendMessage(senderId, receiverId, message || '', messageType || 'text', fileUrl, orderId);
+        const result = await message_service_1.messageService.sendMessage(senderId, receiverId, message || '', messageType || 'text', fileUrl, orderId, undefined, replyTo);
         // Emit via socket if available
         const io = req.app.get('io');
         if (io) {
