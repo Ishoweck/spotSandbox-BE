@@ -41,8 +41,8 @@ router.get('/:id', (0, error_1.asyncHandler)(product_controller_1.productControl
 router.post('/generate-content', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.generateProductContent.bind(product_controller_1.productController)));
 // Create product (vendors, admins, super admins only)
 router.post('/', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.createProduct.bind(product_controller_1.productController)));
-// Toggle flash sale on a product (vendor only, must have >=10% discount)
-router.put('/:id/flash-sale', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.toggleFlashSale.bind(product_controller_1.productController)));
+// Toggle flash sale on a product (admin only)
+router.put('/:id/flash-sale', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.toggleFlashSale.bind(product_controller_1.productController)));
 // Update product (vendors, admins, super admins only)
 router.put('/:id', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.updateProduct.bind(product_controller_1.productController)));
 // Delete product (vendors, admins, super admins only)

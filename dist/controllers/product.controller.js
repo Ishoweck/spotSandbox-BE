@@ -60,6 +60,18 @@ class ProductController {
                 throw new error_1.AppError('Please complete your store setup before posting products.', 403);
             }
             const isDraft = productData.status === 'draft';
+            // Validate price and quantity
+            if (productData.price !== undefined && productData.price <= 0) {
+                throw new error_1.AppError('Price must be greater than 0', 400);
+            }
+            if (productData.compareAtPrice !== undefined &&
+                productData.price !== undefined &&
+                productData.compareAtPrice <= productData.price) {
+                throw new error_1.AppError('Compare-at price must be greater than the selling price', 400);
+            }
+            if (productData.quantity !== undefined && productData.quantity < 0) {
+                throw new error_1.AppError('Quantity cannot be negative', 400);
+            }
             // Generate slug and SKU
             productData.slug = (0, helpers_1.generateSlug)(productData.name);
             if (!productData.sku) {
@@ -286,9 +298,10 @@ class ProductController {
             filter.productType = req.query.productType;
         }
         if (req.query.search) {
+            const safeSearch = (0, helpers_1.escapeRegex)(req.query.search);
             filter.$or = [
-                { name: { $regex: req.query.search, $options: 'i' } },
-                { description: { $regex: req.query.search, $options: 'i' } }
+                { name: { $regex: safeSearch, $options: 'i' } },
+                { description: { $regex: safeSearch, $options: 'i' } },
             ];
         }
         // Sort options
@@ -804,6 +817,19 @@ class ProductController {
             throw new error_1.AppError('Not authorized', 403);
         }
         const oldPrice = product.price;
+        // Validate price and quantity when supplied
+        if (req.body.price !== undefined && req.body.price <= 0) {
+            throw new error_1.AppError('Price must be greater than 0', 400);
+        }
+        if (req.body.quantity !== undefined && req.body.quantity < 0) {
+            throw new error_1.AppError('Quantity cannot be negative', 400);
+        }
+        const effectivePrice = req.body.price ?? product.price;
+        const effectiveCompare = req.body.compareAtPrice ?? product.compareAtPrice;
+        if (effectiveCompare !== undefined &&
+            effectiveCompare <= effectivePrice) {
+            throw new error_1.AppError('Compare-at price must be greater than the selling price', 400);
+        }
         // Upload any new base64 images to Cloudinary before saving
         if (req.body.images && Array.isArray(req.body.images) && req.body.images.length > 0) {
             req.body.images = await Promise.all(req.body.images.map(async (img) => {

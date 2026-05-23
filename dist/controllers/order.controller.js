@@ -787,7 +787,15 @@ class OrderController {
             }
             logger_1.logger.info(`💰 Total shipping cost: ₦${totalShippingCost}`);
         }
-        const subtotal = cart.subtotal;
+        // Recalculate subtotal from current product prices — never trust the stale
+        // cart.subtotal since vendors may have changed prices since the cart was built.
+        let subtotal = 0;
+        for (const cartItem of cart.items) {
+            const liveProduct = await Product_1.default.findById(cartItem.product).select('price');
+            subtotal += (liveProduct?.price || cartItem.price || 0) * cartItem.quantity;
+        }
+        if (subtotal === 0)
+            subtotal = cart.subtotal; // fallback if product lookup fails
         const discount = cart.discount;
         const tax = 0;
         const baseTotal = subtotal - discount + totalShippingCost + tax;
@@ -871,23 +879,25 @@ class OrderController {
         // ✅ WALLET PAYMENT ONLY (Paystack/Flutterwave blocked above)
         if (paymentMethod === types_1.PaymentMethod.WALLET) {
             logger_1.logger.info('💰 Processing wallet payment...');
-            const wallet = await Additional_1.Wallet.findOne({ user: req.user?.id });
-            if (!wallet || wallet.balance < total) {
+            // Atomic: deduct only if sufficient balance — prevents double-spend on concurrent wallet payments
+            const wallet = await Additional_1.Wallet.findOneAndUpdate({ user: req.user?.id, balance: { $gte: total } }, {
+                $inc: { balance: -total, totalSpent: total },
+                $push: {
+                    transactions: {
+                        type: types_1.TransactionType.DEBIT,
+                        amount: total,
+                        purpose: types_1.WalletPurpose.PURCHASE,
+                        reference: orderNumber,
+                        description: `Payment for order ${orderNumber}`,
+                        relatedOrder: order._id,
+                        status: 'completed',
+                        timestamp: new Date(),
+                    },
+                },
+            }, { new: true });
+            if (!wallet) {
                 throw new error_1.AppError('Insufficient wallet balance', 400);
             }
-            wallet.balance -= total;
-            wallet.totalSpent += total;
-            wallet.transactions.push({
-                type: types_1.TransactionType.DEBIT,
-                amount: total,
-                purpose: types_1.WalletPurpose.PURCHASE,
-                reference: orderNumber,
-                description: `Payment for order ${orderNumber}`,
-                relatedOrder: order._id,
-                status: 'completed',
-                timestamp: new Date(),
-            });
-            await wallet.save();
             order.paymentStatus = types_1.PaymentStatus.COMPLETED;
             order.status = isDigitalOnly ? types_1.OrderStatus.DELIVERED : types_1.OrderStatus.PENDING;
             await order.save();
@@ -1046,34 +1056,30 @@ class OrderController {
                 }
             }
         }
-        const subtotal = cart.subtotal;
+        // Recalculate subtotal from live product prices — stale cart.subtotal not trusted
+        let subtotal = 0;
+        for (const cartItem of cart.items) {
+            const liveProduct = await Product_1.default.findById(cartItem.product).select('price');
+            subtotal += (liveProduct?.price || cartItem.price || 0) * cartItem.quantity;
+        }
+        if (subtotal === 0)
+            subtotal = cart.subtotal;
         const discount = cart.discount;
         const tax = 0;
         const baseTotal = subtotal - discount + totalShippingCost + tax;
         const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
         const total = Math.round(baseTotal + serviceCharge);
-        // Validate and apply VCredits (separate from wallet cash balance)
+        // Validate VCredits balance now but do NOT deduct yet — deduction happens in
+        // confirmPayment only after the card charge succeeds to prevent lost credits
+        // if the user closes the app before completing payment.
         let validVCredits = 0;
         if (vCreditsAmount > 0) {
             const wallet = await Additional_1.Wallet.findOne({ user: req.user?.id });
             if (!wallet || (wallet.vCredits || 0) < vCreditsAmount) {
                 throw new error_1.AppError('Insufficient VCredits balance', 400);
             }
-            // Can't apply more VCredits than the total
             validVCredits = Math.min(vCreditsAmount, total);
-            // Deduct from vCredits field (not wallet balance)
-            wallet.vCredits = (wallet.vCredits || 0) - validVCredits;
-            wallet.transactions.push({
-                type: types_1.TransactionType.DEBIT,
-                amount: validVCredits,
-                purpose: types_1.WalletPurpose.PURCHASE,
-                reference: `VCREDITS-HOLD-${Date.now()}`,
-                description: `VCredits applied to order (pending card payment)`,
-                status: 'completed',
-                timestamp: new Date(),
-            });
-            await wallet.save();
-            logger_1.logger.info(`💎 VCredits applied: ${validVCredits} — remaining to charge on card: ₦${total - validVCredits}`);
+            logger_1.logger.info(`💎 VCredits reserved (not yet deducted): ${validVCredits}`);
         }
         const cardChargeAmount = total - validVCredits;
         // Generate a reference for this payment attempt
@@ -1208,6 +1214,7 @@ class OrderController {
         // Step 1: Verify payment with the gateway
         let paymentSuccess = false;
         let snapshotFromGateway = null;
+        let paidAmountNaira = null;
         const paymentProvider = provider || 'paystack';
         try {
             if (paymentProvider === 'flutterwave') {
@@ -1221,6 +1228,7 @@ class OrderController {
                 }
                 if (verification.data?.status === 'successful') {
                     paymentSuccess = true;
+                    paidAmountNaira = verification.data.amount;
                     logger_1.logger.info('✅ Flutterwave payment verified:', { amount: verification.data.amount });
                 }
             }
@@ -1229,7 +1237,8 @@ class OrderController {
                 const verification = await paystack_service_1.paystackService.verifyPayment(reference);
                 if (verification.data.status === 'success') {
                     paymentSuccess = true;
-                    logger_1.logger.info('✅ Paystack payment verified:', { amount: verification.data.amount });
+                    paidAmountNaira = verification.data.amount / 100; // kobo → naira
+                    logger_1.logger.info('✅ Paystack payment verified:', { amount: paidAmountNaira });
                     // Extract snapshot stored in Paystack metadata during initializePayment
                     const meta = verification.data.metadata;
                     if (meta?.checkoutSnapshot) {
@@ -1256,6 +1265,16 @@ class OrderController {
         const snapshot = snapshotFromClient || snapshotFromGateway;
         if (!snapshot || snapshot.userId !== req.user?.id) {
             throw new error_1.AppError('Invalid checkout data', 400);
+        }
+        // Validate paid amount against what was expected
+        if (paidAmountNaira !== null && snapshot.cardChargeAmount !== undefined) {
+            if (paidAmountNaira < snapshot.cardChargeAmount - 1) { // 1 naira tolerance for rounding
+                logger_1.logger.error('❌ confirmPayment amount mismatch:', {
+                    expected: snapshot.cardChargeAmount,
+                    received: paidAmountNaira,
+                });
+                throw new error_1.AppError('Payment amount does not match order total', 400);
+            }
         }
         // Step 3: Re-validate cart (stock may have changed while user was paying)
         const cart = await Cart_1.default.findOne({ user: req.user?.id }).populate({
@@ -1497,6 +1516,36 @@ class OrderController {
             ...(affiliateUserId && { affiliateUser: affiliateUserId, affiliateCommission: affiliateCommissionAmount }),
         });
         logger_1.logger.info(`✅ Order created with verified payment: ${order._id}`);
+        // Deduct VCredits NOW — payment is confirmed, safe to remove from wallet
+        const vCreditsApplied = snapshot.vCreditsApplied || 0;
+        if (vCreditsApplied > 0) {
+            try {
+                // Atomic: deduct only if sufficient vCredits exist — prevents race condition on concurrent orders
+                const vcWallet = await Additional_1.Wallet.findOneAndUpdate({ user: snapshot.userId, vCredits: { $gte: vCreditsApplied } }, {
+                    $inc: { vCredits: -vCreditsApplied },
+                    $push: {
+                        transactions: {
+                            type: types_1.TransactionType.DEBIT,
+                            amount: vCreditsApplied,
+                            purpose: types_1.WalletPurpose.PURCHASE,
+                            reference: `VCREDITS-${order._id}`,
+                            description: `VCredits applied to order #${order.orderNumber}`,
+                            status: 'completed',
+                            timestamp: new Date(),
+                        },
+                    },
+                });
+                if (vcWallet) {
+                    logger_1.logger.info(`💎 VCredits deducted after payment confirmed: ${vCreditsApplied}`);
+                }
+                else {
+                    logger_1.logger.warn(`⚠️ VCredits deduction skipped — insufficient balance or wallet not found`);
+                }
+            }
+            catch (vcErr) {
+                logger_1.logger.error('Failed to deduct VCredits after payment confirm:', vcErr);
+            }
+        }
         // Re-activate any closed conversations between the customer and each vendor
         try {
             const vendorIds = [...new Set(orderItems.map((i) => i.vendor.toString()))];
@@ -1524,7 +1573,7 @@ class OrderController {
                 $push: { usedBy: user._id },
             });
         }
-        // Step 10: Reduce stock & update sales
+        // Step 10: Reduce stock atomically & update sales
         for (const item of order.items) {
             const product = await Product_1.default.findById(item.product);
             if (!product)
@@ -1532,9 +1581,12 @@ class OrderController {
             const productType = product.productType?.toUpperCase();
             const isPhysical = productType !== 'DIGITAL' && productType !== 'SERVICE';
             if (isPhysical) {
-                await Product_1.default.findByIdAndUpdate(item.product, {
-                    $inc: { quantity: -item.quantity, totalSales: item.quantity },
-                });
+                // Atomic decrement — only succeeds if sufficient stock remains.
+                // This prevents two concurrent payments from both draining the last unit.
+                const updated = await Product_1.default.findOneAndUpdate({ _id: item.product, quantity: { $gte: item.quantity } }, { $inc: { quantity: -item.quantity, totalSales: item.quantity } }, { new: true });
+                if (!updated) {
+                    logger_1.logger.warn(`⚠️ Stock exhausted for product ${item.product} after payment — order ${order._id} oversold`);
+                }
                 await notifyCartUsersAboutStock(item.product, product.name, product.quantity, item.quantity, req.user.id, product.vendor?.toString() || '', product.lowStockThreshold ?? 10);
             }
             else {
@@ -1772,7 +1824,10 @@ class OrderController {
         logger_1.logger.info('🔍 Payment reference:', reference);
         logger_1.logger.info('🔍 Provider:', provider || 'paystack (default)');
         logger_1.logger.info('🔍 Transaction ID:', transaction_id || 'N/A');
-        const order = await Order_1.default.findOne({ orderNumber: reference }).populate('items.product');
+        const order = await Order_1.default.findOne({
+            orderNumber: reference,
+            user: req.user?.id,
+        }).populate('items.product');
         if (!order) {
             throw new error_1.AppError('Order not found', 404);
         }
@@ -1836,19 +1891,37 @@ class OrderController {
                     amount: verification.data.amount,
                 });
                 if (verification.data.status === 'success') {
-                    paymentSuccess = true;
+                    // Paystack returns amount in kobo (100 kobo = ₦1)
+                    const paidNaira = verification.data.amount / 100;
+                    if (paidNaira >= order.total) {
+                        paymentSuccess = true;
+                    }
+                    else {
+                        logger_1.logger.error('❌ Paystack amount mismatch:', {
+                            expected: order.total,
+                            received: paidNaira,
+                        });
+                        throw new error_1.AppError('Payment amount does not match order total', 400);
+                    }
                 }
             }
             if (paymentSuccess) {
                 logger_1.logger.info('✅ Payment verified successfully');
                 const isDigitalOnly = this.isDigitalOnly(order.items);
                 logger_1.logger.info('📦 Order type:', { isDigitalOnly });
-                order.paymentStatus = types_1.PaymentStatus.COMPLETED;
-                order.status = isDigitalOnly ? types_1.OrderStatus.DELIVERED : types_1.OrderStatus.PENDING;
-                await order.save();
+                // Atomic: only mark completed if still pending — prevents double stock-decrement on concurrent calls
+                const processedOrder = await Order_1.default.findOneAndUpdate({ _id: order._id, paymentStatus: types_1.PaymentStatus.PENDING }, {
+                    paymentStatus: types_1.PaymentStatus.COMPLETED,
+                    status: isDigitalOnly ? types_1.OrderStatus.DELIVERED : types_1.OrderStatus.PENDING,
+                }, { new: true });
+                if (!processedOrder) {
+                    logger_1.logger.info('⚠️ Order already completed by concurrent request — skipping stock decrement');
+                    res.json({ success: true, message: 'Payment already verified', data: { order } });
+                    return;
+                }
                 logger_1.logger.info('✅ Order status updated:', {
-                    status: order.status,
-                    paymentStatus: order.paymentStatus,
+                    status: processedOrder.status,
+                    paymentStatus: processedOrder.paymentStatus,
                 });
                 // Reduce product quantities
                 logger_1.logger.info('📊 Updating product quantities...');
@@ -1859,19 +1932,16 @@ class OrderController {
                     const productType = product.productType?.toUpperCase();
                     const isPhysical = productType !== 'DIGITAL' && productType !== 'SERVICE';
                     if (isPhysical) {
-                        await Product_1.default.findByIdAndUpdate(item.product, {
-                            $inc: {
-                                quantity: -item.quantity,
-                                totalSales: item.quantity,
-                            },
-                        });
+                        // Atomic: $gte guard prevents quantity going negative if two payments race
+                        const stockUpdated = await Product_1.default.findOneAndUpdate({ _id: item.product, quantity: { $gte: item.quantity } }, { $inc: { quantity: -item.quantity, totalSales: item.quantity } });
+                        if (!stockUpdated) {
+                            logger_1.logger.warn(`⚠️ Stock exhausted for product ${item.product} in verifyPayment — oversold`);
+                        }
                         logger_1.logger.info(`✅ Updated physical product: ${product.name}`);
                     }
                     else {
                         await Product_1.default.findByIdAndUpdate(item.product, {
-                            $inc: {
-                                totalSales: item.quantity,
-                            },
+                            $inc: { totalSales: item.quantity },
                         });
                         logger_1.logger.info(`✅ Updated digital product: ${product.name}`);
                     }
@@ -2904,24 +2974,33 @@ class OrderController {
     async completeOrder(req, res) {
         const { id } = req.params;
         const userId = req.user.id;
-        const order = await Order_1.default.findById(id);
+        // Atomic: set fundsReleased=true in one operation — prevents double vendor payout
+        // from concurrent customer clicks OR race with the 24-hour auto-complete job
+        const order = await Order_1.default.findOneAndUpdate({
+            _id: id,
+            user: userId,
+            fundsReleased: { $ne: true },
+            status: { $in: [types_1.OrderStatus.SHIPPED, types_1.OrderStatus.IN_TRANSIT, types_1.OrderStatus.DELIVERED] },
+            paymentStatus: types_1.PaymentStatus.COMPLETED,
+        }, {
+            status: types_1.OrderStatus.DELIVERED,
+            fundsReleased: true,
+            $set: { deliveredAt: new Date() },
+        }, { new: true });
         if (!order) {
-            throw new error_1.AppError('Order not found', 404);
+            const existing = await Order_1.default.findById(id);
+            if (!existing)
+                throw new error_1.AppError('Order not found', 404);
+            if (existing.user.toString() !== userId)
+                throw new error_1.AppError('You are not authorized to complete this order', 403);
+            if (existing.fundsReleased) {
+                res.json({ success: true, message: 'Order already completed', data: { order: existing } });
+                return;
+            }
+            if (existing.paymentStatus !== types_1.PaymentStatus.COMPLETED)
+                throw new error_1.AppError('Payment not completed', 400);
+            throw new error_1.AppError(`Order cannot be completed from status "${existing.status}". Must be shipped or further.`, 400);
         }
-        // Verify the requesting user is the order's customer
-        const orderUserId = order.user.toString();
-        if (orderUserId !== userId) {
-            throw new error_1.AppError('You are not authorized to complete this order', 403);
-        }
-        // Verify order is in a completable state
-        const completableStatuses = [types_1.OrderStatus.SHIPPED, types_1.OrderStatus.IN_TRANSIT, types_1.OrderStatus.DELIVERED];
-        if (!completableStatuses.includes(order.status)) {
-            throw new error_1.AppError(`Order cannot be completed from status "${order.status}". Must be shipped or further.`, 400);
-        }
-        order.status = types_1.OrderStatus.DELIVERED;
-        order.deliveredAt = order.deliveredAt || new Date();
-        order.fundsReleased = true;
-        await order.save();
         // Credit vendor wallets with their earnings
         try {
             // Group items by vendor and calculate each vendor's total
@@ -2933,51 +3012,48 @@ class OrderController {
             }
             // Credit each vendor's wallet using tiered commission rate
             for (const [vendorId, amount] of vendorEarnings) {
-                let vendorWallet = await Additional_1.Wallet.findOne({ user: vendorId });
-                if (!vendorWallet) {
-                    vendorWallet = await Additional_1.Wallet.create({ user: vendorId });
-                }
                 const commissionRatePct = await getVendorCommissionRate(vendorId);
                 const commissionRate = commissionRatePct / 100;
                 const commission = Math.round(amount * commissionRate * 100) / 100;
                 const vendorAmount = Math.round((amount - commission) * 100) / 100;
-                vendorWallet.balance += vendorAmount;
-                vendorWallet.totalEarned += vendorAmount;
-                vendorWallet.transactions.push({
-                    type: types_1.TransactionType.CREDIT,
-                    amount: vendorAmount,
-                    purpose: types_1.WalletPurpose.COMMISSION,
-                    reference: `order_${order.orderNumber}_${Date.now()}`,
-                    description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee deducted)`,
-                    relatedOrder: order._id,
-                    status: 'completed',
-                    timestamp: new Date(),
-                });
-                await vendorWallet.save();
+                // Atomic $inc — safe even if this function is called concurrently
+                await Additional_1.Wallet.findOneAndUpdate({ user: vendorId }, {
+                    $inc: { balance: vendorAmount, totalEarned: vendorAmount },
+                    $push: {
+                        transactions: {
+                            type: types_1.TransactionType.CREDIT,
+                            amount: vendorAmount,
+                            purpose: types_1.WalletPurpose.COMMISSION,
+                            reference: `order_${order.orderNumber}_${vendorId}`,
+                            description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee deducted)`,
+                            relatedOrder: order._id,
+                            status: 'completed',
+                            timestamp: new Date(),
+                        },
+                    },
+                }, { upsert: true });
                 logger_1.logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for order ${order.orderNumber} (commission: ₦${commission} at ${Math.round(commissionRate * 100)}%, original: ₦${amount})`);
                 // Notify vendor their funds have been released
                 notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, amount, vendorAmount).catch(() => { });
             }
             // Handle affiliate commission if applicable
             if (order.affiliateUser && order.affiliateCommission) {
-                let affiliateWallet = await Additional_1.Wallet.findOne({ user: order.affiliateUser });
-                if (!affiliateWallet) {
-                    affiliateWallet = await Additional_1.Wallet.create({ user: order.affiliateUser });
-                }
                 const commissionAmount = order.affiliateCommission;
-                affiliateWallet.balance += commissionAmount;
-                affiliateWallet.totalEarned += commissionAmount;
-                affiliateWallet.transactions.push({
-                    type: types_1.TransactionType.CREDIT,
-                    amount: commissionAmount,
-                    purpose: types_1.WalletPurpose.COMMISSION,
-                    reference: `affiliate_${order.orderNumber}_${Date.now()}`,
-                    description: `Affiliate commission for Order #${order.orderNumber}`,
-                    relatedOrder: order._id,
-                    status: 'completed',
-                    timestamp: new Date(),
-                });
-                await affiliateWallet.save();
+                await Additional_1.Wallet.findOneAndUpdate({ user: order.affiliateUser }, {
+                    $inc: { balance: commissionAmount, totalEarned: commissionAmount },
+                    $push: {
+                        transactions: {
+                            type: types_1.TransactionType.CREDIT,
+                            amount: commissionAmount,
+                            purpose: types_1.WalletPurpose.COMMISSION,
+                            reference: `affiliate_${order.orderNumber}`,
+                            description: `Affiliate commission for Order #${order.orderNumber}`,
+                            relatedOrder: order._id,
+                            status: 'completed',
+                            timestamp: new Date(),
+                        },
+                    },
+                }, { upsert: true });
                 logger_1.logger.info(`Credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
             }
         }
@@ -3066,26 +3142,25 @@ class OrderController {
         });
         const vendorSubtotal = vendorItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
         try {
-            let vendorWallet = await Additional_1.Wallet.findOne({ user: vendorId });
-            if (!vendorWallet)
-                vendorWallet = await Additional_1.Wallet.create({ user: vendorId });
             const vendorProfile = await VendorProfile_1.default.findOne({ user: vendorId }).select('commissionRate');
             const commissionRate = (vendorProfile?.commissionRate ?? 8) / 100;
             const commission = Math.round(vendorSubtotal * commissionRate * 100) / 100;
             const vendorAmount = Math.round((vendorSubtotal - commission) * 100) / 100;
-            vendorWallet.balance += vendorAmount;
-            vendorWallet.totalEarned += vendorAmount;
-            vendorWallet.transactions.push({
-                type: types_1.TransactionType.CREDIT,
-                amount: vendorAmount,
-                purpose: types_1.WalletPurpose.COMMISSION,
-                reference: `order_${order.orderNumber}_vendor_${vendorId}_${Date.now()}`,
-                description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee)`,
-                relatedOrder: order._id,
-                status: 'completed',
-                timestamp: new Date(),
-            });
-            await vendorWallet.save();
+            await Additional_1.Wallet.findOneAndUpdate({ user: vendorId }, {
+                $inc: { balance: vendorAmount, totalEarned: vendorAmount },
+                $push: {
+                    transactions: {
+                        type: types_1.TransactionType.CREDIT,
+                        amount: vendorAmount,
+                        purpose: types_1.WalletPurpose.COMMISSION,
+                        reference: `order_${order.orderNumber}_vendor_${vendorId}`,
+                        description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee)`,
+                        relatedOrder: order._id,
+                        status: 'completed',
+                        timestamp: new Date(),
+                    },
+                },
+            }, { upsert: true });
             logger_1.logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for shipment in order ${order.orderNumber}`);
             // Notify vendor their funds have been released
             notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, vendorSubtotal, vendorAmount).catch(() => { });
@@ -3121,22 +3196,21 @@ class OrderController {
             // Handle affiliate commission
             if (order.affiliateUser && order.affiliateCommission) {
                 try {
-                    let affiliateWallet = await Additional_1.Wallet.findOne({ user: order.affiliateUser });
-                    if (!affiliateWallet)
-                        affiliateWallet = await Additional_1.Wallet.create({ user: order.affiliateUser });
-                    affiliateWallet.balance += order.affiliateCommission;
-                    affiliateWallet.totalEarned += order.affiliateCommission;
-                    affiliateWallet.transactions.push({
-                        type: types_1.TransactionType.CREDIT,
-                        amount: order.affiliateCommission,
-                        purpose: types_1.WalletPurpose.COMMISSION,
-                        reference: `affiliate_${order.orderNumber}_${Date.now()}`,
-                        description: `Affiliate commission for Order #${order.orderNumber}`,
-                        relatedOrder: order._id,
-                        status: 'completed',
-                        timestamp: new Date(),
-                    });
-                    await affiliateWallet.save();
+                    await Additional_1.Wallet.findOneAndUpdate({ user: order.affiliateUser }, {
+                        $inc: { balance: order.affiliateCommission, totalEarned: order.affiliateCommission },
+                        $push: {
+                            transactions: {
+                                type: types_1.TransactionType.CREDIT,
+                                amount: order.affiliateCommission,
+                                purpose: types_1.WalletPurpose.COMMISSION,
+                                reference: `affiliate_${order.orderNumber}`,
+                                description: `Affiliate commission for Order #${order.orderNumber}`,
+                                relatedOrder: order._id,
+                                status: 'completed',
+                                timestamp: new Date(),
+                            },
+                        },
+                    }, { upsert: true });
                 }
                 catch (affiliateErr) {
                     logger_1.logger.error('Error crediting affiliate commission on full delivery:', affiliateErr);

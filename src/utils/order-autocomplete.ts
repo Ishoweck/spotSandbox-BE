@@ -32,6 +32,17 @@ async function runAutoComplete(): Promise<void> {
 
   for (const order of orders) {
     try {
+      // Atomic claim — prevents race with completeOrder (customer-triggered confirm delivery).
+      // Only the first process to set fundsReleased=true proceeds; the other skips safely.
+      const claimed = await Order.findOneAndUpdate(
+        { _id: order._id, fundsReleased: { $ne: true } },
+        { fundsReleased: true },
+      );
+      if (!claimed) {
+        logger.info(`⚠️ Auto-complete: order ${order.orderNumber} already claimed — skipping`);
+        continue;
+      }
+
       const vendorShipments = (order as any).vendorShipments as any[] | undefined;
 
       if (vendorShipments && vendorShipments.length > 0) {
@@ -54,24 +65,26 @@ async function runAutoComplete(): Promise<void> {
           const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
           const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
 
-          let wallet = await Wallet.findOne({ user: vendorId });
-          if (!wallet) wallet = await Wallet.create({ user: vendorId });
+          await Wallet.findOneAndUpdate(
+            { user: vendorId },
+            {
+              $inc: { balance: vendorAmount, totalEarned: vendorAmount },
+              $push: {
+                transactions: {
+                  type: TransactionType.CREDIT,
+                  amount: vendorAmount,
+                  purpose: WalletPurpose.COMMISSION,
+                  reference: `autocomplete_${order.orderNumber}_${vendorId}`,
+                  description: `Auto-released payment for Order #${order.orderNumber} (24-hour window)`,
+                  relatedOrder: order._id,
+                  status: 'completed',
+                  timestamp: new Date(),
+                },
+              },
+            },
+            { upsert: true }
+          );
 
-          wallet.balance += vendorAmount;
-          wallet.totalEarned += vendorAmount;
-          wallet.transactions.push({
-            type: TransactionType.CREDIT,
-            amount: vendorAmount,
-            purpose: WalletPurpose.COMMISSION,
-            reference: `autocomplete_${order.orderNumber}_${vendorId}_${Date.now()}`,
-            description: `Auto-released payment for Order #${order.orderNumber} (7-day window)`,
-            relatedOrder: order._id,
-            status: 'completed',
-            timestamp: new Date(),
-          } as any);
-          await wallet.save();
-
-          shipment.paidAt = new Date();
           logger.info(`✅ Auto-credited ₦${vendorAmount} to vendor ${vendorId} (order ${order.orderNumber})`);
           notificationService.vendorSaleCompleted(vendorId, order.orderNumber, subtotal, vendorAmount).catch(() => {});
         }
@@ -89,29 +102,30 @@ async function runAutoComplete(): Promise<void> {
           const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
           const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
 
-          let wallet = await Wallet.findOne({ user: vendorId });
-          if (!wallet) wallet = await Wallet.create({ user: vendorId });
-
-          wallet.balance += vendorAmount;
-          wallet.totalEarned += vendorAmount;
-          wallet.transactions.push({
-            type: TransactionType.CREDIT,
-            amount: vendorAmount,
-            purpose: WalletPurpose.COMMISSION,
-            reference: `autocomplete_${order.orderNumber}_${vendorId}_${Date.now()}`,
-            description: `Auto-released payment for Order #${order.orderNumber} (7-day window)`,
-            relatedOrder: order._id,
-            status: 'completed',
-            timestamp: new Date(),
-          } as any);
-          await wallet.save();
+          await Wallet.findOneAndUpdate(
+            { user: vendorId },
+            {
+              $inc: { balance: vendorAmount, totalEarned: vendorAmount },
+              $push: {
+                transactions: {
+                  type: TransactionType.CREDIT,
+                  amount: vendorAmount,
+                  purpose: WalletPurpose.COMMISSION,
+                  reference: `autocomplete_${order.orderNumber}_${vendorId}`,
+                  description: `Auto-released payment for Order #${order.orderNumber} (24-hour window)`,
+                  relatedOrder: order._id,
+                  status: 'completed',
+                  timestamp: new Date(),
+                },
+              },
+            },
+            { upsert: true }
+          );
           logger.info(`✅ Auto-credited ₦${vendorAmount} to vendor ${vendorId} (order ${order.orderNumber})`);
           notificationService.vendorSaleCompleted(vendorId, order.orderNumber, subtotal, vendorAmount).catch(() => {});
         }
       }
 
-      (order as any).fundsReleased = true;
-      await order.save();
       logger.info(`✅ Auto-complete done: order ${order.orderNumber}`);
     } catch (err: any) {
       logger.error(`❌ Auto-complete failed for order ${order.orderNumber}: ${err.message}`);

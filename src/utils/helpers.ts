@@ -155,6 +155,9 @@ export const generateConversationId = (userId1: string, userId2: string): string
   return `${sorted[0]}_${sorted[1]}`;
 };
 
+export const escapeRegex = (str: string): string =>
+  str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Calculate average rating
  */

@@ -1,5 +1,7 @@
 import { Response } from 'express';
 import mongoose from 'mongoose';
+
+const escapeRegex = (str: unknown) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 import {
   AuthRequest,
   ApiResponse,
@@ -592,10 +594,10 @@ export const getAllUsers = asyncHandler(
     if (status) filter.status = status;
     if (search) {
       filter.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
+        { firstName: { $regex: escapeRegex(search), $options: 'i' } },
+        { lastName: { $regex: escapeRegex(search), $options: 'i' } },
+        { email: { $regex: escapeRegex(search), $options: 'i' } },
+        { phone: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
@@ -795,11 +797,14 @@ export const deleteUser = asyncHandler(
       return;
     }
 
-    // Prevent deleting super admins unless you're a super admin
-    if (user.role === UserRole.SUPER_ADMIN && req.user!.role !== UserRole.SUPER_ADMIN) {
+    // Prevent deleting any admin account unless you're a super admin
+    if (
+      (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN) &&
+      req.user!.role !== UserRole.SUPER_ADMIN
+    ) {
       res.status(403).json({
         success: false,
-        message: 'Only super admins can delete other super admins',
+        message: 'Only super admins can delete admin accounts',
       });
       return;
     }
@@ -863,8 +868,8 @@ export const getAllVendors = asyncHandler(
     }
     if (search) {
       filter.$or = [
-        { businessName: { $regex: search, $options: 'i' } },
-        { businessEmail: { $regex: search, $options: 'i' } },
+        { businessName: { $regex: escapeRegex(search), $options: 'i' } },
+        { businessEmail: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
@@ -1154,8 +1159,8 @@ export const getAllProducts = asyncHandler(
     if (featured === 'true') filter.isFeatured = true;
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } },
+        { name: { $regex: escapeRegex(search), $options: 'i' } },
+        { sku: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
@@ -1386,8 +1391,8 @@ export const getAllOrders = asyncHandler(
     if (paymentMethod) filter.paymentMethod = paymentMethod;
     if (search) {
       filter.$or = [
-        { orderNumber: { $regex: search, $options: 'i' } },
-        { paymentReference: { $regex: search, $options: 'i' } },
+        { orderNumber: { $regex: escapeRegex(search), $options: 'i' } },
+        { paymentReference: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
     if (startDate || endDate) {
@@ -1696,8 +1701,8 @@ export const getAllTransactions = asyncHandler(
     if (status) matchStage['transactions.status'] = status;
     if (search) {
       matchStage.$or = [
-        { 'transactions.reference': { $regex: search, $options: 'i' } },
-        { 'transactions.description': { $regex: search, $options: 'i' } },
+        { 'transactions.reference': { $regex: escapeRegex(search), $options: 'i' } },
+        { 'transactions.description': { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
     if (startDate || endDate) {
@@ -1841,41 +1846,50 @@ export const processWithdrawal = asyncHandler(
       return;
     }
 
-    const wallet = await Wallet.findById(walletId);
+    // Pre-read to get the transaction amount for the atomic update
+    const walletRead = await Wallet.findOne({
+      _id: walletId,
+      transactions: { $elemMatch: { _id: transactionId, purpose: WalletPurpose.WITHDRAWAL } },
+    });
+    if (!walletRead) {
+      res.status(404).json({ success: false, message: 'Wallet or withdrawal transaction not found' });
+      return;
+    }
+
+    const txn = (walletRead.transactions as any).id(transactionId);
+    if (txn.status !== 'pending') {
+      res.status(400).json({ success: false, message: 'Transaction is not a pending withdrawal' });
+      return;
+    }
+
+    const txnAmount = txn.amount;
+    const newStatus = action === 'approve' ? 'completed' : 'failed';
+
+    // Atomic: only update if transaction is still 'pending' — prevents double-processing
+    const wallet = await Wallet.findOneAndUpdate(
+      {
+        _id: walletId,
+        transactions: { $elemMatch: { _id: txn._id, status: 'pending', purpose: WalletPurpose.WITHDRAWAL } },
+      },
+      {
+        $set: { 'transactions.$.status': newStatus },
+        $inc: {
+          pendingBalance: -txnAmount,
+          ...(action === 'approve' ? { totalWithdrawn: txnAmount } : { balance: txnAmount }),
+        },
+      },
+      { new: true }
+    );
+
     if (!wallet) {
-      res.status(404).json({ success: false, message: 'Wallet not found' });
+      res.status(400).json({ success: false, message: 'Transaction already processed' });
       return;
     }
-
-    const transaction = (wallet.transactions as any).id(transactionId);
-    if (!transaction) {
-      res.status(404).json({ success: false, message: 'Transaction not found' });
-      return;
-    }
-
-    if (transaction.purpose !== WalletPurpose.WITHDRAWAL || transaction.status !== 'pending') {
-      res.status(400).json({
-        success: false,
-        message: 'Transaction is not a pending withdrawal',
-      });
-      return;
-    }
-
-    if (action === 'approve') {
-      transaction.status = 'completed';
-      wallet.totalWithdrawn += transaction.amount;
-    } else {
-      transaction.status = 'failed';
-      wallet.balance += transaction.amount;
-      wallet.pendingBalance -= transaction.amount;
-    }
-
-    await wallet.save();
 
     // Notify user
     await notificationService.walletWithdrawalProcessed(
       wallet.user.toString(),
-      transaction.amount,
+      txnAmount,
       action === 'approve' ? 'completed' : 'failed'
     );
 
@@ -1884,8 +1898,8 @@ export const processWithdrawal = asyncHandler(
       message: `Withdrawal ${action === 'approve' ? 'approved' : 'rejected'} successfully`,
       data: {
         transactionId,
-        amount: transaction.amount,
-        status: transaction.status,
+        amount: txnAmount,
+        status: newStatus,
       },
     });
   }

@@ -19,7 +19,7 @@ const authenticate = async (req, res, next) => {
         }
         const decoded = (0, jwt_1.verifyAccessToken)(token);
         // Check the user is still active in the DB — catches deleted/suspended accounts
-        const user = await User_1.default.findById(decoded.id).select('status').lean();
+        const user = await User_1.default.findById(decoded.id).select('status role').lean();
         if (!user) {
             res.status(401).json({
                 success: false,
@@ -28,7 +28,8 @@ const authenticate = async (req, res, next) => {
             });
             return;
         }
-        if (user.status === 'inactive' || user.status === 'deleted') {
+        const { status, role } = user;
+        if (status === 'inactive' || status === 'deleted') {
             res.status(401).json({
                 success: false,
                 message: 'Your account has been deleted. Thank you for using VendorSpot.',
@@ -36,10 +37,26 @@ const authenticate = async (req, res, next) => {
             });
             return;
         }
+        if (status === 'suspended') {
+            res.status(403).json({
+                success: false,
+                message: 'Your account has been suspended. Please contact support.',
+                error: 'account_suspended',
+            });
+            return;
+        }
+        if (status === 'pending_verification') {
+            res.status(403).json({
+                success: false,
+                message: 'Please verify your email before continuing.',
+                error: 'email_not_verified',
+            });
+            return;
+        }
         req.user = {
             id: decoded.id,
             email: decoded.email,
-            role: decoded.role,
+            role, // always from DB, not the JWT
         };
         next();
     }
@@ -78,11 +95,16 @@ const optionalAuth = async (req, res, next) => {
         const token = req.headers.authorization?.split(' ')[1];
         if (token) {
             const decoded = (0, jwt_1.verifyAccessToken)(token);
-            req.user = {
-                id: decoded.id,
-                email: decoded.email,
-                role: decoded.role,
-            };
+            const dbUser = await User_1.default.findById(decoded.id).select('status role').lean();
+            const status = dbUser?.status;
+            // Only attach user if account is in good standing
+            if (dbUser && status === 'active') {
+                req.user = {
+                    id: decoded.id,
+                    email: decoded.email,
+                    role: dbUser.role,
+                };
+            }
         }
         next();
     }

@@ -34,6 +34,13 @@ async function runAutoComplete() {
     logger_1.logger.info(`⏰ Auto-complete: releasing funds for ${orders.length} order(s)`);
     for (const order of orders) {
         try {
+            // Atomic claim — prevents race with completeOrder (customer-triggered confirm delivery).
+            // Only the first process to set fundsReleased=true proceeds; the other skips safely.
+            const claimed = await Order_1.default.findOneAndUpdate({ _id: order._id, fundsReleased: { $ne: true } }, { fundsReleased: true });
+            if (!claimed) {
+                logger_1.logger.info(`⚠️ Auto-complete: order ${order.orderNumber} already claimed — skipping`);
+                continue;
+            }
             const vendorShipments = order.vendorShipments;
             if (vendorShipments && vendorShipments.length > 0) {
                 // Multi-vendor: credit each vendor that hasn't been paid yet
@@ -53,23 +60,21 @@ async function runAutoComplete() {
                     const commissionRatePct = await getCommissionRate(vendorId);
                     const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
                     const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
-                    let wallet = await Wallet_1.default.findOne({ user: vendorId });
-                    if (!wallet)
-                        wallet = await Wallet_1.default.create({ user: vendorId });
-                    wallet.balance += vendorAmount;
-                    wallet.totalEarned += vendorAmount;
-                    wallet.transactions.push({
-                        type: types_1.TransactionType.CREDIT,
-                        amount: vendorAmount,
-                        purpose: types_1.WalletPurpose.COMMISSION,
-                        reference: `autocomplete_${order.orderNumber}_${vendorId}_${Date.now()}`,
-                        description: `Auto-released payment for Order #${order.orderNumber} (7-day window)`,
-                        relatedOrder: order._id,
-                        status: 'completed',
-                        timestamp: new Date(),
-                    });
-                    await wallet.save();
-                    shipment.paidAt = new Date();
+                    await Wallet_1.default.findOneAndUpdate({ user: vendorId }, {
+                        $inc: { balance: vendorAmount, totalEarned: vendorAmount },
+                        $push: {
+                            transactions: {
+                                type: types_1.TransactionType.CREDIT,
+                                amount: vendorAmount,
+                                purpose: types_1.WalletPurpose.COMMISSION,
+                                reference: `autocomplete_${order.orderNumber}_${vendorId}`,
+                                description: `Auto-released payment for Order #${order.orderNumber} (24-hour window)`,
+                                relatedOrder: order._id,
+                                status: 'completed',
+                                timestamp: new Date(),
+                            },
+                        },
+                    }, { upsert: true });
                     logger_1.logger.info(`✅ Auto-credited ₦${vendorAmount} to vendor ${vendorId} (order ${order.orderNumber})`);
                     notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, subtotal, vendorAmount).catch(() => { });
                 }
@@ -87,28 +92,25 @@ async function runAutoComplete() {
                     const commissionRatePct = await getCommissionRate(vendorId);
                     const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
                     const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
-                    let wallet = await Wallet_1.default.findOne({ user: vendorId });
-                    if (!wallet)
-                        wallet = await Wallet_1.default.create({ user: vendorId });
-                    wallet.balance += vendorAmount;
-                    wallet.totalEarned += vendorAmount;
-                    wallet.transactions.push({
-                        type: types_1.TransactionType.CREDIT,
-                        amount: vendorAmount,
-                        purpose: types_1.WalletPurpose.COMMISSION,
-                        reference: `autocomplete_${order.orderNumber}_${vendorId}_${Date.now()}`,
-                        description: `Auto-released payment for Order #${order.orderNumber} (7-day window)`,
-                        relatedOrder: order._id,
-                        status: 'completed',
-                        timestamp: new Date(),
-                    });
-                    await wallet.save();
+                    await Wallet_1.default.findOneAndUpdate({ user: vendorId }, {
+                        $inc: { balance: vendorAmount, totalEarned: vendorAmount },
+                        $push: {
+                            transactions: {
+                                type: types_1.TransactionType.CREDIT,
+                                amount: vendorAmount,
+                                purpose: types_1.WalletPurpose.COMMISSION,
+                                reference: `autocomplete_${order.orderNumber}_${vendorId}`,
+                                description: `Auto-released payment for Order #${order.orderNumber} (24-hour window)`,
+                                relatedOrder: order._id,
+                                status: 'completed',
+                                timestamp: new Date(),
+                            },
+                        },
+                    }, { upsert: true });
                     logger_1.logger.info(`✅ Auto-credited ₦${vendorAmount} to vendor ${vendorId} (order ${order.orderNumber})`);
                     notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, subtotal, vendorAmount).catch(() => { });
                 }
             }
-            order.fundsReleased = true;
-            await order.save();
             logger_1.logger.info(`✅ Auto-complete done: order ${order.orderNumber}`);
         }
         catch (err) {

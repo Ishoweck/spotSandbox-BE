@@ -5,6 +5,17 @@ import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validation';
+import rateLimit from 'express-rate-limit';
+
+// 10 attempts per 15 minutes per IP — covers login, OTP, forgot-password
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many attempts. Please try again in 15 minutes.',
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const router = Router();
 
@@ -45,21 +56,21 @@ const guestRegisterValidation = [
 ];
 
 // Standard auth routes
-router.post('/guest-register', validate(guestRegisterValidation), asyncHandler(authController.guestRegister.bind(authController)));
-router.post('/register', validate(registerValidation), asyncHandler(authController.register.bind(authController)));
-router.post('/verify-email', asyncHandler(authController.verifyEmail.bind(authController)));
-router.post('/resend-otp', asyncHandler(authController.resendOTP.bind(authController)));
-router.post('/login', validate(loginValidation), asyncHandler(authController.login.bind(authController)));
-router.post('/forgot-password', asyncHandler(authController.forgotPassword.bind(authController)));
-router.post('/reset-password', asyncHandler(authController.resetPassword.bind(authController)));
-router.post('/refresh-token', asyncHandler(authController.refreshToken.bind(authController)));
+router.post('/guest-register', authLimiter, validate(guestRegisterValidation), asyncHandler(authController.guestRegister.bind(authController)));
+router.post('/register', authLimiter, validate(registerValidation), asyncHandler(authController.register.bind(authController)));
+router.post('/verify-email', authLimiter, asyncHandler(authController.verifyEmail.bind(authController)));
+router.post('/resend-otp', authLimiter, asyncHandler(authController.resendOTP.bind(authController)));
+router.post('/login', authLimiter, validate(loginValidation), asyncHandler(authController.login.bind(authController)));
+router.post('/forgot-password', authLimiter, asyncHandler(authController.forgotPassword.bind(authController)));
+router.post('/reset-password', authLimiter, asyncHandler(authController.resetPassword.bind(authController)));
+router.post('/refresh-token', authLimiter, asyncHandler(authController.refreshToken.bind(authController)));
 
 // OAuth routes
 router.post('/oauth/google', validate(googleLoginValidation), asyncHandler(oauthController.googleLogin.bind(oauthController)));
 router.post('/oauth/apple', validate(appleLoginValidation), asyncHandler(oauthController.appleLogin.bind(oauthController)));
 
-// Get support user (public - returns the first admin/super_admin user for chat)
-router.get('/support-user', asyncHandler(authController.getSupportUser.bind(authController)));
+// Get support user — requires auth so anonymous users can't enumerate admin IDs
+router.get('/support-user', authenticate, asyncHandler(authController.getSupportUser.bind(authController)));
 
 // Protected routes
 router.get('/me', authenticate, asyncHandler(authController.getMe.bind(authController)));

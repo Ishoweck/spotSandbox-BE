@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateLicenseKey = exports.isStrongPassword = exports.getTimeAgo = exports.calculateAverageRating = exports.generateConversationId = exports.sanitizeInput = exports.isValidPhone = exports.isValidEmail = exports.formatCurrency = exports.calculateCommission = exports.calculateDiscount = exports.generateToken = exports.getPaginationMeta = exports.generateSlug = exports.generateSKU = exports.generateAffiliateCode = exports.generateOrderNumber = exports.generateResetCode = exports.generateOTP = void 0;
+exports.generateLicenseKey = exports.isStrongPassword = exports.getTimeAgo = exports.calculateAverageRating = exports.escapeRegex = exports.generateConversationId = exports.sanitizeInput = exports.isValidPhone = exports.isValidEmail = exports.formatCurrency = exports.calculateCommission = exports.calculateDiscount = exports.generateToken = exports.getPaginationMeta = exports.generateSlug = exports.generateSKU = exports.generateAffiliateCode = exports.generateOrderNumber = exports.generateResetCode = exports.generateOTP = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 /**
  * Generate OTP code
@@ -154,6 +154,8 @@ const generateConversationId = (userId1, userId2) => {
     return `${sorted[0]}_${sorted[1]}`;
 };
 exports.generateConversationId = generateConversationId;
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+exports.escapeRegex = escapeRegex;
 /**
  * Calculate average rating
  */

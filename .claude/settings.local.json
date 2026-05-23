@@ -29,7 +29,12 @@
       "Bash(Select-Object -First 20)",
       "Bash(Format-Table FullName)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\" -Recurse -Include \"*.ts\" -File)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\\\\*.js\")",
+      "Bash(dir \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\")",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\" | Where-Object { $_.Name -ne 'node_modules' } | Select-Object Name, PSIsContainer)",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\"; npx tsc --noEmit; Write-Output \"EXIT: $LASTEXITCODE\")",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }

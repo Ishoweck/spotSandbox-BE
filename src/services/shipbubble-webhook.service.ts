@@ -18,16 +18,16 @@ export class ShipBubbleWebhookService {
    * OR directly simulates the webhook if ShipBubble sandbox is not configured
    */
   async simulateWebhook(params: WebhookSimulatorParams) {
-    const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
-
-    if (!this.isSandbox && !isDevelopment) {
-      throw new Error('Webhook simulation is only available in sandbox or development mode');
+    if (!this.isSandbox) {
+      throw new Error('Webhook simulation is only available in sandbox mode');
     }
 
     logger.info('🧪 ============================================');
     logger.info('🧪 SIMULATING SHIPBUBBLE WEBHOOK');
     logger.info('🧪 ============================================');
     logger.info('📋 Simulation params:', params);
+    const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
+
     logger.info('🔧 Environment:', {
       isSandbox: this.isSandbox,
       isDevelopment,

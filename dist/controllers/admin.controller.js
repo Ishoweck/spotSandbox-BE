@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.broadcastNotification = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getAllReviews = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
 exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAllAffiliates = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
+const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
 const User_1 = __importDefault(require("../models/User"));
 const Product_1 = __importDefault(require("../models/Product"));
@@ -512,10 +513,10 @@ exports.getAllUsers = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         filter.status = status;
     if (search) {
         filter.$or = [
-            { firstName: { $regex: search, $options: 'i' } },
-            { lastName: { $regex: search, $options: 'i' } },
-            { email: { $regex: search, $options: 'i' } },
-            { phone: { $regex: search, $options: 'i' } },
+            { firstName: { $regex: escapeRegex(search), $options: 'i' } },
+            { lastName: { $regex: escapeRegex(search), $options: 'i' } },
+            { email: { $regex: escapeRegex(search), $options: 'i' } },
+            { phone: { $regex: escapeRegex(search), $options: 'i' } },
         ];
     }
     const sortObj = { [sort]: order === 'asc' ? 1 : -1 };
@@ -680,11 +681,12 @@ exports.deleteUser = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
     }
-    // Prevent deleting super admins unless you're a super admin
-    if (user.role === types_1.UserRole.SUPER_ADMIN && req.user.role !== types_1.UserRole.SUPER_ADMIN) {
+    // Prevent deleting any admin account unless you're a super admin
+    if ((user.role === types_1.UserRole.SUPER_ADMIN || user.role === types_1.UserRole.ADMIN) &&
+        req.user.role !== types_1.UserRole.SUPER_ADMIN) {
         res.status(403).json({
             success: false,
-            message: 'Only super admins can delete other super admins',
+            message: 'Only super admins can delete admin accounts',
         });
         return;
     }
@@ -731,8 +733,8 @@ exports.getAllVendors = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     }
     if (search) {
         filter.$or = [
-            { businessName: { $regex: search, $options: 'i' } },
-            { businessEmail: { $regex: search, $options: 'i' } },
+            { businessName: { $regex: escapeRegex(search), $options: 'i' } },
+            { businessEmail: { $regex: escapeRegex(search), $options: 'i' } },
         ];
     }
     const sortObj = { [sort]: order === 'asc' ? 1 : -1 };
@@ -959,8 +961,8 @@ exports.getAllProducts = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         filter.isFeatured = true;
     if (search) {
         filter.$or = [
-            { name: { $regex: search, $options: 'i' } },
-            { sku: { $regex: search, $options: 'i' } },
+            { name: { $regex: escapeRegex(search), $options: 'i' } },
+            { sku: { $regex: escapeRegex(search), $options: 'i' } },
         ];
     }
     const sortObj = { [sort]: order === 'asc' ? 1 : -1 };
@@ -1141,8 +1143,8 @@ exports.getAllOrders = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         filter.paymentMethod = paymentMethod;
     if (search) {
         filter.$or = [
-            { orderNumber: { $regex: search, $options: 'i' } },
-            { paymentReference: { $regex: search, $options: 'i' } },
+            { orderNumber: { $regex: escapeRegex(search), $options: 'i' } },
+            { paymentReference: { $regex: escapeRegex(search), $options: 'i' } },
         ];
     }
     if (startDate || endDate) {
@@ -1393,8 +1395,8 @@ exports.getAllTransactions = (0, ayncHandler_1.asyncHandler)(async (req, res) =>
         matchStage['transactions.status'] = status;
     if (search) {
         matchStage.$or = [
-            { 'transactions.reference': { $regex: search, $options: 'i' } },
-            { 'transactions.description': { $regex: search, $options: 'i' } },
+            { 'transactions.reference': { $regex: escapeRegex(search), $options: 'i' } },
+            { 'transactions.description': { $regex: escapeRegex(search), $options: 'i' } },
         ];
     }
     if (startDate || endDate) {
@@ -1525,42 +1527,46 @@ exports.processWithdrawal = (0, ayncHandler_1.asyncHandler)(async (req, res) => 
         });
         return;
     }
-    const wallet = await Wallet_1.default.findById(walletId);
+    // Pre-read to get the transaction amount for the atomic update
+    const walletRead = await Wallet_1.default.findOne({
+        _id: walletId,
+        transactions: { $elemMatch: { _id: transactionId, purpose: types_1.WalletPurpose.WITHDRAWAL } },
+    });
+    if (!walletRead) {
+        res.status(404).json({ success: false, message: 'Wallet or withdrawal transaction not found' });
+        return;
+    }
+    const txn = walletRead.transactions.id(transactionId);
+    if (txn.status !== 'pending') {
+        res.status(400).json({ success: false, message: 'Transaction is not a pending withdrawal' });
+        return;
+    }
+    const txnAmount = txn.amount;
+    const newStatus = action === 'approve' ? 'completed' : 'failed';
+    // Atomic: only update if transaction is still 'pending' — prevents double-processing
+    const wallet = await Wallet_1.default.findOneAndUpdate({
+        _id: walletId,
+        transactions: { $elemMatch: { _id: txn._id, status: 'pending', purpose: types_1.WalletPurpose.WITHDRAWAL } },
+    }, {
+        $set: { 'transactions.$.status': newStatus },
+        $inc: {
+            pendingBalance: -txnAmount,
+            ...(action === 'approve' ? { totalWithdrawn: txnAmount } : { balance: txnAmount }),
+        },
+    }, { new: true });
     if (!wallet) {
-        res.status(404).json({ success: false, message: 'Wallet not found' });
+        res.status(400).json({ success: false, message: 'Transaction already processed' });
         return;
     }
-    const transaction = wallet.transactions.id(transactionId);
-    if (!transaction) {
-        res.status(404).json({ success: false, message: 'Transaction not found' });
-        return;
-    }
-    if (transaction.purpose !== types_1.WalletPurpose.WITHDRAWAL || transaction.status !== 'pending') {
-        res.status(400).json({
-            success: false,
-            message: 'Transaction is not a pending withdrawal',
-        });
-        return;
-    }
-    if (action === 'approve') {
-        transaction.status = 'completed';
-        wallet.totalWithdrawn += transaction.amount;
-    }
-    else {
-        transaction.status = 'failed';
-        wallet.balance += transaction.amount;
-        wallet.pendingBalance -= transaction.amount;
-    }
-    await wallet.save();
     // Notify user
-    await notification_service_1.notificationService.walletWithdrawalProcessed(wallet.user.toString(), transaction.amount, action === 'approve' ? 'completed' : 'failed');
+    await notification_service_1.notificationService.walletWithdrawalProcessed(wallet.user.toString(), txnAmount, action === 'approve' ? 'completed' : 'failed');
     res.json({
         success: true,
         message: `Withdrawal ${action === 'approve' ? 'approved' : 'rejected'} successfully`,
         data: {
             transactionId,
-            amount: transaction.amount,
-            status: transaction.status,
+            amount: txnAmount,
+            status: newStatus,
         },
     });
 });

@@ -68,6 +68,9 @@ class AuthController {
         // Generate OTP
         const otpCode = (0, helpers_1.generateOTP)();
         const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        // Only allow self-registration as customer, vendor, or affiliate — never admin
+        const allowedSelfRegistrationRoles = [types_1.UserRole.CUSTOMER, types_1.UserRole.VENDOR, types_1.UserRole.AFFILIATE];
+        const safeRole = allowedSelfRegistrationRoles.includes(role) ? role : types_1.UserRole.CUSTOMER;
         // Create user
         const user = await User_1.default.create({
             firstName,
@@ -75,7 +78,7 @@ class AuthController {
             email,
             phone,
             password,
-            role: role || types_1.UserRole.CUSTOMER,
+            role: safeRole,
             otp: {
                 code: otpCode,
                 expiresAt: otpExpiry,
@@ -165,7 +168,10 @@ class AuthController {
         if (user.emailVerified) {
             throw new error_1.AppError('Email already verified', 400);
         }
-        if (!user.otp || user.otp.code !== otp) {
+        const otpMatch = user.otp &&
+            user.otp.code.length === String(otp).length &&
+            crypto_1.default.timingSafeEqual(Buffer.from(user.otp.code), Buffer.from(String(otp)));
+        if (!otpMatch) {
             throw new error_1.AppError('Invalid OTP', 400);
         }
         if (user.otp.expiresAt && user.otp.expiresAt < new Date()) {
@@ -426,32 +432,26 @@ class AuthController {
      * Reset password with OTP code
      */
     async resetPassword(req, res) {
-        console.log('🔍 Reset password request body:', JSON.stringify(req.body, null, 2));
         const { code, password, token } = req.body;
         // Accept both 'code' and 'token' for backwards compatibility
         const resetCode = code || token;
         if (!resetCode || !password) {
-            console.log('❌ Missing fields - code:', !!resetCode, 'password:', !!password);
             throw new error_1.AppError('Reset code and new password are required', 400);
         }
         const normalizedCode = resetCode.trim();
-        console.log('🔐 Normalized code:', normalizedCode);
         const hashedCode = crypto_1.default.createHash('sha256').update(normalizedCode).digest('hex');
         const user = await User_1.default.findOne({
             resetPasswordToken: hashedCode,
             resetPasswordExpires: { $gt: Date.now() },
         });
         if (!user) {
-            console.log('❌ No user found with valid reset code');
             throw new error_1.AppError('Invalid or expired reset code', 400);
         }
-        console.log('✅ User found:', user.email);
         // Update password
         user.password = password;
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
         await user.save();
-        console.log(`✅ Password reset successful for ${user.email}`);
         res.json({
             success: true,
             message: 'Password reset successful',
@@ -466,9 +466,12 @@ class AuthController {
             throw new error_1.AppError('Refresh token required', 400);
         }
         const decoded = (0, jwt_1.verifyRefreshToken)(refreshToken);
-        const user = await User_1.default.findById(decoded.id);
+        const user = await User_1.default.findById(decoded.id).select('status email role');
         if (!user) {
             throw new error_1.AppError('User not found', 404);
+        }
+        if (user.status === 'suspended' || user.status === 'inactive') {
+            throw new error_1.AppError('Your account is not active. Please contact support.', 403);
         }
         // Generate new tokens
         const tokens = (0, jwt_1.generateTokens)(user._id, user.email, user.role);

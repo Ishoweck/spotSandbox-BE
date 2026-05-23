@@ -225,13 +225,110 @@ Here's everything you know about VendorSpot:
 - For urgent issues, suggest contacting support@vendorspotng.com
 - Keep responses concise and actionable — vendors are busy people`;
 
+const ADMIN_SUGGEST_SYSTEM_PROMPT = `You are a support agent assistant for VendorSpot, a 100% secure and trusted Nigerian e-commerce marketplace.
+
+VendorSpot platform context:
+- Customers shop physical and digital products from KYC-verified vendors
+- Vendors manage products, orders, and earnings; platform fee is 8% (premium vendors pay 5%)
+- Payments via Paystack and Flutterwave only — NO Cash on Delivery
+- Wallet: balance, pending balance, withdrawals (min ₦1,000, admin-approved)
+- Order flow: Pending → Confirmed → Processing → Shipped → Delivered
+- Disputes: filed within 7 days of delivery, resolved within 24 hours
+- KYC: NIN required; optional CAC, Utility Bill, Passport, Social Media
+- OTP for sign-in; email verification links expire in 30 minutes
+- Rewards: points from purchases/sales, tiers Bronze → Silver → Gold → Platinum → Diamond
+- Account suspension happens when activity violates community guidelines
+
+Your job is to suggest 3 different reply options a support admin could send to the user. Each suggestion should take a different angle (e.g. one empathetic/reassuring, one action-focused with clear steps, one requesting more information to investigate further).
+
+Rules:
+- Use the user's first name naturally in every reply
+- Be warm, professional, and concise
+- Use Nigerian Naira (₦) for any currency references
+- Never invent specific order IDs, amounts, or dates — use placeholders if needed
+- Return ONLY valid JSON, no markdown, no extra text
+
+Required format:
+{ "suggestions": [
+  { "title": "3-5 word label", "reply": "Full reply the admin will send" },
+  { "title": "3-5 word label", "reply": "Full reply the admin will send" },
+  { "title": "3-5 word label", "reply": "Full reply the admin will send" },
+  { "title": "3-5 word label", "reply": "Full reply the admin will send" },
+  { "title": "3-5 word label", "reply": "Full reply the admin will send" }
+]}`;
+
 class AIChatController {
+  async adminSuggest(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    try {
+      const { messages, userRole, userName } = req.body;
+
+      if (!Array.isArray(messages) || messages.length === 0) {
+        throw new AppError('Messages are required', 400);
+      }
+
+      const safeMessages = (messages as any[])
+        .filter((m) => (m.role === 'user' || m.role === 'admin') && typeof m.content === 'string')
+        .slice(-20)
+        .map((m) => ({
+          role: m.role as 'user' | 'admin',
+          content: String(m.content).slice(0, 500),
+        }));
+
+      const conversationText = safeMessages
+        .map((m) => `${m.role === 'user' ? `${userName || 'User'} (${userRole || 'customer'})` : 'Admin'}: ${m.content}`)
+        .join('\n');
+
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+      const completion = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: ADMIN_SUGGEST_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: `User name: ${userName || 'there'}\nUser type: ${userRole || 'customer'}\n\nConversation:\n${conversationText}\n\nGenerate 5 reply suggestions for the support admin.`,
+          },
+        ],
+        max_tokens: 1500,
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+      });
+
+      const raw = completion.choices[0]?.message?.content?.trim() || '{}';
+
+      let suggestions: { title: string; reply: string }[] = [];
+      try {
+        const parsed = JSON.parse(raw);
+        const arr = Array.isArray(parsed) ? parsed : (parsed.suggestions || []);
+        suggestions = arr
+          .filter((s: any) => s && typeof s.title === 'string' && typeof s.reply === 'string')
+          .slice(0, 5);
+      } catch {
+        suggestions = [];
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Suggestions generated',
+        data: { suggestions },
+      });
+    } catch (error: any) {
+      if (error instanceof AppError) throw error;
+      console.error('AI suggest error:', error);
+      throw new AppError('Failed to generate suggestions', 500);
+    }
+  }
+
   async chat(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     try {
       const { message, history, role } = req.body;
 
       if (!message || typeof message !== 'string' || !message.trim()) {
         throw new AppError('Message is required', 400);
+      }
+
+      if (message.length > 2000) {
+        throw new AppError('Message is too long (max 2000 characters)', 400);
       }
 
       const isFirstMessage = !history || !Array.isArray(history) || history.length === 0;
@@ -250,12 +347,16 @@ class AIChatController {
         { role: 'system', content: systemPrompt },
       ];
 
-      // Add conversation history (last 10 messages to keep context manageable)
+      // Add conversation history — only accept known roles, cap each message at 500 chars
+      // to prevent prompt injection via crafted history entries
       if (history && Array.isArray(history)) {
         const recentHistory = history.slice(-10);
         for (const msg of recentHistory) {
           if (msg.role === 'user' || msg.role === 'assistant') {
-            messages.push({ role: msg.role, content: msg.content });
+            const safeContent = typeof msg.content === 'string'
+              ? msg.content.slice(0, 500)
+              : '';
+            if (safeContent) messages.push({ role: msg.role, content: safeContent });
           }
         }
       }

@@ -14,7 +14,19 @@ export class WebhookController {
     logger.info('📨 ============================================');
     logger.info('📨 SHIPBUBBLE WEBHOOK RECEIVED');
     logger.info('📨 ============================================');
-    
+
+    // Verify webhook authenticity using shared secret
+    const webhookSecret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const incoming = req.headers['x-shipbubble-signature'] || req.headers['authorization'];
+      const expected = `Bearer ${webhookSecret}`;
+      if (!incoming || incoming !== expected) {
+        logger.warn('🚫 ShipBubble webhook rejected — invalid signature');
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+      }
+    }
+
     const webhookData = req.body;
     
     logger.info('📦 Webhook payload:', {

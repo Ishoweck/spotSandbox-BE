@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit';
 import connectDB from './config/database';
 import routes from './routes';
 import { errorHandler, notFound } from './middleware/error';
+import { mongoSanitize } from './middleware/validation';
 import { logger } from './utils/logger';
 import { initializeSocket } from './config/socket';
 import { setSocketInstance } from './services/notification.service';
@@ -53,13 +54,32 @@ app.use((req, res, next) => {
 // ============================================================
 // BODY PARSER - ONLY ONCE with 50MB limit
 // ============================================================
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Upload routes handle their own large payloads (base64 images) — everything else is capped at 1MB
+app.use((req, res, next) => {
+  const isUploadRoute =
+    req.path.startsWith('/api/v1/upload') ||
+    req.path.startsWith('/api/v1/products');
+  express.json({ limit: isUploadRoute ? '50mb' : '1mb' })(req, res, next);
+});
+app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
 // Security middleware
 app.use(helmet());
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true,
 }));
 
@@ -77,6 +97,9 @@ const limiter = rateLimit({
   keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
 });
 app.use('/api', limiter);
+
+// Strip MongoDB operator keys ($gt, $where, etc.) from all request inputs
+app.use(mongoSanitize);
 
 // Compression
 app.use(compression());

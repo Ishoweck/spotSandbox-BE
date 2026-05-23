@@ -3,6 +3,7 @@ import http from 'http';
 import { verifyAccessToken } from '../utils/jwt';
 import { messageService } from '../services/message.service';
 import { logger } from '../utils/logger';
+import User from '../models/User';
 
 // Track online users: userId -> Set of socketIds (supports multiple devices)
 const onlineUsers = new Map<string, Set<string>>();
@@ -28,7 +29,7 @@ export const initializeSocket = (server: http.Server): SocketServer => {
   });
 
   // Authentication middleware — verify JWT on connection
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth.token || socket.handshake.query.token;
 
@@ -37,10 +38,17 @@ export const initializeSocket = (server: http.Server): SocketServer => {
       }
 
       const decoded = verifyAccessToken(token as string);
+
+      // Re-validate user status against DB — catches suspended/deleted accounts
+      const dbUser = await User.findById(decoded.id).select('status role').lean();
+      if (!dbUser || dbUser.status === 'suspended' || dbUser.status === 'inactive') {
+        return next(new Error('Account is suspended or inactive'));
+      }
+
       (socket as any).user = {
         id: decoded.id,
         email: decoded.email,
-        role: decoded.role,
+        role: dbUser.role,
       };
 
       next();

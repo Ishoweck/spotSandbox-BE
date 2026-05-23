@@ -78,11 +78,11 @@ router.post(
   asyncHandler(productController.createProduct.bind(productController))
 );
 
-// Toggle flash sale on a product (vendor only, must have >=10% discount)
+// Toggle flash sale on a product (admin only)
 router.put(
   '/:id/flash-sale',
   authenticate,
-  authorize(UserRole.VENDOR, UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
   asyncHandler(productController.toggleFlashSale.bind(productController))
 );
 

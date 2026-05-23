@@ -15,6 +15,7 @@ const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const database_1 = __importDefault(require("./config/database"));
 const routes_1 = __importDefault(require("./routes"));
 const error_1 = require("./middleware/error");
+const validation_1 = require("./middleware/validation");
 const logger_1 = require("./utils/logger");
 const socket_1 = require("./config/socket");
 const notification_service_1 = require("./services/notification.service");
@@ -50,12 +51,29 @@ app.use((req, res, next) => {
 // ============================================================
 // BODY PARSER - ONLY ONCE with 50MB limit
 // ============================================================
-app.use(express_1.default.json({ limit: '50mb' }));
-app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
+// Upload routes handle their own large payloads (base64 images) — everything else is capped at 1MB
+app.use((req, res, next) => {
+    const isUploadRoute = req.path.startsWith('/api/v1/upload') ||
+        req.path.startsWith('/api/v1/products');
+    express_1.default.json({ limit: isUploadRoute ? '50mb' : '1mb' })(req, res, next);
+});
+app.use(express_1.default.urlencoded({ limit: '1mb', extended: true }));
 // Security middleware
 app.use((0, helmet_1.default)());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
 app.use((0, cors_1.default)({
-    origin: '*',
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, Postman, server-to-server)
+        if (!origin)
+            return callback(null, true);
+        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
     credentials: true,
 }));
 // ============================================================
@@ -72,6 +90,8 @@ const limiter = (0, express_rate_limit_1.default)({
     keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
 });
 app.use('/api', limiter);
+// Strip MongoDB operator keys ($gt, $where, etc.) from all request inputs
+app.use(validation_1.mongoSanitize);
 // Compression
 app.use((0, compression_1.default)());
 // Logging

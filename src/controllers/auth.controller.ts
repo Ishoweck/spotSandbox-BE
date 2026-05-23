@@ -35,6 +35,10 @@ export class AuthController {
     const otpCode = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+    // Only allow self-registration as customer, vendor, or affiliate — never admin
+    const allowedSelfRegistrationRoles = [UserRole.CUSTOMER, UserRole.VENDOR, UserRole.AFFILIATE];
+    const safeRole = allowedSelfRegistrationRoles.includes(role) ? role : UserRole.CUSTOMER;
+
     // Create user
     const user = await User.create({
       firstName,
@@ -42,7 +46,7 @@ export class AuthController {
       email,
       phone,
       password,
-      role: role || UserRole.CUSTOMER,
+      role: safeRole,
       otp: {
         code: otpCode,
         expiresAt: otpExpiry,
@@ -149,7 +153,10 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     throw new AppError('Email already verified', 400);
   }
 
-  if (!user.otp || user.otp.code !== otp) {
+  const otpMatch = user.otp &&
+    user.otp.code.length === String(otp).length &&
+    crypto.timingSafeEqual(Buffer.from(user.otp.code), Buffer.from(String(otp)));
+  if (!otpMatch) {
     throw new AppError('Invalid OTP', 400);
   }
 
@@ -453,20 +460,16 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
    * Reset password with OTP code
    */
   async resetPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    console.log('🔍 Reset password request body:', JSON.stringify(req.body, null, 2));
-
     const { code, password, token } = req.body;
 
     // Accept both 'code' and 'token' for backwards compatibility
     const resetCode = code || token;
 
     if (!resetCode || !password) {
-      console.log('❌ Missing fields - code:', !!resetCode, 'password:', !!password);
       throw new AppError('Reset code and new password are required', 400);
     }
 
     const normalizedCode = resetCode.trim();
-    console.log('🔐 Normalized code:', normalizedCode);
 
     const hashedCode = crypto.createHash('sha256').update(normalizedCode).digest('hex');
 
@@ -476,19 +479,14 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
     });
 
     if (!user) {
-      console.log('❌ No user found with valid reset code');
       throw new AppError('Invalid or expired reset code', 400);
     }
-
-    console.log('✅ User found:', user.email);
 
     // Update password
     user.password = password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
-
-    console.log(`✅ Password reset successful for ${user.email}`);
 
     res.json({
       success: true,
@@ -507,9 +505,13 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
 
     const decoded = verifyRefreshToken(refreshToken);
 
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).select('status email role');
     if (!user) {
       throw new AppError('User not found', 404);
+    }
+
+    if (user.status === 'suspended' || user.status === 'inactive') {
+      throw new AppError('Your account is not active. Please contact support.', 403);
     }
 
     // Generate new tokens

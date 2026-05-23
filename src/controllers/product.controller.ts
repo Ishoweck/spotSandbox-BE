@@ -6,7 +6,7 @@ import Category from '../models/Category';
 import VendorProfile from '../models/VendorProfile';
 import Groq from 'groq-sdk';
 import { AppError } from '../middleware/error';
-import { getPaginationMeta, generateSlug, generateSKU } from '../utils/helpers';
+import { getPaginationMeta, generateSlug, generateSKU, escapeRegex } from '../utils/helpers';
 import { uploadMultipleToCloudinary, uploadDigitalFileToCloudinary, uploadToCloudinary } from '../utils/cloudinary';
 import { notificationService } from '../services/notification.service';
 
@@ -31,6 +31,21 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
     }
 
     const isDraft = productData.status === 'draft';
+
+    // Validate price and quantity
+    if (productData.price !== undefined && productData.price <= 0) {
+      throw new AppError('Price must be greater than 0', 400);
+    }
+    if (
+      productData.compareAtPrice !== undefined &&
+      productData.price !== undefined &&
+      productData.compareAtPrice <= productData.price
+    ) {
+      throw new AppError('Compare-at price must be greater than the selling price', 400);
+    }
+    if (productData.quantity !== undefined && productData.quantity < 0) {
+      throw new AppError('Quantity cannot be negative', 400);
+    }
 
     // Generate slug and SKU
     productData.slug = generateSlug(productData.name);
@@ -305,9 +320,10 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     }
     
     if (req.query.search) {
+      const safeSearch = escapeRegex(req.query.search as string);
       filter.$or = [
-        { name: { $regex: req.query.search, $options: 'i' } },
-        { description: { $regex: req.query.search, $options: 'i' } }
+        { name: { $regex: safeSearch, $options: 'i' } },
+        { description: { $regex: safeSearch, $options: 'i' } },
       ];
     }
 
@@ -909,6 +925,22 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     }
 
     const oldPrice = product.price;
+
+    // Validate price and quantity when supplied
+    if (req.body.price !== undefined && req.body.price <= 0) {
+      throw new AppError('Price must be greater than 0', 400);
+    }
+    if (req.body.quantity !== undefined && req.body.quantity < 0) {
+      throw new AppError('Quantity cannot be negative', 400);
+    }
+    const effectivePrice = req.body.price ?? product.price;
+    const effectiveCompare = req.body.compareAtPrice ?? product.compareAtPrice;
+    if (
+      effectiveCompare !== undefined &&
+      effectiveCompare <= effectivePrice
+    ) {
+      throw new AppError('Compare-at price must be greater than the selling price', 400);
+    }
 
     // Upload any new base64 images to Cloudinary before saving
     if (req.body.images && Array.isArray(req.body.images) && req.body.images.length > 0) {

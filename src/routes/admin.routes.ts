@@ -106,6 +106,8 @@ import {
   updateAppVersionConfig,
 } from '../controllers/admin.controller';
 import { auditMiddleware } from '../middleware/audit';
+import { asyncHandler } from '../middleware/error';
+import { aiChatController } from '../controllers/ai-chat.controller';
 
 const router = Router();
 
@@ -262,5 +264,10 @@ router.get('/search', authorize(...allAdmins), globalSearch);
 // ================================================================
 router.get('/app-version', authorize(...allAdmins), getAppVersionConfig);
 router.put('/app-version', authorize(...generalAdmins), updateAppVersionConfig);
+
+// ================================================================
+// AI SUPPORT SUGGESTIONS
+// ================================================================
+router.post('/ai/suggest', authorize(...allAdmins), asyncHandler(aiChatController.adminSuggest.bind(aiChatController)));
 
 export default router;

@@ -52,7 +52,12 @@ export class CartController {
    * Add item to cart
    */
   async addToCart(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { productId, quantity, variant } = req.body;
+    const { productId, variant } = req.body;
+    const quantity = parseInt(req.body.quantity, 10);
+
+    if (!quantity || quantity < 1 || quantity > 1000) {
+      throw new AppError('Quantity must be between 1 and 1000', 400);
+    }
 
     // Validate product
     const product = await Product.findById(productId);

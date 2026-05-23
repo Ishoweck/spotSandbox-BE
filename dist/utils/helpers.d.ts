@@ -66,6 +66,7 @@ export declare const sanitizeInput: (input: string) => string;
  * Generate conversation ID for chat
  */
 export declare const generateConversationId: (userId1: string, userId2: string) => string;
+export declare const escapeRegex: (str: string) => string;
 /**
  * Calculate average rating
  */

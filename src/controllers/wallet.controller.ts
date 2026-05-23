@@ -134,24 +134,36 @@ export class WalletController {
       if (verification.data.status === 'success') {
         const amount = verification.data.amount / 100; // Convert from kobo
 
-        // Update wallet
-        let wallet = await Wallet.findOne({ user: req.user?.id });
-        if (!wallet) {
-          wallet = await Wallet.create({ user: req.user?.id });
-        }
+        // Atomic: credit only if this reference has not already been processed — prevents double-credit on concurrent verify calls
+        const wallet = await Wallet.findOneAndUpdate(
+          {
+            user: req.user?.id,
+            $nor: [{ transactions: { $elemMatch: { reference, status: 'completed' } } }],
+          },
+          {
+            $inc: { balance: amount, totalEarned: amount },
+            $push: {
+              transactions: {
+                type: TransactionType.CREDIT,
+                amount,
+                purpose: WalletPurpose.TOP_UP,
+                reference,
+                description: 'Wallet top-up via Paystack',
+                status: 'completed',
+                timestamp: new Date(),
+              },
+            },
+          },
+          { new: true }
+        );
 
-        wallet.balance += amount;
-        wallet.totalEarned += amount;
-        wallet.transactions.push({
-          type: TransactionType.CREDIT,
-          amount,
-          purpose: WalletPurpose.TOP_UP,
-          reference,
-          description: 'Wallet top-up via Paystack',
-          status: 'completed',
-          timestamp: new Date(),
-        });
-        await wallet.save();
+        if (!wallet) {
+          // Either wallet not found or reference already credited
+          const existingWallet = await Wallet.findOne({ user: req.user?.id });
+          if (!existingWallet) throw new AppError('Wallet not found', 404);
+          res.json({ success: true, message: 'Payment already credited', data: { wallet: existingWallet } });
+          return;
+        }
 
         logger.info(`Wallet top-up verified: ${reference} - ₦${amount}`);
 
@@ -186,28 +198,31 @@ export class WalletController {
       throw new AppError('Minimum withdrawal amount is ₦1,000', 400);
     }
 
-    const wallet = await Wallet.findOne({ user: req.user?.id });
-    if (!wallet) {
-      throw new AppError('Wallet not found', 404);
-    }
+    const reference = `WD-${generateOrderNumber()}`;
 
-    if (wallet.balance < amount) {
+    // Atomic: deduct balance only if sufficient funds exist — prevents double-spend on concurrent clicks
+    const wallet = await Wallet.findOneAndUpdate(
+      { user: req.user?.id, balance: { $gte: amount } },
+      {
+        $inc: { balance: -amount, pendingBalance: amount },
+        $push: {
+          transactions: {
+            type: TransactionType.DEBIT,
+            amount,
+            purpose: WalletPurpose.WITHDRAWAL,
+            reference,
+            description: 'Withdrawal request',
+            status: 'pending',
+            timestamp: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!wallet) {
       throw new AppError('Insufficient wallet balance', 400);
     }
-
-    // Deduct from balance and add to pending
-    wallet.balance -= amount;
-    wallet.pendingBalance += amount;
-    wallet.transactions.push({
-      type: TransactionType.DEBIT,
-      amount,
-      purpose: WalletPurpose.WITHDRAWAL,
-      reference: `WD-${generateOrderNumber()}`,
-      description: 'Withdrawal request',
-      status: 'pending',
-      timestamp: new Date(),
-    });
-    await wallet.save();
 
     logger.info(`Withdrawal requested: ${req.user?.id} - ₦${amount}`);
 
@@ -232,43 +247,51 @@ export class WalletController {
     const { transactionId, status } = req.body;
     const { userId } = req.params;
 
-    const wallet = await Wallet.findOne({ user: userId });
-    if (!wallet) {
+    // Read first to get the transaction amount (needed for the atomic update)
+    const walletRead = await Wallet.findOne({ user: userId });
+    if (!walletRead) {
       throw new AppError('Wallet not found', 404);
     }
 
-    const transaction = wallet.transactions.find(
-      (t: any) => t._id.toString() === transactionId
-    );
-    if (!transaction) {
+    const txn = walletRead.transactions.find((t: any) => t._id.toString() === transactionId);
+    if (!txn) {
       throw new AppError('Transaction not found', 404);
     }
 
-    if (transaction.status !== 'pending') {
+    if (txn.status !== 'pending') {
       throw new AppError('Transaction already processed', 400);
     }
 
-    if (status === 'completed') {
-      transaction.status = 'completed';
-      wallet.pendingBalance -= transaction.amount;
-      wallet.totalWithdrawn += transaction.amount;
+    const txnAmount = (txn as any).amount;
 
-      logger.info(`Withdrawal completed: ${userId} - ₦${transaction.amount}`);
-    } else if (status === 'failed') {
-      transaction.status = 'failed';
-      wallet.balance += transaction.amount;
-      wallet.pendingBalance -= transaction.amount;
+    // Atomic: only update if transaction is still 'pending' — prevents double-processing by concurrent admin requests
+    const wallet = await Wallet.findOneAndUpdate(
+      {
+        user: userId,
+        transactions: { $elemMatch: { _id: (txn as any)._id, status: 'pending' } },
+      },
+      {
+        $set: { 'transactions.$.status': status },
+        $inc: {
+          pendingBalance: -txnAmount,
+          ...(status === 'completed' ? { totalWithdrawn: txnAmount } : {}),
+          ...(status === 'failed' ? { balance: txnAmount } : {}),
+        },
+      },
+      { new: true }
+    );
 
-      logger.info(`Withdrawal failed: ${userId} - ₦${transaction.amount}`);
+    if (!wallet) {
+      throw new AppError('Transaction already processed', 400);
     }
 
-    await wallet.save();
+    logger.info(`Withdrawal ${status}: ${userId} - ₦${txnAmount}`);
 
     // Notify user about withdrawal status
     try {
       await notificationService.walletWithdrawalProcessed(
         userId,
-        transaction.amount,
+        txnAmount,
         status as 'completed' | 'failed'
       );
     } catch (error) {
@@ -336,13 +359,7 @@ export class WalletController {
       throw new AppError('Minimum transfer amount is ₦100', 400);
     }
 
-    // Get sender wallet
-    const senderWallet = await Wallet.findOne({ user: req.user?.id });
-    if (!senderWallet || senderWallet.balance < amount) {
-      throw new AppError('Insufficient balance', 400);
-    }
-
-    // Get recipient
+    // Get recipient first (needed for description)
     const recipient = await User.findOne({ email: recipientEmail });
     if (!recipient) {
       throw new AppError('Recipient not found', 404);
@@ -352,41 +369,74 @@ export class WalletController {
       throw new AppError('Cannot transfer to yourself', 400);
     }
 
-    // Get or create recipient wallet
-    let recipientWallet = await Wallet.findOne({ user: recipient._id });
-    if (!recipientWallet) {
-      recipientWallet = await Wallet.create({ user: recipient._id });
-    }
-
     const reference = `TF-${generateOrderNumber()}`;
 
-    // Deduct from sender
-    senderWallet.balance -= amount;
-    senderWallet.totalSpent += amount;
-    senderWallet.transactions.push({
-      type: TransactionType.DEBIT,
-      amount,
-      purpose: WalletPurpose.WITHDRAWAL,
-      reference,
-      description: description || `Transfer to ${recipient.firstName} ${recipient.lastName}`,
-      status: 'completed',
-      timestamp: new Date(),
-    });
-    await senderWallet.save();
+    // Atomic: deduct from sender only if sufficient balance — prevents double-spend on concurrent transfers
+    const senderWallet = await Wallet.findOneAndUpdate(
+      { user: req.user?.id, balance: { $gte: amount } },
+      {
+        $inc: { balance: -amount, totalSpent: amount },
+        $push: {
+          transactions: {
+            type: TransactionType.DEBIT,
+            amount,
+            purpose: WalletPurpose.WITHDRAWAL,
+            reference,
+            description: description || `Transfer to ${recipient.firstName} ${recipient.lastName}`,
+            status: 'completed',
+            timestamp: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
 
-    // Credit recipient
-    recipientWallet.balance += amount;
-    recipientWallet.totalEarned += amount;
-    recipientWallet.transactions.push({
-      type: TransactionType.CREDIT,
-      amount,
-      purpose: WalletPurpose.REWARD,
-      reference,
-      description: description || `Transfer from ${req.user?.email}`,
-      status: 'completed',
-      timestamp: new Date(),
-    });
-    await recipientWallet.save();
+    if (!senderWallet) {
+      throw new AppError('Insufficient balance', 400);
+    }
+
+    // Credit recipient — refund sender atomically if this step fails
+    let recipientWallet: any;
+    try {
+      recipientWallet = await Wallet.findOneAndUpdate(
+        { user: recipient._id },
+        {
+          $inc: { balance: amount, totalEarned: amount },
+          $push: {
+            transactions: {
+              type: TransactionType.CREDIT,
+              amount,
+              purpose: WalletPurpose.REWARD,
+              reference,
+              description: description || `Transfer from ${req.user?.email}`,
+              status: 'completed',
+              timestamp: new Date(),
+            },
+          },
+        },
+        { upsert: true, new: true }
+      );
+    } catch (recipientErr) {
+      logger.error('Transfer recipient credit failed — refunding sender:', recipientErr);
+      await Wallet.findOneAndUpdate(
+        { user: req.user?.id },
+        {
+          $inc: { balance: amount, totalSpent: -amount },
+          $push: {
+            transactions: {
+              type: TransactionType.CREDIT,
+              amount,
+              purpose: WalletPurpose.REWARD,
+              reference: `REFUND-${reference}`,
+              description: 'Transfer refunded (recipient credit failed)',
+              status: 'completed',
+              timestamp: new Date(),
+            },
+          },
+        }
+      );
+      throw new AppError('Transfer failed. Your balance has been refunded.', 500);
+    }
 
     logger.info(`Fund transfer: ${req.user?.email} -> ${recipientEmail} - ₦${amount}`);
 

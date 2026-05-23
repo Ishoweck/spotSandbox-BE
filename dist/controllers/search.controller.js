@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchController = exports.SearchController = void 0;
 const Product_1 = __importDefault(require("../models/Product"));
 const Category_1 = __importDefault(require("../models/Category"));
+const helpers_1 = require("../utils/helpers");
 class SearchController {
     /**
      * Advanced product search
@@ -20,10 +21,11 @@ class SearchController {
         const filter = { status: 'active' };
         // Text search
         if (q) {
+            const safeQ = (0, helpers_1.escapeRegex)(q);
             filter.$or = [
-                { name: { $regex: q, $options: 'i' } },
-                { description: { $regex: q, $options: 'i' } },
-                { tags: { $in: [new RegExp(q, 'i')] } },
+                { name: { $regex: safeQ, $options: 'i' } },
+                { description: { $regex: safeQ, $options: 'i' } },
+                { tags: { $in: [new RegExp(safeQ, 'i')] } },
             ];
         }
         // Category filter
@@ -122,11 +124,12 @@ class SearchController {
             });
             return;
         }
+        const safeQ = (0, helpers_1.escapeRegex)(q);
         const products = await Product_1.default.find({
             status: 'active',
             $or: [
-                { name: { $regex: q, $options: 'i' } },
-                { tags: { $in: [new RegExp(q, 'i')] } },
+                { name: { $regex: safeQ, $options: 'i' } },
+                { tags: { $in: [new RegExp(safeQ, 'i')] } },
             ],
         })
             .select('name slug')

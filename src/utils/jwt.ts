@@ -1,11 +1,19 @@
 import jwt from 'jsonwebtoken';
 import { Types } from 'mongoose';
 import { UserRole } from '../types';
+import dotenv from "dotenv"
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your_refresh_secret';
+
+dotenv.config()
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+
+if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+  throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be defined in environment variables');
+}
 
 export interface TokenPayload {
   id: string;

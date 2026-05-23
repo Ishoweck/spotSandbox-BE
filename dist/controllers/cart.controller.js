@@ -50,7 +50,11 @@ class CartController {
      * Add item to cart
      */
     async addToCart(req, res) {
-        const { productId, quantity, variant } = req.body;
+        const { productId, variant } = req.body;
+        const quantity = parseInt(req.body.quantity, 10);
+        if (!quantity || quantity < 1 || quantity > 1000) {
+            throw new error_1.AppError('Quantity must be between 1 and 1000', 400);
+        }
         // Validate product
         const product = await Product_1.default.findById(productId);
         if (!product) {

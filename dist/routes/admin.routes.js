@@ -5,6 +5,8 @@ const auth_1 = require("../middleware/auth");
 const types_1 = require("../types");
 const admin_controller_1 = require("../controllers/admin.controller");
 const audit_1 = require("../middleware/audit");
+const error_1 = require("../middleware/error");
+const ai_chat_controller_1 = require("../controllers/ai-chat.controller");
 const router = (0, express_1.Router)();
 // All admin routes require authentication
 router.use(auth_1.authenticate);
@@ -137,5 +139,9 @@ router.get('/search', (0, auth_1.authorize)(...allAdmins), admin_controller_1.gl
 // ================================================================
 router.get('/app-version', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getAppVersionConfig);
 router.put('/app-version', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.updateAppVersionConfig);
+// ================================================================
+// AI SUPPORT SUGGESTIONS
+// ================================================================
+router.post('/ai/suggest', (0, auth_1.authorize)(...allAdmins), (0, error_1.asyncHandler)(ai_chat_controller_1.aiChatController.adminSuggest.bind(ai_chat_controller_1.aiChatController)));
 exports.default = router;
 //# sourceMappingURL=admin.routes.js.map

@@ -109,7 +109,10 @@ export class ReviewController {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
-    const sortBy = (req.query.sortBy as string) || 'createdAt';
+    const allowedSortFields = ['createdAt', 'rating', 'helpful'];
+    const sortBy = allowedSortFields.includes(req.query.sortBy as string)
+      ? (req.query.sortBy as string)
+      : 'createdAt';
 
     const filter: any = { product: productId };
     if (req.query.rating) {

@@ -1,10 +1,14 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initializeSocket = exports.isUserOnline = exports.getOnlineUsers = void 0;
 const socket_io_1 = require("socket.io");
 const jwt_1 = require("../utils/jwt");
 const message_service_1 = require("../services/message.service");
 const logger_1 = require("../utils/logger");
+const User_1 = __importDefault(require("../models/User"));
 // Track online users: userId -> Set of socketIds (supports multiple devices)
 const onlineUsers = new Map();
 const getOnlineUsers = () => onlineUsers;
@@ -27,17 +31,22 @@ const initializeSocket = (server) => {
         pingInterval: 30000,
     });
     // Authentication middleware — verify JWT on connection
-    io.use((socket, next) => {
+    io.use(async (socket, next) => {
         try {
             const token = socket.handshake.auth.token || socket.handshake.query.token;
             if (!token) {
                 return next(new Error('Authentication required'));
             }
             const decoded = (0, jwt_1.verifyAccessToken)(token);
+            // Re-validate user status against DB — catches suspended/deleted accounts
+            const dbUser = await User_1.default.findById(decoded.id).select('status role').lean();
+            if (!dbUser || dbUser.status === 'suspended' || dbUser.status === 'inactive') {
+                return next(new Error('Account is suspended or inactive'));
+            }
             socket.user = {
                 id: decoded.id,
                 email: decoded.email,
-                role: decoded.role,
+                role: dbUser.role,
             };
             next();
         }

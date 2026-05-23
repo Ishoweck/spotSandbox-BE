@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, ApiResponse } from '../types';
 import Product from '../models/Product';
 import Category from '../models/Category';
+import { escapeRegex } from '../utils/helpers';
 
 export class SearchController {
   /**
@@ -29,10 +30,11 @@ export class SearchController {
 
     // Text search
     if (q) {
+      const safeQ = escapeRegex(q as string);
       filter.$or = [
-        { name: { $regex: q, $options: 'i' } },
-        { description: { $regex: q, $options: 'i' } },
-        { tags: { $in: [new RegExp(q as string, 'i')] } },
+        { name: { $regex: safeQ, $options: 'i' } },
+        { description: { $regex: safeQ, $options: 'i' } },
+        { tags: { $in: [new RegExp(safeQ, 'i')] } },
       ];
     }
 
@@ -142,11 +144,12 @@ export class SearchController {
       return;
     }
 
+    const safeQ = escapeRegex(q as string);
     const products = await Product.find({
       status: 'active',
       $or: [
-        { name: { $regex: q, $options: 'i' } },
-        { tags: { $in: [new RegExp(q as string, 'i')] } },
+        { name: { $regex: safeQ, $options: 'i' } },
+        { tags: { $in: [new RegExp(safeQ, 'i')] } },
       ],
     })
       .select('name slug')

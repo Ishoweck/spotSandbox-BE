@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_controller_1 = require("../controllers/auth.controller");
@@ -7,6 +10,16 @@ const auth_1 = require("../middleware/auth");
 const error_1 = require("../middleware/error");
 const express_validator_1 = require("express-validator");
 const validation_1 = require("../middleware/validation");
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
+// 10 attempts per 15 minutes per IP — covers login, OTP, forgot-password
+const authLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: 'Too many attempts. Please try again in 15 minutes.',
+    skipSuccessfulRequests: false,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 const router = (0, express_1.Router)();
 // Validation rules
 // Replace the registerValidation array
@@ -40,19 +53,19 @@ const guestRegisterValidation = [
     (0, express_validator_1.body)('email').isEmail().withMessage('Valid email is required'),
 ];
 // Standard auth routes
-router.post('/guest-register', (0, validation_1.validate)(guestRegisterValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.guestRegister.bind(auth_controller_1.authController)));
-router.post('/register', (0, validation_1.validate)(registerValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.register.bind(auth_controller_1.authController)));
-router.post('/verify-email', (0, error_1.asyncHandler)(auth_controller_1.authController.verifyEmail.bind(auth_controller_1.authController)));
-router.post('/resend-otp', (0, error_1.asyncHandler)(auth_controller_1.authController.resendOTP.bind(auth_controller_1.authController)));
-router.post('/login', (0, validation_1.validate)(loginValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.login.bind(auth_controller_1.authController)));
-router.post('/forgot-password', (0, error_1.asyncHandler)(auth_controller_1.authController.forgotPassword.bind(auth_controller_1.authController)));
-router.post('/reset-password', (0, error_1.asyncHandler)(auth_controller_1.authController.resetPassword.bind(auth_controller_1.authController)));
-router.post('/refresh-token', (0, error_1.asyncHandler)(auth_controller_1.authController.refreshToken.bind(auth_controller_1.authController)));
+router.post('/guest-register', authLimiter, (0, validation_1.validate)(guestRegisterValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.guestRegister.bind(auth_controller_1.authController)));
+router.post('/register', authLimiter, (0, validation_1.validate)(registerValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.register.bind(auth_controller_1.authController)));
+router.post('/verify-email', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.verifyEmail.bind(auth_controller_1.authController)));
+router.post('/resend-otp', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resendOTP.bind(auth_controller_1.authController)));
+router.post('/login', authLimiter, (0, validation_1.validate)(loginValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.login.bind(auth_controller_1.authController)));
+router.post('/forgot-password', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.forgotPassword.bind(auth_controller_1.authController)));
+router.post('/reset-password', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resetPassword.bind(auth_controller_1.authController)));
+router.post('/refresh-token', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.refreshToken.bind(auth_controller_1.authController)));
 // OAuth routes
 router.post('/oauth/google', (0, validation_1.validate)(googleLoginValidation), (0, error_1.asyncHandler)(oauthController_1.oauthController.googleLogin.bind(oauthController_1.oauthController)));
 router.post('/oauth/apple', (0, validation_1.validate)(appleLoginValidation), (0, error_1.asyncHandler)(oauthController_1.oauthController.appleLogin.bind(oauthController_1.oauthController)));
-// Get support user (public - returns the first admin/super_admin user for chat)
-router.get('/support-user', (0, error_1.asyncHandler)(auth_controller_1.authController.getSupportUser.bind(auth_controller_1.authController)));
+// Get support user — requires auth so anonymous users can't enumerate admin IDs
+router.get('/support-user', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.getSupportUser.bind(auth_controller_1.authController)));
 // Protected routes
 router.get('/me', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.getMe.bind(auth_controller_1.authController)));
 router.put('/profile', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.updateProfile.bind(auth_controller_1.authController)));

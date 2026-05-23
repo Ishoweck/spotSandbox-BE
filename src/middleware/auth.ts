@@ -24,7 +24,7 @@ export const authenticate = async (
     const decoded = verifyAccessToken(token);
 
     // Check the user is still active in the DB — catches deleted/suspended accounts
-    const user = await User.findById(decoded.id).select('status').lean();
+    const user = await User.findById(decoded.id).select('status role').lean();
     if (!user) {
       res.status(401).json({
         success: false,
@@ -33,7 +33,9 @@ export const authenticate = async (
       });
       return;
     }
-    if ((user as any).status === 'inactive' || (user as any).status === 'deleted') {
+
+    const { status, role } = user as any;
+    if (status === 'inactive' || status === 'deleted') {
       res.status(401).json({
         success: false,
         message: 'Your account has been deleted. Thank you for using VendorSpot.',
@@ -41,11 +43,27 @@ export const authenticate = async (
       });
       return;
     }
+    if (status === 'suspended') {
+      res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Please contact support.',
+        error: 'account_suspended',
+      });
+      return;
+    }
+    if (status === 'pending_verification') {
+      res.status(403).json({
+        success: false,
+        message: 'Please verify your email before continuing.',
+        error: 'email_not_verified',
+      });
+      return;
+    }
 
     req.user = {
       id: decoded.id,
       email: decoded.email,
-      role: decoded.role,
+      role,  // always from DB, not the JWT
     };
 
     next();
@@ -91,11 +109,16 @@ export const optionalAuth = async (
 
     if (token) {
       const decoded = verifyAccessToken(token);
-      req.user = {
-        id: decoded.id,
-        email: decoded.email,
-        role: decoded.role,
-      };
+      const dbUser = await User.findById(decoded.id).select('status role').lean();
+      const status = (dbUser as any)?.status;
+      // Only attach user if account is in good standing
+      if (dbUser && status === 'active') {
+        req.user = {
+          id: decoded.id,
+          email: decoded.email,
+          role: (dbUser as any).role,
+        };
+      }
     }
 
     next();
