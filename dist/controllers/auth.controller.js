@@ -314,13 +314,16 @@ class AuthController {
     async awardDailyLoginPoints(user) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const lastLogin = user.lastLogin ? new Date(user.lastLogin) : null;
-        if (lastLogin) {
-            lastLogin.setHours(0, 0, 0, 0);
+        // Use loginStreak.lastLoginDate as the source of truth — it's what this method updates,
+        // so the guard stays consistent whether called from login() or getMe().
+        const lastAwardDate = user.loginStreak?.lastLoginDate
+            ? new Date(user.loginStreak.lastLoginDate)
+            : null;
+        if (lastAwardDate) {
+            lastAwardDate.setHours(0, 0, 0, 0);
         }
-        // Check if user already logged in today
-        if (lastLogin && lastLogin.getTime() === today.getTime()) {
-            // Already logged in today, no points
+        // Already awarded points today — nothing to do
+        if (lastAwardDate && lastAwardDate.getTime() === today.getTime()) {
             return;
         }
         // Initialize login streak tracking if it doesn't exist
@@ -336,11 +339,11 @@ class AuthController {
         let pointsAwarded = 5; // Base daily login points
         let streakBonus = 0;
         let newStreak = 1;
-        if (lastLogin && lastLogin.getTime() === yesterday.getTime()) {
+        if (lastAwardDate && lastAwardDate.getTime() === yesterday.getTime()) {
             // Consecutive day - increase streak
             newStreak = (user.loginStreak.currentStreak || 0) + 1;
         }
-        else if (!lastLogin || lastLogin.getTime() < yesterday.getTime()) {
+        else if (!lastAwardDate || lastAwardDate.getTime() < yesterday.getTime()) {
             // Streak broken - reset to 1
             newStreak = 1;
         }
@@ -489,6 +492,8 @@ class AuthController {
         if (!user) {
             throw new error_1.AppError('User not found', 404);
         }
+        // Award daily points when the app loads with an existing session (user didn't log out/in)
+        await this.awardDailyLoginPoints(user);
         res.json({
             success: true,
             data: {

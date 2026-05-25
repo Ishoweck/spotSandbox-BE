@@ -30,6 +30,10 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
       );
     }
 
+    if (vendorProfile.isActive === false) {
+      throw new AppError('Your account is currently inactive. Please contact support to post products.', 403);
+    }
+
     const isDraft = productData.status === 'draft';
 
     // Validate price and quantity

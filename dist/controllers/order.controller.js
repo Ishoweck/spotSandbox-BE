@@ -841,6 +841,15 @@ class OrderController {
                 logger_1.logger.error('Error resolving affiliate:', affiliateErr);
             }
         }
+        // Detect first order for customer and vendors (count BEFORE creating)
+        const priorCustomerOrders = await Order_1.default.countDocuments({ user: req.user?.id });
+        const isFirstOrder = priorCustomerOrders === 0;
+        const firstOrderVendorIds = [];
+        for (const group of vendorGroups) {
+            const priorVendorOrders = await Order_1.default.countDocuments({ 'items.vendor': new mongoose_1.default.Types.ObjectId(group.vendorId) });
+            if (priorVendorOrders === 0)
+                firstOrderVendorIds.push(group.vendorId);
+        }
         const order = await Order_1.default.create({
             orderNumber,
             user: req.user?.id,
@@ -981,6 +990,8 @@ class OrderController {
                 vendorCount: vendorGroups.length,
                 multiVendor: vendorGroups.length > 1,
                 isDigital: isDigitalOnly,
+                isFirstOrder,
+                firstOrderVendorIds,
             },
         });
     }
@@ -1492,6 +1503,15 @@ class OrderController {
                 logger_1.logger.error('Error resolving affiliate:', affiliateErr);
             }
         }
+        // Detect first order for customer and vendors (count BEFORE creating)
+        const priorCustomerOrders = await Order_1.default.countDocuments({ user: req.user?.id });
+        const isFirstOrder = priorCustomerOrders === 0;
+        const firstOrderVendorIds = [];
+        for (const group of vendorGroups) {
+            const priorVendorOrders = await Order_1.default.countDocuments({ 'items.vendor': new mongoose_1.default.Types.ObjectId(group.vendorId) });
+            if (priorVendorOrders === 0)
+                firstOrderVendorIds.push(group.vendorId);
+        }
         const order = await Order_1.default.create({
             orderNumber,
             user: req.user?.id,
@@ -1623,6 +1643,8 @@ class OrderController {
             data: {
                 order,
                 isDigital: isDigitalOnly,
+                isFirstOrder,
+                firstOrderVendorIds,
             },
         });
     }
@@ -2205,10 +2227,12 @@ class OrderController {
                 : shipment.vendor?.toString();
             return shipVendorId === req.user?.id;
         });
+        const totalVendorOrders = await Order_1.default.countDocuments({ 'items.vendor': new mongoose_1.default.Types.ObjectId(req.user.id) });
         const orderData = {
             ...order.toObject(),
             items: vendorItems,
             vendorShipment: vendorShipment || null,
+            isFirstVendorOrder: totalVendorOrders === 1,
         };
         res.json({
             success: true,

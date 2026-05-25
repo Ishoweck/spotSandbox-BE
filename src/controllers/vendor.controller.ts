@@ -860,6 +860,7 @@ export class VendorController {
           hasPayoutDetails: !!vendorProfile.payoutDetails,
           businessName: vendorProfile.businessName,
           businessLogo: vendorProfile.businessLogo,
+          isPremium: vendorProfile.isPremium || false,
         },
         
         rewardsTier,

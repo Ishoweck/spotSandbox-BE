@@ -59,6 +59,9 @@ class ProductController {
             if (!vendorProfile) {
                 throw new error_1.AppError('Please complete your store setup before posting products.', 403);
             }
+            if (vendorProfile.isActive === false) {
+                throw new error_1.AppError('Your account is currently inactive. Please contact support to post products.', 403);
+            }
             const isDraft = productData.status === 'draft';
             // Validate price and quantity
             if (productData.price !== undefined && productData.price <= 0) {

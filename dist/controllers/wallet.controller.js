@@ -7,6 +7,7 @@ exports.walletController = exports.WalletController = void 0;
 const types_1 = require("../types");
 const Additional_1 = require("../models/Additional");
 const User_1 = __importDefault(require("../models/User"));
+const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const error_1 = require("../middleware/error");
 const paystack_service_1 = require("../services/paystack.service");
 const helpers_1 = require("../utils/helpers");
@@ -175,6 +176,10 @@ class WalletController {
         const { amount, bankDetails } = req.body;
         if (!amount || amount < 1000) {
             throw new error_1.AppError('Minimum withdrawal amount is ₦1,000', 400);
+        }
+        const vendorProfile = await VendorProfile_1.default.findOne({ user: req.user?.id }).select('isActive');
+        if (vendorProfile && vendorProfile.isActive === false) {
+            throw new error_1.AppError('Your account is currently inactive. Please contact support to withdraw funds.', 403);
         }
         const reference = `WD-${(0, helpers_1.generateOrderNumber)()}`;
         // Atomic: deduct balance only if sufficient funds exist — prevents double-spend on concurrent clicks

@@ -126,6 +126,32 @@ async function runAutoComplete(): Promise<void> {
         }
       }
 
+      // Credit affiliate commission if applicable
+      if ((order as any).affiliateUser && (order as any).affiliateCommission) {
+        const affiliateUserId = (order as any).affiliateUser;
+        const commissionAmount = (order as any).affiliateCommission;
+        await Wallet.findOneAndUpdate(
+          { user: affiliateUserId },
+          {
+            $inc: { balance: commissionAmount, totalEarned: commissionAmount },
+            $push: {
+              transactions: {
+                type: TransactionType.CREDIT,
+                amount: commissionAmount,
+                purpose: WalletPurpose.COMMISSION,
+                reference: `autocomplete_affiliate_${order.orderNumber}`,
+                description: `Affiliate commission for Order #${order.orderNumber} (auto-released)`,
+                relatedOrder: order._id,
+                status: 'completed',
+                timestamp: new Date(),
+              },
+            },
+          },
+          { upsert: true }
+        );
+        logger.info(`✅ Auto-credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+      }
+
       logger.info(`✅ Auto-complete done: order ${order.orderNumber}`);
     } catch (err: any) {
       logger.error(`❌ Auto-complete failed for order ${order.orderNumber}: ${err.message}`);

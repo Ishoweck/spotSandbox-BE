@@ -111,6 +111,27 @@ async function runAutoComplete() {
                     notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, subtotal, vendorAmount).catch(() => { });
                 }
             }
+            // Credit affiliate commission if applicable
+            if (order.affiliateUser && order.affiliateCommission) {
+                const affiliateUserId = order.affiliateUser;
+                const commissionAmount = order.affiliateCommission;
+                await Wallet_1.default.findOneAndUpdate({ user: affiliateUserId }, {
+                    $inc: { balance: commissionAmount, totalEarned: commissionAmount },
+                    $push: {
+                        transactions: {
+                            type: types_1.TransactionType.CREDIT,
+                            amount: commissionAmount,
+                            purpose: types_1.WalletPurpose.COMMISSION,
+                            reference: `autocomplete_affiliate_${order.orderNumber}`,
+                            description: `Affiliate commission for Order #${order.orderNumber} (auto-released)`,
+                            relatedOrder: order._id,
+                            status: 'completed',
+                            timestamp: new Date(),
+                        },
+                    },
+                }, { upsert: true });
+                logger_1.logger.info(`✅ Auto-credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+            }
             logger_1.logger.info(`✅ Auto-complete done: order ${order.orderNumber}`);
         }
         catch (err) {

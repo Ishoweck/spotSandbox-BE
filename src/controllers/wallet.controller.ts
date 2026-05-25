@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, ApiResponse, TransactionType, WalletPurpose } from '../types';
 import { Wallet } from '../models/Additional';
 import User from '../models/User';
+import VendorProfile from '../models/VendorProfile';
 import { AppError } from '../middleware/error';
 import { paystackService } from '../services/paystack.service';
 import { generateOrderNumber } from '../utils/helpers';
@@ -196,6 +197,11 @@ export class WalletController {
 
     if (!amount || amount < 1000) {
       throw new AppError('Minimum withdrawal amount is ₦1,000', 400);
+    }
+
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id }).select('isActive');
+    if (vendorProfile && vendorProfile.isActive === false) {
+      throw new AppError('Your account is currently inactive. Please contact support to withdraw funds.', 403);
     }
 
     const reference = `WD-${generateOrderNumber()}`;

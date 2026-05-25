@@ -34,7 +34,15 @@
       "Bash(dir \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\")",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\" | Where-Object { $_.Name -ne 'node_modules' } | Select-Object Name, PSIsContainer)",
       "PowerShell(Set-Location \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\"; npx tsc --noEmit; Write-Output \"EXIT: $LASTEXITCODE\")",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\" -Recurse -Directory | Select-Object -First 30 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\" -Recurse -Directory | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\" -Recurse -File | Where-Object { $_.DirectoryName -match '\\(Payments|Orders|Cart\\)' } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\" | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\" | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\\\\components\\\\Cart\" -File | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\\\\components\\\\Orders\" -File | ForEach-Object { $_.Name })",
+      "Bash(dir \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\" /b)"
     ]
   }
 }

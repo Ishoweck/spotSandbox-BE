@@ -101,6 +101,36 @@ if (process.env.NODE_ENV === 'development') {
 else {
     app.use((0, morgan_1.default)('combined'));
 }
+// ============================================================
+// WELL-KNOWN FILES — Required for iOS Universal Links and Android App Links
+// ============================================================
+app.get('/.well-known/apple-app-site-association', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+        applinks: {
+            apps: [],
+            details: [
+                {
+                    appID: `${process.env.APPLE_TEAM_ID || 'TEAMID'}.${process.env.APPLE_BUNDLE_ID || 'com.vendorspot.app'}`,
+                    paths: ['/affiliate/*', '/products/*', '/shops/*', '/vendor/*'],
+                },
+            ],
+        },
+    });
+});
+app.get('/.well-known/assetlinks.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json([
+        {
+            relation: ['delegate_permission/common.handle_all_urls'],
+            target: {
+                namespace: 'android_app',
+                package_name: process.env.ANDROID_PACKAGE_NAME || 'com.vendorspot.app',
+                sha256_cert_fingerprints: (process.env.ANDROID_SHA256_FINGERPRINTS || '').split(',').filter(Boolean),
+            },
+        },
+    ]);
+});
 // API routes
 const API_VERSION = process.env.API_VERSION || 'v1';
 app.use(`/api/${API_VERSION}`, routes_1.default);

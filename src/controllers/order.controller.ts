@@ -972,6 +972,15 @@
         }
       }
 
+      // Detect first order for customer and vendors (count BEFORE creating)
+      const priorCustomerOrders = await Order.countDocuments({ user: req.user?.id });
+      const isFirstOrder = priorCustomerOrders === 0;
+      const firstOrderVendorIds: string[] = [];
+      for (const group of vendorGroups) {
+        const priorVendorOrders = await Order.countDocuments({ 'items.vendor': new mongoose.Types.ObjectId(group.vendorId) });
+        if (priorVendorOrders === 0) firstOrderVendorIds.push(group.vendorId);
+      }
+
       const order = await Order.create({
         orderNumber,
         user: req.user?.id,
@@ -1158,6 +1167,8 @@
           vendorCount: vendorGroups.length,
           multiVendor: vendorGroups.length > 1,
           isDigital: isDigitalOnly,
+          isFirstOrder,
+          firstOrderVendorIds,
         },
       });
     }
@@ -1720,6 +1731,15 @@
         }
       }
 
+      // Detect first order for customer and vendors (count BEFORE creating)
+      const priorCustomerOrders = await Order.countDocuments({ user: req.user?.id });
+      const isFirstOrder = priorCustomerOrders === 0;
+      const firstOrderVendorIds: string[] = [];
+      for (const group of vendorGroups) {
+        const priorVendorOrders = await Order.countDocuments({ 'items.vendor': new mongoose.Types.ObjectId(group.vendorId) });
+        if (priorVendorOrders === 0) firstOrderVendorIds.push(group.vendorId);
+      }
+
       const order = await Order.create({
         orderNumber,
         user: req.user?.id,
@@ -1888,6 +1908,8 @@
         data: {
           order,
           isDigital: isDigitalOnly,
+          isFirstOrder,
+          firstOrderVendorIds,
         },
       });
     }
@@ -2578,10 +2600,13 @@
         }
       );
 
+      const totalVendorOrders = await Order.countDocuments({ 'items.vendor': new mongoose.Types.ObjectId(req.user!.id) });
+
       const orderData = {
         ...order.toObject(),
         items: vendorItems,
         vendorShipment: vendorShipment || null,
+        isFirstVendorOrder: totalVendorOrders === 1,
       };
 
       res.json({
