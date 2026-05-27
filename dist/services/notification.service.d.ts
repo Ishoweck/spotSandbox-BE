@@ -30,6 +30,7 @@ declare class NotificationService {
     orderStatusUpdated(orderId: string, orderNumber: string, status: string, customerId: string): Promise<void>;
     orderCancelled(orderId: string, orderNumber: string, customerId: string, vendorIds: string[], cancelledBy: 'customer' | 'vendor'): Promise<void>;
     paymentCompleted(orderId: string, orderNumber: string, amount: number, userId: string): Promise<void>;
+    insufficientWalletBalance(userId: string, required: number, current: number): Promise<void>;
     walletTopUp(userId: string, amount: number, newBalance: number): Promise<void>;
     walletWithdrawalRequested(userId: string, amount: number): Promise<void>;
     walletWithdrawalProcessed(userId: string, amount: number, status: 'completed' | 'failed'): Promise<void>;

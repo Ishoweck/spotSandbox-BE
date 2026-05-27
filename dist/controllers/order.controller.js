@@ -801,11 +801,29 @@ class OrderController {
         const baseTotal = subtotal - discount + totalShippingCost + tax;
         const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
         const total = Math.round(baseTotal + serviceCharge);
+        // ── WALLET PRE-CHECK ──────────────────────────────────────────────────────
+        // Validate balance BEFORE creating the order so we never leave an orphaned
+        // PENDING order in the database when the user can't actually pay.
+        if (paymentMethod === types_1.PaymentMethod.WALLET) {
+            const walletCheck = await Additional_1.Wallet.findOne({ user: req.user?.id }).select('balance');
+            const currentBalance = walletCheck?.balance ?? 0;
+            if (currentBalance < total) {
+                try {
+                    await notification_service_1.notificationService.insufficientWalletBalance(req.user.id, total, currentBalance);
+                }
+                catch (notifErr) {
+                    logger_1.logger.error('Error sending insufficient balance notification:', notifErr);
+                }
+                throw new error_1.AppError(`Insufficient wallet balance. You need ₦${total.toLocaleString()} but your wallet only has ₦${currentBalance.toLocaleString()}. Please top up and try again.`, 400);
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────────
         const orderNumber = (0, helpers_1.generateOrderNumber)();
         logger_1.logger.info('💾 Creating order document...', { orderNumber });
         // Resolve affiliate if a code was passed at checkout
         let walletAffiliateUserId = undefined;
         let walletAffiliateCommission = 0;
+        let walletAffiliateLinkId = undefined;
         const normalizedWalletAffiliateCode = affiliateCode ? affiliateCode.toUpperCase() : undefined;
         if (normalizedWalletAffiliateCode) {
             try {
@@ -833,6 +851,7 @@ class OrderController {
                             commissionSum = subtotal * 0.03;
                     }
                     walletAffiliateUserId = linkRecord.user;
+                    walletAffiliateLinkId = linkRecord._id;
                     walletAffiliateCommission = Math.round(commissionSum * 100) / 100;
                     logger_1.logger.info(`🤝 Affiliate code ${normalizedWalletAffiliateCode} resolved — commission: ₦${walletAffiliateCommission}`);
                 }
@@ -870,7 +889,7 @@ class OrderController {
             isPickup: deliveryType === 'pickup' || isDigitalOnly,
             vendorShipments,
             isDigital: isDigitalOnly,
-            ...(walletAffiliateUserId && { affiliateUser: walletAffiliateUserId, affiliateCommission: walletAffiliateCommission }),
+            ...(walletAffiliateUserId && { affiliateUser: walletAffiliateUserId, affiliateCommission: walletAffiliateCommission, affiliateLinkId: walletAffiliateLinkId }),
         });
         logger_1.logger.info(`✅ Order created: ${order._id}`);
         // Re-activate any closed conversations between the customer and each vendor in this order
@@ -905,7 +924,10 @@ class OrderController {
                 },
             }, { new: true });
             if (!wallet) {
-                throw new error_1.AppError('Insufficient wallet balance', 400);
+                // Race condition: balance dropped between the pre-check and here — delete the orphaned order
+                await Order_1.default.findByIdAndDelete(order._id);
+                logger_1.logger.warn(`⚠️ Wallet race condition: deleted orphaned order ${order.orderNumber}`);
+                throw new error_1.AppError('Insufficient wallet balance. Please top up and try again.', 400);
             }
             order.paymentStatus = types_1.PaymentStatus.COMPLETED;
             order.status = isDigitalOnly ? types_1.OrderStatus.DELIVERED : types_1.OrderStatus.PENDING;
@@ -1466,6 +1488,7 @@ class OrderController {
         // Resolve affiliate if a code was passed at checkout
         let affiliateUserId = undefined;
         let affiliateCommissionAmount = 0;
+        let affiliateLinkId = undefined;
         const snapshotAffiliateCode = snapshot.affiliateCode
             ? snapshot.affiliateCode.toUpperCase()
             : undefined;
@@ -1495,6 +1518,7 @@ class OrderController {
                             commissionSum = subtotal * 0.03;
                     }
                     affiliateUserId = linkRecord.user;
+                    affiliateLinkId = linkRecord._id;
                     affiliateCommissionAmount = Math.round(commissionSum * 100) / 100;
                     logger_1.logger.info(`🤝 Affiliate code ${snapshotAffiliateCode} resolved — commission: ₦${affiliateCommissionAmount}`);
                 }
@@ -1533,7 +1557,7 @@ class OrderController {
             isPickup: deliveryType === 'pickup' || isDigitalOnly,
             vendorShipments,
             isDigital: isDigitalOnly,
-            ...(affiliateUserId && { affiliateUser: affiliateUserId, affiliateCommission: affiliateCommissionAmount }),
+            ...(affiliateUserId && { affiliateUser: affiliateUserId, affiliateCommission: affiliateCommissionAmount, affiliateLinkId }),
         });
         logger_1.logger.info(`✅ Order created with verified payment: ${order._id}`);
         // Deduct VCredits NOW — payment is confirmed, safe to remove from wallet
@@ -3034,12 +3058,39 @@ class OrderController {
                 const itemTotal = item.price * item.quantity;
                 vendorEarnings.set(vendorId, (vendorEarnings.get(vendorId) || 0) + itemTotal);
             }
-            // Credit each vendor's wallet using tiered commission rate
+            // Build per-vendor affiliate deduction map — vendor absorbs affiliate commission, not platform
+            const affiliateVendorDeductions = new Map();
+            if (order.affiliateUser && order.affiliateCommission && order.affiliateLinkId) {
+                try {
+                    const linkDoc = await Additional_1.AffiliateLink.findById(order.affiliateLinkId).select('product').lean();
+                    if (linkDoc?.product) {
+                        // Product-specific link: only the vendor of that product bears the cost
+                        const affItem = order.items.find((item) => item.product.toString() === linkDoc.product.toString());
+                        if (affItem) {
+                            affiliateVendorDeductions.set(affItem.vendor.toString(), order.affiliateCommission);
+                        }
+                    }
+                    else {
+                        // General link: distribute proportionally by each vendor's subtotal share
+                        const totalSubtotal = [...vendorEarnings.values()].reduce((s, v) => s + v, 0);
+                        for (const [vid, sub] of vendorEarnings) {
+                            const deduction = Math.round((sub / totalSubtotal) * order.affiliateCommission * 100) / 100;
+                            if (deduction > 0)
+                                affiliateVendorDeductions.set(vid, deduction);
+                        }
+                    }
+                }
+                catch (e) {
+                    logger_1.logger.error('Error computing affiliate vendor deductions:', e);
+                }
+            }
+            // Credit each vendor's wallet using tiered commission rate, minus their affiliate share
             for (const [vendorId, amount] of vendorEarnings) {
                 const commissionRatePct = await getVendorCommissionRate(vendorId);
                 const commissionRate = commissionRatePct / 100;
                 const commission = Math.round(amount * commissionRate * 100) / 100;
-                const vendorAmount = Math.round((amount - commission) * 100) / 100;
+                const affiliateDeduction = affiliateVendorDeductions.get(vendorId) || 0;
+                const vendorAmount = Math.max(0, Math.round((amount - commission - affiliateDeduction) * 100) / 100);
                 // Atomic $inc — safe even if this function is called concurrently
                 await Additional_1.Wallet.findOneAndUpdate({ user: vendorId }, {
                     $inc: { balance: vendorAmount, totalEarned: vendorAmount },
@@ -3049,7 +3100,7 @@ class OrderController {
                             amount: vendorAmount,
                             purpose: types_1.WalletPurpose.COMMISSION,
                             reference: `order_${order.orderNumber}_${vendorId}`,
-                            description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee deducted)`,
+                            description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee${affiliateDeduction > 0 ? `, ₦${affiliateDeduction} affiliate commission` : ''} deducted)`,
                             relatedOrder: order._id,
                             status: 'completed',
                             timestamp: new Date(),
@@ -3060,25 +3111,33 @@ class OrderController {
                 // Notify vendor their funds have been released
                 notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, amount, vendorAmount).catch(() => { });
             }
-            // Handle affiliate commission if applicable
+            // Handle affiliate commission — atomic guard prevents double-credit
             if (order.affiliateUser && order.affiliateCommission) {
-                const commissionAmount = order.affiliateCommission;
-                await Additional_1.Wallet.findOneAndUpdate({ user: order.affiliateUser }, {
-                    $inc: { balance: commissionAmount, totalEarned: commissionAmount },
-                    $push: {
-                        transactions: {
-                            type: types_1.TransactionType.CREDIT,
-                            amount: commissionAmount,
-                            purpose: types_1.WalletPurpose.COMMISSION,
-                            reference: `affiliate_${order.orderNumber}`,
-                            description: `Affiliate commission for Order #${order.orderNumber}`,
-                            relatedOrder: order._id,
-                            status: 'completed',
-                            timestamp: new Date(),
+                const claimed = await Order_1.default.findOneAndUpdate({ _id: order._id, affiliateCommissionPaid: { $ne: true } }, { $set: { affiliateCommissionPaid: true } });
+                if (claimed) {
+                    const commissionAmount = order.affiliateCommission;
+                    await Additional_1.Wallet.findOneAndUpdate({ user: order.affiliateUser }, {
+                        $inc: { balance: commissionAmount, totalEarned: commissionAmount },
+                        $push: {
+                            transactions: {
+                                type: types_1.TransactionType.CREDIT,
+                                amount: commissionAmount,
+                                purpose: types_1.WalletPurpose.COMMISSION,
+                                reference: `affiliate_${order.orderNumber}`,
+                                description: `Affiliate commission for Order #${order.orderNumber}`,
+                                relatedOrder: order._id,
+                                status: 'completed',
+                                timestamp: new Date(),
+                            },
                         },
-                    },
-                }, { upsert: true });
-                logger_1.logger.info(`Credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+                    }, { upsert: true });
+                    if (order.affiliateLinkId) {
+                        await Additional_1.AffiliateLink.findByIdAndUpdate(order.affiliateLinkId, {
+                            $inc: { conversions: 1, totalEarned: commissionAmount },
+                        });
+                    }
+                    logger_1.logger.info(`Credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+                }
             }
         }
         catch (walletError) {
@@ -3169,7 +3228,30 @@ class OrderController {
             const vendorProfile = await VendorProfile_1.default.findOne({ user: vendorId }).select('commissionRate');
             const commissionRate = (vendorProfile?.commissionRate ?? 8) / 100;
             const commission = Math.round(vendorSubtotal * commissionRate * 100) / 100;
-            const vendorAmount = Math.round((vendorSubtotal - commission) * 100) / 100;
+            // Determine this vendor's affiliate deduction — vendor absorbs it, not platform
+            let affiliateDeduction = 0;
+            if (order.affiliateUser && order.affiliateCommission && order.affiliateLinkId) {
+                try {
+                    const linkDoc = await Additional_1.AffiliateLink.findById(order.affiliateLinkId).select('product').lean();
+                    if (linkDoc?.product) {
+                        // Product-specific: only this vendor pays if they own the affiliated product
+                        const affItem = vendorItems.find((item) => item.product.toString() === linkDoc.product.toString());
+                        if (affItem)
+                            affiliateDeduction = order.affiliateCommission;
+                    }
+                    else {
+                        // General link: this vendor's proportional share of the order subtotal
+                        const orderSubtotal = order.items.reduce((s, item) => s + item.price * item.quantity, 0);
+                        affiliateDeduction = orderSubtotal > 0
+                            ? Math.round((vendorSubtotal / orderSubtotal) * order.affiliateCommission * 100) / 100
+                            : 0;
+                    }
+                }
+                catch (e) {
+                    logger_1.logger.error('Error computing affiliate deduction for vendor shipment:', e);
+                }
+            }
+            const vendorAmount = Math.max(0, Math.round((vendorSubtotal - commission - affiliateDeduction) * 100) / 100);
             await Additional_1.Wallet.findOneAndUpdate({ user: vendorId }, {
                 $inc: { balance: vendorAmount, totalEarned: vendorAmount },
                 $push: {
@@ -3178,14 +3260,14 @@ class OrderController {
                         amount: vendorAmount,
                         purpose: types_1.WalletPurpose.COMMISSION,
                         reference: `order_${order.orderNumber}_vendor_${vendorId}`,
-                        description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee)`,
+                        description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee${affiliateDeduction > 0 ? `, ₦${affiliateDeduction} affiliate commission` : ''} deducted)`,
                         relatedOrder: order._id,
                         status: 'completed',
                         timestamp: new Date(),
                     },
                 },
             }, { upsert: true });
-            logger_1.logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for shipment in order ${order.orderNumber}`);
+            logger_1.logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for shipment in order ${order.orderNumber}${affiliateDeduction > 0 ? ` (₦${affiliateDeduction} affiliate deducted)` : ''}`);
             // Notify vendor their funds have been released
             notification_service_1.notificationService.vendorSaleCompleted(vendorId, order.orderNumber, vendorSubtotal, vendorAmount).catch(() => { });
         }
@@ -3217,24 +3299,34 @@ class OrderController {
             catch (pointsError) {
                 logger_1.logger.error('Error awarding points on full shipment receipt:', pointsError);
             }
-            // Handle affiliate commission
+            // Handle affiliate commission — atomic guard prevents double-credit across completeOrder and completeVendorShipment
             if (order.affiliateUser && order.affiliateCommission) {
                 try {
-                    await Additional_1.Wallet.findOneAndUpdate({ user: order.affiliateUser }, {
-                        $inc: { balance: order.affiliateCommission, totalEarned: order.affiliateCommission },
-                        $push: {
-                            transactions: {
-                                type: types_1.TransactionType.CREDIT,
-                                amount: order.affiliateCommission,
-                                purpose: types_1.WalletPurpose.COMMISSION,
-                                reference: `affiliate_${order.orderNumber}`,
-                                description: `Affiliate commission for Order #${order.orderNumber}`,
-                                relatedOrder: order._id,
-                                status: 'completed',
-                                timestamp: new Date(),
+                    const claimed = await Order_1.default.findOneAndUpdate({ _id: order._id, affiliateCommissionPaid: { $ne: true } }, { $set: { affiliateCommissionPaid: true } });
+                    if (claimed) {
+                        const commissionAmount = order.affiliateCommission;
+                        await Additional_1.Wallet.findOneAndUpdate({ user: order.affiliateUser }, {
+                            $inc: { balance: commissionAmount, totalEarned: commissionAmount },
+                            $push: {
+                                transactions: {
+                                    type: types_1.TransactionType.CREDIT,
+                                    amount: commissionAmount,
+                                    purpose: types_1.WalletPurpose.COMMISSION,
+                                    reference: `affiliate_${order.orderNumber}`,
+                                    description: `Affiliate commission for Order #${order.orderNumber}`,
+                                    relatedOrder: order._id,
+                                    status: 'completed',
+                                    timestamp: new Date(),
+                                },
                             },
-                        },
-                    }, { upsert: true });
+                        }, { upsert: true });
+                        if (order.affiliateLinkId) {
+                            await Additional_1.AffiliateLink.findByIdAndUpdate(order.affiliateLinkId, {
+                                $inc: { conversions: 1, totalEarned: commissionAmount },
+                            });
+                        }
+                        logger_1.logger.info(`Credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+                    }
                 }
                 catch (affiliateErr) {
                     logger_1.logger.error('Error crediting affiliate commission on full delivery:', affiliateErr);

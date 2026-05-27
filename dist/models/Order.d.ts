@@ -53,6 +53,8 @@ export interface IOrder extends Document {
     fundsReleased?: boolean;
     affiliateUser?: Types.ObjectId;
     affiliateCommission?: number;
+    affiliateLinkId?: Types.ObjectId;
+    affiliateCommissionPaid?: boolean;
     statusHistory: {
         status: OrderStatus;
         timestamp: Date;

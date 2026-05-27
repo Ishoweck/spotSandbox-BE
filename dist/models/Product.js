@@ -140,7 +140,7 @@ const productSchema = new mongoose_1.Schema({
     },
     affiliateCommission: {
         type: Number,
-        default: 10,
+        default: 3,
         min: 0,
         max: 100,
     },

@@ -9,6 +9,7 @@ import Wallet from '../models/Wallet';
 import { AppError } from '../middleware/error';
 import { notificationService } from '../services/notification.service';
 import { logger } from '../utils/logger';
+import { rewardController } from './reward.controller';
 
 const VERIFIED_BUYER_THRESHOLD = 5000; // ₦5,000 minimum spend for verified buyer badge
 
@@ -91,6 +92,9 @@ export class ReviewController {
     } catch (error) {
       logger.error('Error sending review notification:', error);
     }
+
+    // Check for review-related badges (non-blocking)
+    rewardController.checkBadges(req.user!.id).catch(() => {});
 
     logger.info(`Review created: ${review._id} for product ${productId} on order ${orderId}`);
 

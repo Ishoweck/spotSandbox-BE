@@ -207,11 +207,10 @@ const orderSchema = new mongoose_1.Schema({
     refundReason: String,
     deliveredAt: Date,
     fundsReleased: { type: Boolean, default: false },
-    affiliateUser: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User',
-    },
+    affiliateUser: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
     affiliateCommission: Number,
+    affiliateLinkId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'AffiliateLink' },
+    affiliateCommissionPaid: { type: Boolean, default: false },
     statusHistory: [{
             status: {
                 type: String,

@@ -62,6 +62,8 @@ export interface IOrder extends Document {
   fundsReleased?: boolean;
   affiliateUser?: Types.ObjectId;
   affiliateCommission?: number;
+  affiliateLinkId?: Types.ObjectId;
+  affiliateCommissionPaid?: boolean;
   statusHistory: {
     status: OrderStatus;
     timestamp: Date;
@@ -250,11 +252,10 @@ const orderSchema = new Schema<IOrder>({
   refundReason: String,
   deliveredAt: Date,
   fundsReleased: { type: Boolean, default: false },
-  affiliateUser: {
-    type: Schema.Types.ObjectId,
-    ref: 'User',
-  },
+  affiliateUser: { type: Schema.Types.ObjectId, ref: 'User' },
   affiliateCommission: Number,
+  affiliateLinkId: { type: Schema.Types.ObjectId, ref: 'AffiliateLink' },
+  affiliateCommissionPaid: { type: Boolean, default: false },
   statusHistory: [{
     status: {
       type: String,

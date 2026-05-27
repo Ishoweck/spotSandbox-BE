@@ -13,6 +13,7 @@ const Wallet_1 = __importDefault(require("../models/Wallet"));
 const error_1 = require("../middleware/error");
 const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
+const reward_controller_1 = require("./reward.controller");
 const VERIFIED_BUYER_THRESHOLD = 5000; // ₦5,000 minimum spend for verified buyer badge
 class ReviewController {
     /**
@@ -83,6 +84,8 @@ class ReviewController {
         catch (error) {
             logger_1.logger.error('Error sending review notification:', error);
         }
+        // Check for review-related badges (non-blocking)
+        reward_controller_1.rewardController.checkBadges(req.user.id).catch(() => { });
         logger_1.logger.info(`Review created: ${review._id} for product ${productId} on order ${orderId}`);
         res.status(201).json({
             success: true,

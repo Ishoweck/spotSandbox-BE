@@ -105,7 +105,7 @@ export class VendorController {
     }
 
     const vendors = await VendorProfile.find(baseFilter)
-      .populate('user', 'firstName lastName')
+      .populate('user', 'firstName lastName avatar')
       .sort(sortCriteria)
       .limit(limit)
       .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium');
@@ -132,6 +132,9 @@ export class VendorController {
           description: vendor.businessDescription,
           image: vendor.businessLogo || '',
           coverImage: vendor.businessBanner || '',
+          userAvatar: vendorUser.avatar || '',
+          firstName: vendorUser.firstName || '',
+          lastName: vendorUser.lastName || '',
           location,
           rating: vendor.averageRating || 0,
           reviews: vendor.totalReviews || 0,

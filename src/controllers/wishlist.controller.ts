@@ -3,6 +3,7 @@ import { AuthRequest, ApiResponse } from '../types';
 import { Wishlist } from '../models/Additional';
 import Product from '../models/Product';
 import { AppError } from '../middleware/error';
+import { rewardController } from './reward.controller';
 
 export class WishlistController {
   /**
@@ -66,6 +67,9 @@ export class WishlistController {
       wishlist.items.push({ product: productId } as any);
       await wishlist.save();
     }
+
+    // Check wishlist-collector badge in background
+    rewardController.checkBadges(req.user!.id).catch(() => {});
 
     res.json({
       success: true,

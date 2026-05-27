@@ -7,6 +7,7 @@ exports.wishlistController = exports.WishlistController = void 0;
 const Additional_1 = require("../models/Additional");
 const Product_1 = __importDefault(require("../models/Product"));
 const error_1 = require("../middleware/error");
+const reward_controller_1 = require("./reward.controller");
 class WishlistController {
     /**
      * Get user's wishlist
@@ -56,6 +57,8 @@ class WishlistController {
             wishlist.items.push({ product: productId });
             await wishlist.save();
         }
+        // Check wishlist-collector badge in background
+        reward_controller_1.rewardController.checkBadges(req.user.id).catch(() => { });
         res.json({
             success: true,
             message: 'Product added to wishlist',

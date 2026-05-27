@@ -182,6 +182,8 @@ class AuthController {
         user.status = types_1.UserStatus.ACTIVE;
         user.otp = undefined;
         await user.save();
+        // Check verified-identity badge in background
+        Promise.resolve().then(() => __importStar(require('./reward.controller'))).then(({ rewardController: rc }) => rc.checkBadges(user._id.toString())).catch(() => { });
         // Queue welcome emails in background with 10 second delays
         // Only send vendor-specific emails (founder welcome + product posting guide) to vendors
         // Buyers get welcome email + buyer founder's note only
@@ -205,14 +207,17 @@ class AuthController {
         catch (error) {
             // Non-critical, don't throw
         }
-        // Notify referrer if this user was referred
+        // Notify referrer if this user was referred + check their referral badges
         if (user.referredBy) {
+            const referrerId = user.referredBy.toString();
             try {
-                await notification_service_1.notificationService.referralSignup(user.referredBy.toString(), `${user.firstName} ${user.lastName}`);
+                await notification_service_1.notificationService.referralSignup(referrerId, `${user.firstName} ${user.lastName}`);
             }
             catch (error) {
                 // Non-critical
             }
+            // Fire referral badge check for the referrer immediately
+            Promise.resolve().then(() => __importStar(require('./reward.controller'))).then(({ rewardController: rc }) => rc.checkBadges(referrerId)).catch(() => { });
         }
         // Generate tokens
         const tokens = (0, jwt_1.generateTokens)(user._id, user.email, user.role);
@@ -367,6 +372,9 @@ class AuthController {
             lastLoginDate: today,
         };
         await user.save();
+        // Check streak-related badges in background — non-blocking
+        const { rewardController: rc } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
+        rc.checkBadges(user._id.toString()).catch(() => { });
         // ✅ CREATE TRANSACTION RECORD
         const PointsTransaction = (await Promise.resolve().then(() => __importStar(require('../models/PointsTransaction')))).default;
         let description = `Daily login`;

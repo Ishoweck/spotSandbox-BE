@@ -20,7 +20,8 @@
     "fix-add": "npx ts-node src/scripts/fix-vendor-addresses-quick.ts",
     "download-content": "ts-node src/scripts/download-real-content.ts",
     "migrate": "npx ts-node src/scripts/migrate-from-old-db.ts",
-    "patch:pending": "npx ts-node src/scripts/patch-migrated-to-pending.ts"
+    "patch:pending": "npx ts-node src/scripts/patch-migrated-to-pending.ts",
+    "seed:vendors": "npx ts-node src/scripts/seedVendors.ts"
   },
   "keywords": [
     "ecommerce",

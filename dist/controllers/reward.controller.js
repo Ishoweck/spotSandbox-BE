@@ -10,6 +10,8 @@ const User_1 = __importDefault(require("../models/User"));
 const Order_1 = __importDefault(require("../models/Order"));
 const PointsTransaction_1 = __importDefault(require("../models/PointsTransaction"));
 const Additional_1 = require("../models/Additional");
+const Review_1 = __importDefault(require("../models/Review"));
+const Product_1 = __importDefault(require("../models/Product"));
 const error_1 = require("../middleware/error");
 const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
@@ -341,34 +343,103 @@ class RewardController {
      */
     async checkBadges(userId) {
         const user = await User_1.default.findById(userId);
-        if (!user) {
+        if (!user)
             return;
-        }
+        // Reload badges fresh so we don't use a stale snapshot from caller
         const badges = user.badges || [];
-        // First Purchase Badge
-        const orderCount = await Order_1.default.countDocuments({
-            user: userId,
-            paymentStatus: 'completed',
-        });
-        if (orderCount >= 1 && !badges.includes('first-purchase')) {
+        // ── Order counts ────────────────────────────────────────────
+        const orderCount = await Order_1.default.countDocuments({ user: userId, paymentStatus: 'completed' });
+        if (orderCount >= 1 && !badges.includes('first-purchase'))
             await this.awardBadge(userId, 'first-purchase');
-        }
-        // Loyal Customer (10 orders)
-        if (orderCount >= 10 && !badges.includes('loyal-customer')) {
+        if (orderCount >= 10 && !badges.includes('loyal-customer'))
             await this.awardBadge(userId, 'loyal-customer');
-        }
-        // VIP Customer (50 orders)
-        if (orderCount >= 50 && !badges.includes('vip-customer')) {
+        if (orderCount >= 50 && !badges.includes('vip-customer'))
             await this.awardBadge(userId, 'vip-customer');
-        }
-        // High Spender (total spending > ₦100,000)
-        const orders = await Order_1.default.find({
-            user: userId,
-            paymentStatus: 'completed',
-        });
-        const totalSpent = orders.reduce((sum, order) => sum + order.total, 0);
-        if (totalSpent >= 100000 && !badges.includes('high-spender')) {
+        if (orderCount >= 100 && !badges.includes('century-shopper'))
+            await this.awardBadge(userId, 'century-shopper');
+        // ── Spending ────────────────────────────────────────────────
+        const orders = await Order_1.default.find({ user: userId, paymentStatus: 'completed' }).select('total');
+        const totalSpent = orders.reduce((sum, o) => sum + o.total, 0);
+        if (totalSpent >= 100000 && !badges.includes('high-spender'))
             await this.awardBadge(userId, 'high-spender');
+        if (totalSpent >= 500000 && !badges.includes('whale'))
+            await this.awardBadge(userId, 'whale');
+        // Single order over ₦50,000
+        if (!badges.includes('big-spender')) {
+            const bigOrder = await Order_1.default.exists({ user: userId, paymentStatus: 'completed', total: { $gte: 50000 } });
+            if (bigOrder)
+                await this.awardBadge(userId, 'big-spender');
+        }
+        // Flash sale purchase — checks if any completed order item's product is/was a flash sale item
+        if (!badges.includes('flash-buyer')) {
+            const userOrders = await Order_1.default.find({ user: userId, paymentStatus: 'completed' }).select('items').lean();
+            const productIds = userOrders.flatMap(o => o.items.map((i) => i.product)).filter(Boolean);
+            if (productIds.length > 0) {
+                const flashProduct = await Product_1.default.exists({ _id: { $in: productIds }, isFlashSale: true });
+                if (flashProduct)
+                    await this.awardBadge(userId, 'flash-buyer');
+            }
+        }
+        // ── Reviews ─────────────────────────────────────────────────
+        const reviewCount = await Review_1.default.countDocuments({ user: userId, status: 'approved' });
+        if (reviewCount >= 1 && !badges.includes('first-review'))
+            await this.awardBadge(userId, 'first-review');
+        if (reviewCount >= 10 && !badges.includes('top-reviewer'))
+            await this.awardBadge(userId, 'top-reviewer');
+        if (!badges.includes('five-star-fan')) {
+            const fiveStarCount = await Review_1.default.countDocuments({ user: userId, rating: 5 });
+            if (fiveStarCount >= 5)
+                await this.awardBadge(userId, 'five-star-fan');
+        }
+        // ── Login streak ─────────────────────────────────────────────
+        const streak = user.loginStreak?.currentStreak || 0;
+        if (streak >= 3 && !badges.includes('streak-3'))
+            await this.awardBadge(userId, 'streak-3');
+        if (streak >= 7 && !badges.includes('streak-7'))
+            await this.awardBadge(userId, 'streak-7');
+        if (streak >= 30 && !badges.includes('streak-30'))
+            await this.awardBadge(userId, 'streak-30');
+        // ── Referrals ────────────────────────────────────────────────
+        const referralCount = await User_1.default.countDocuments({ referredBy: new mongoose_1.Types.ObjectId(userId) });
+        if (referralCount >= 1 && !badges.includes('referral-rookie'))
+            await this.awardBadge(userId, 'referral-rookie');
+        if (referralCount >= 5 && !badges.includes('connector'))
+            await this.awardBadge(userId, 'connector');
+        // ── Wishlist ─────────────────────────────────────────────────
+        if (!badges.includes('wishlist-collector')) {
+            const wishlist = await Additional_1.Wishlist.findOne({ user: userId }).select('items').lean();
+            if (wishlist && (wishlist.items?.length || 0) >= 10) {
+                await this.awardBadge(userId, 'wishlist-collector');
+            }
+        }
+        // ── Explorer (ordered from 5+ different categories) ──────────
+        if (!badges.includes('explorer')) {
+            const categoryAgg = await Order_1.default.aggregate([
+                { $match: { user: new mongoose_1.Types.ObjectId(userId), paymentStatus: 'completed' } },
+                { $unwind: '$items' },
+                { $lookup: { from: 'products', localField: 'items.product', foreignField: '_id', as: 'prod' } },
+                { $unwind: { path: '$prod', preserveNullAndEmptyArrays: true } },
+                { $group: { _id: '$prod.category' } },
+                { $match: { _id: { $ne: null } } },
+                { $count: 'total' },
+            ]);
+            if ((categoryAgg[0]?.total || 0) >= 5) {
+                await this.awardBadge(userId, 'explorer');
+            }
+        }
+        // ── Profile ──────────────────────────────────────────────────
+        if (user.emailVerified && !badges.includes('verified-identity')) {
+            await this.awardBadge(userId, 'verified-identity');
+        }
+        // ── Early adopter (joined within first 6 months of platform) ─
+        // Update PLATFORM_LAUNCH_DATE to your actual go-live date
+        if (!badges.includes('early-adopter')) {
+            const PLATFORM_LAUNCH_DATE = new Date('2026-06-09'); // 2nd week of June 2026
+            const earlyAdopterCutoff = new Date(PLATFORM_LAUNCH_DATE);
+            earlyAdopterCutoff.setMonth(earlyAdopterCutoff.getMonth() + 6);
+            if (user.createdAt <= earlyAdopterCutoff) {
+                await this.awardBadge(userId, 'early-adopter');
+            }
         }
     }
     /**
@@ -406,7 +477,7 @@ class RewardController {
      * Award locked points for vendor referral — not usable until vendor's first sale
      */
     async awardVendorReferralPoints(referrerId, vendorId) {
-        const REFERRAL_POINTS = 500;
+        const REFERRAL_POINTS = 1000;
         await PointsTransaction_1.default.create({
             user: referrerId,
             type: 'earn',
@@ -418,12 +489,12 @@ class RewardController {
             metadata: { vendorId },
         });
         try {
-            await notification_service_1.notificationService.pointsEarned(referrerId, REFERRAL_POINTS, 'You referred a vendor! 500 points will unlock when they make their first sale.');
+            await notification_service_1.notificationService.pointsEarned(referrerId, REFERRAL_POINTS, 'You referred a vendor! 1,000 points will unlock when they make their first sale.');
         }
         catch (err) {
             logger_1.logger.error('Error sending referral notification:', err);
         }
-        logger_1.logger.info(`Locked 500 referral points for user ${referrerId} pending vendor ${vendorId} first sale`);
+        logger_1.logger.info(`Locked 1,000 referral points for user ${referrerId} pending vendor ${vendorId} first sale`);
     }
     /**
      * Unlock vendor referral points when the vendor makes their first sale
@@ -448,7 +519,7 @@ class RewardController {
             $inc: { points: lockedTx.points },
         });
         try {
-            await notification_service_1.notificationService.pointsEarned(lockedTx.user.toString(), lockedTx.points, 'Your vendor referral reward is now active! 500 points added to your balance.');
+            await notification_service_1.notificationService.pointsEarned(lockedTx.user.toString(), lockedTx.points, `Your vendor referral reward is now active! ${lockedTx.points.toLocaleString()} points added to your balance.`);
         }
         catch (err) {
             logger_1.logger.error('Error sending unlock notification:', err);

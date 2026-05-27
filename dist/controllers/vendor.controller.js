@@ -125,7 +125,7 @@ class VendorController {
             baseFilter.verificationStatus = types_1.VendorVerificationStatus.VERIFIED;
         }
         const vendors = await VendorProfile_1.default.find(baseFilter)
-            .populate('user', 'firstName lastName')
+            .populate('user', 'firstName lastName avatar')
             .sort(sortCriteria)
             .limit(limit)
             .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium');
@@ -147,6 +147,9 @@ class VendorController {
                 description: vendor.businessDescription,
                 image: vendor.businessLogo || '',
                 coverImage: vendor.businessBanner || '',
+                userAvatar: vendorUser.avatar || '',
+                firstName: vendorUser.firstName || '',
+                lastName: vendorUser.lastName || '',
                 location,
                 rating: vendor.averageRating || 0,
                 reviews: vendor.totalReviews || 0,

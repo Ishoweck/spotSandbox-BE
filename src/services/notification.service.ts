@@ -236,6 +236,17 @@ class NotificationService {
     });
   }
 
+  async insufficientWalletBalance(userId: string, required: number, current: number): Promise<void> {
+    await this.send({
+      userId,
+      type: NotificationType.PAYMENT,
+      title: 'Insufficient Wallet Balance',
+      message: `You need ₦${required.toLocaleString()} to complete this order, but your wallet only has ₦${current.toLocaleString()}. Please top up and try again.`,
+      data: { required, current },
+      link: '/wallet',
+    });
+  }
+
   async walletTopUp(userId: string, amount: number, newBalance: number): Promise<void> {
     await this.send({
       userId,
@@ -423,14 +434,30 @@ class NotificationService {
       'loyal-customer': 'Loyal Customer',
       'vip-customer': 'VIP Customer',
       'high-spender': 'High Spender',
+      'century-shopper': 'Century Shopper',
+      'big-spender': 'Big Spender',
+      'whale': 'Whale',
+      'flash-buyer': 'Flash Buyer',
+      'first-review': 'First Review',
+      'top-reviewer': 'Top Reviewer',
+      'five-star-fan': '5-Star Fan',
+      'streak-3': '3-Day Streak',
+      'streak-7': 'Week Warrior',
+      'streak-30': 'On Fire!',
+      'referral-rookie': 'Referral Rookie',
+      'connector': 'Connector',
+      'wishlist-collector': 'Wishlist Collector',
+      'explorer': 'Explorer',
+      'verified-identity': 'Verified Identity',
+      'early-adopter': 'Early Adopter',
     };
 
     await this.send({
       userId,
       type: NotificationType.SYSTEM,
-      title: 'New Badge Unlocked',
+      title: '🏅 New Badge Unlocked!',
       message: `Congratulations! You earned the "${badgeNames[badge] || badge}" badge!`,
-      data: { badge },
+      data: { type: 'badge', badge },
       link: '/rewards',
     });
   }
