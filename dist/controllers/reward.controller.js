@@ -136,8 +136,9 @@ class RewardController {
             if (points < 100) {
                 throw new error_1.AppError('Minimum redemption is 100 points', 400);
             }
-            // Conversion rate: 100 points = ₦100
-            const cashValue = points;
+            // Tier-based conversion rate
+            const conversionRate = this.getTierConversionRate(user.points || 0);
+            const cashValue = Math.round(points * conversionRate * 100) / 100;
             // Atomic deduct using findOneAndUpdate to prevent race conditions
             const updated = await User_1.default.findOneAndUpdate({ _id: userId, points: { $gte: points } }, { $inc: { points: -points } }, { new: true });
             if (!updated) {
@@ -158,6 +159,8 @@ class RewardController {
                 wallet = await Additional_1.Wallet.create({ user: user._id });
             }
             wallet.vCredits = (wallet.vCredits || 0) + cashValue;
+            wallet.vCreditsExpiresAt = this.vCreditsExpiry();
+            wallet.vCreditsRemindersSent = [];
             wallet.transactions.push({
                 type: 'credit',
                 amount: cashValue,
@@ -299,37 +302,21 @@ class RewardController {
         if (!user) {
             throw new error_1.AppError('User not found', 404);
         }
-        // Define available rewards
-        const rewards = [
-            {
-                id: 'vcredits-100',
-                name: '100 VCredits',
-                description: 'Convert 100 points to 100 VCredits',
-                pointsCost: 100,
-                available: (user.points || 0) >= 100,
-            },
-            {
-                id: 'vcredits-500',
-                name: '500 VCredits',
-                description: 'Convert 500 points to 500 VCredits',
-                pointsCost: 500,
-                available: (user.points || 0) >= 500,
-            },
-            {
-                id: 'vcredits-1000',
-                name: '1,000 VCredits',
-                description: 'Convert 1,000 points to 1,000 VCredits',
-                pointsCost: 1000,
-                available: (user.points || 0) >= 1000,
-            },
-            {
-                id: 'vcredits-5000',
-                name: '5,000 VCredits',
-                description: 'Convert 5,000 points to 5,000 VCredits',
-                pointsCost: 5000,
-                available: (user.points || 0) >= 5000,
-            },
-        ];
+        const userPoints = user.points || 0;
+        const rate = this.getTierConversionRate(userPoints);
+        const tier = this.getTierName(userPoints);
+        const rewardOptions = [100, 500, 1000, 5000];
+        const rewards = rewardOptions.map((cost) => {
+            const vCreditsValue = Math.round(cost * rate * 100) / 100;
+            return {
+                id: `vcredits-${cost}`,
+                name: `₦${vCreditsValue.toLocaleString()} VCredits`,
+                description: `Convert ${cost} points → ₦${vCreditsValue.toLocaleString()} VCredits (${tier} rate: ₦${rate}/pt)`,
+                pointsCost: cost,
+                vCreditsValue,
+                available: userPoints >= cost,
+            };
+        });
         res.json({
             success: true,
             data: {
@@ -541,6 +528,95 @@ class RewardController {
         }
         // Check for badge awards
         await this.checkBadges(order.user.toString());
+    }
+    /** Returns a Date 60 days from now — used to (re)set vCredits expiry */
+    vCreditsExpiry() {
+        return new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+    }
+    /**
+     * Cashback rates per tier (applied to order total on delivery)
+     */
+    getTierCashbackRate(points) {
+        if (points >= 10000)
+            return 0.01; // Diamond  1%
+        if (points >= 5000)
+            return 0.01; // Platinum 1%
+        if (points >= 2000)
+            return 0.007; // Gold     0.7%
+        if (points >= 500)
+            return 0.005; // Silver   0.5%
+        return 0.004; // Bronze   0.4%
+    }
+    /**
+     * Points → VCredits conversion rate (₦ per point) per tier
+     */
+    getTierConversionRate(points) {
+        if (points >= 10000)
+            return 1.00; // Diamond  ₦1.00/pt
+        if (points >= 5000)
+            return 1.00; // Platinum ₦1.00/pt
+        if (points >= 2000)
+            return 0.70; // Gold     ₦0.70/pt
+        if (points >= 500)
+            return 0.50; // Silver   ₦0.50/pt
+        return 0.40; // Bronze   ₦0.40/pt
+    }
+    getTierName(points) {
+        if (points >= 10000)
+            return 'Diamond';
+        if (points >= 5000)
+            return 'Platinum';
+        if (points >= 2000)
+            return 'Gold';
+        if (points >= 500)
+            return 'Silver';
+        return 'Bronze';
+    }
+    /**
+     * Award tier-based cashback to buyer's wallet after order delivery
+     * Called alongside awardOrderPoints — safe to call multiple times (uses orderId reference guard)
+     */
+    async awardCashback(orderId) {
+        const order = await Order_1.default.findById(orderId).select('user total orderNumber paymentStatus cashbackAwarded');
+        if (!order || order.paymentStatus !== 'completed')
+            return;
+        if (order.cashbackAwarded)
+            return; // idempotency guard
+        const user = await User_1.default.findById(order.user).select('points');
+        if (!user)
+            return;
+        const rate = this.getTierCashbackRate(user.points || 0);
+        if (rate === 0)
+            return; // Bronze — no cashback
+        const cashbackAmount = Math.round(order.total * rate * 100) / 100;
+        if (cashbackAmount < 1)
+            return; // too small to bother
+        const tierName = this.getTierName(user.points || 0);
+        // Mark the order so we never double-credit
+        await Order_1.default.findByIdAndUpdate(orderId, { cashbackAwarded: true });
+        // Credit buyer's wallet
+        await Additional_1.Wallet.findOneAndUpdate({ user: order.user }, {
+            $inc: { balance: cashbackAmount, totalEarned: cashbackAmount },
+            $push: {
+                transactions: {
+                    type: 'credit',
+                    amount: cashbackAmount,
+                    purpose: 'cashback',
+                    reference: `cashback_${order.orderNumber}`,
+                    description: `${tierName} tier cashback (${Math.round(rate * 100)}%) on Order #${order.orderNumber}`,
+                    relatedOrder: order._id,
+                    status: 'completed',
+                    timestamp: new Date(),
+                },
+            },
+        }, { upsert: true });
+        logger_1.logger.info(`✅ Cashback ₦${cashbackAmount} (${Math.round(rate * 100)}% ${tierName}) awarded to user ${order.user} for order ${order.orderNumber}`);
+        try {
+            await notification_service_1.notificationService.pointsEarned(order.user.toString(), 0, `You earned ₦${cashbackAmount.toLocaleString()} cashback as a ${tierName} member! It has been added to your wallet.`);
+        }
+        catch (err) {
+            logger_1.logger.error('Error sending cashback notification:', err);
+        }
     }
 }
 exports.RewardController = RewardController;

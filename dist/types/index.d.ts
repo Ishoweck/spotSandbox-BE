@@ -122,6 +122,8 @@ export interface ApiResponse<T = any> {
         limit?: number;
         total?: number;
         totalPages?: number;
+        hasNextPage?: boolean;
+        hasPrevPage?: boolean;
     };
 }
 export interface IAddress {

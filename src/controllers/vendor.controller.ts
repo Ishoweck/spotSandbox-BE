@@ -77,7 +77,9 @@ export class VendorController {
    */
   async getTopVendors(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const q = (req.query.q as string || '').trim();
-    const limit = parseInt(req.query.limit as string) || (q ? 50 : 10);
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || (q ? 50 : 10)));
+    const skip = (page - 1) * limit;
     const sortBy = (req.query.sortBy as string) || 'rating';
 
     let sortCriteria: any = {};
@@ -104,11 +106,15 @@ export class VendorController {
       baseFilter.verificationStatus = VendorVerificationStatus.VERIFIED;
     }
 
-    const vendors = await VendorProfile.find(baseFilter)
-      .populate('user', 'firstName lastName avatar')
-      .sort(sortCriteria)
-      .limit(limit)
-      .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium');
+    const [vendors, total] = await Promise.all([
+      VendorProfile.find(baseFilter)
+        .populate('user', 'firstName lastName avatar')
+        .sort(sortCriteria)
+        .skip(skip)
+        .limit(limit)
+        .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium'),
+      VendorProfile.countDocuments(baseFilter),
+    ]);
 
     const vendorsWithDetails = await Promise.all(
       vendors.map(async (vendor) => {
@@ -153,7 +159,15 @@ export class VendorController {
       message: 'Top vendors fetched successfully',
       data: {
         vendors: vendorsWithDetails,
-        total: vendorsWithDetails.length,
+        total,
+      },
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
       },
     });
   }

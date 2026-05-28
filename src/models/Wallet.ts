@@ -16,6 +16,8 @@ export interface IWallet extends Document {
   user: Types.ObjectId;
   balance: number;
   vCredits: number;
+  vCreditsExpiresAt?: Date;
+  vCreditsRemindersSent: number[];
   totalEarned: number;
   totalSpent: number;
   totalWithdrawn: number;
@@ -76,6 +78,13 @@ const walletSchema = new Schema<IWallet>({
     type: Number,
     default: 0,
     min: 0,
+  },
+  vCreditsExpiresAt: {
+    type: Date,
+  },
+  vCreditsRemindersSent: {
+    type: [Number],
+    default: [],
   },
   totalEarned: {
     type: Number,

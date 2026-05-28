@@ -100,7 +100,9 @@ class VendorController {
      */
     async getTopVendors(req, res) {
         const q = (req.query.q || '').trim();
-        const limit = parseInt(req.query.limit) || (q ? 50 : 10);
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || (q ? 50 : 10)));
+        const skip = (page - 1) * limit;
         const sortBy = req.query.sortBy || 'rating';
         let sortCriteria = {};
         switch (sortBy) {
@@ -124,11 +126,15 @@ class VendorController {
         else {
             baseFilter.verificationStatus = types_1.VendorVerificationStatus.VERIFIED;
         }
-        const vendors = await VendorProfile_1.default.find(baseFilter)
-            .populate('user', 'firstName lastName avatar')
-            .sort(sortCriteria)
-            .limit(limit)
-            .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium');
+        const [vendors, total] = await Promise.all([
+            VendorProfile_1.default.find(baseFilter)
+                .populate('user', 'firstName lastName avatar')
+                .sort(sortCriteria)
+                .skip(skip)
+                .limit(limit)
+                .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium'),
+            VendorProfile_1.default.countDocuments(baseFilter),
+        ]);
         const vendorsWithDetails = await Promise.all(vendors.map(async (vendor) => {
             const vendorUser = vendor.user;
             const productCount = await Product_1.default.countDocuments({
@@ -166,7 +172,15 @@ class VendorController {
             message: 'Top vendors fetched successfully',
             data: {
                 vendors: vendorsWithDetails,
-                total: vendorsWithDetails.length,
+                total,
+            },
+            meta: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit),
+                hasNextPage: page < Math.ceil(total / limit),
+                hasPrevPage: page > 1,
             },
         });
     }

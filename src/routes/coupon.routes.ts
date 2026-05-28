@@ -23,6 +23,13 @@ router.get(
   asyncHandler(couponController.validateCoupon.bind(couponController))
 );
 
+// Authenticated user route — get my assigned coupons
+router.get(
+  '/my',
+  authenticate,
+  asyncHandler(couponController.getMyCoupons.bind(couponController))
+);
+
 // Admin/Vendor routes
 router.use(authenticate);
 router.use(authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN));

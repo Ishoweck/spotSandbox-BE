@@ -68,7 +68,7 @@ class NotificationService {
      * Send notification to multiple users
      */
     async sendToMany(options) {
-        const { userIds, type, title, message, data, link } = options;
+        const { userIds, type, title, message, data, link, skipPush } = options;
         const uniqueIds = [...new Set(userIds)];
         // Batch create in-app notifications
         const docs = uniqueIds.map((userId) => ({
@@ -85,39 +85,42 @@ class NotificationService {
         catch (error) {
             logger_1.logger.error('Bulk notification insert error:', error.message);
         }
-        // Emit real-time socket events to each user
+        // Emit real-time socket events to each user.
+        // We intentionally omit per-user unreadCount here — doing N countDocuments
+        // queries sequentially would block for thousands of users. The client fetches
+        // the fresh count on its own when it receives the event.
         if (ioInstance) {
             for (const userId of uniqueIds) {
                 try {
-                    const unreadCount = await Additional_1.Notification.countDocuments({ user: userId, read: false });
                     ioInstance.to(`user_${userId}`).emit('new_notification', {
                         notification: { type, title, message, data, link, read: false, createdAt: new Date() },
-                        unreadCount,
                     });
                 }
-                catch (err) {
-                    // Don't block on socket errors
+                catch {
+                    // Non-critical
                 }
             }
         }
-        // Send push notifications
-        try {
-            const users = await User_1.default.find({
-                _id: { $in: uniqueIds },
-                fcmTokens: { $exists: true, $not: { $size: 0 } },
-            }).select('fcmTokens');
-            const allTokens = users.flatMap((u) => u.fcmTokens);
-            if (allTokens.length > 0) {
-                const pushData = {
-                    type,
-                    ...(link ? { link } : {}),
-                    ...(data ? { payload: JSON.stringify(data) } : {}),
-                };
-                await (0, firebase_1.sendPushNotification)(allTokens, title, message, pushData);
+        // Send push notifications (skipped when caller handles push separately)
+        if (!skipPush) {
+            try {
+                const users = await User_1.default.find({
+                    _id: { $in: uniqueIds },
+                    fcmTokens: { $exists: true, $not: { $size: 0 } },
+                }).select('fcmTokens');
+                const allTokens = users.flatMap((u) => u.fcmTokens);
+                if (allTokens.length > 0) {
+                    const pushData = {
+                        type,
+                        ...(link ? { link } : {}),
+                        ...(data ? { payload: JSON.stringify(data) } : {}),
+                    };
+                    await (0, firebase_1.sendPushNotification)(allTokens, title, message, pushData);
+                }
             }
-        }
-        catch (error) {
-            logger_1.logger.error('Bulk push notification error:', error.message);
+            catch (error) {
+                logger_1.logger.error('Bulk push notification error:', error.message);
+            }
         }
         logger_1.logger.info(`Notification sent to ${uniqueIds.length} users: [${type}] ${title}`);
     }
@@ -372,6 +375,28 @@ class NotificationService {
             title: 'Points Earned',
             message: `You earned ${points} points for ${reason}!`,
             data: { points, reason },
+            link: '/rewards',
+        });
+    }
+    async vCreditsExpiringSoon(userId, amount, daysLeft) {
+        const dayLabel = daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
+        await this.send({
+            userId,
+            type: types_1.NotificationType.SYSTEM,
+            title: '⏳ VCredits Expiring Soon',
+            message: `₦${amount.toLocaleString()} VCredits expire ${dayLabel}. Use them at checkout or earn more to reset the timer!`,
+            data: { type: 'points', amount, daysLeft },
+            link: '/rewards',
+        });
+    }
+    async pointsExpiringSoon(userId, totalPoints, daysLeft) {
+        const dayLabel = daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
+        await this.send({
+            userId,
+            type: types_1.NotificationType.SYSTEM,
+            title: '⏳ Points Expiring Soon',
+            message: `You have ${totalPoints.toLocaleString()} points expiring ${dayLabel}. Redeem them for VCredits before they're gone!`,
+            data: { type: 'points', totalPoints, daysLeft },
             link: '/rewards',
         });
     }

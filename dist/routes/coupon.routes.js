@@ -17,6 +17,8 @@ const createCouponValidation = [
 ];
 // Public route - validate coupon
 router.get('/validate/:code', auth_1.optionalAuth, (0, error_1.asyncHandler)(coupon_controller_1.couponController.validateCoupon.bind(coupon_controller_1.couponController)));
+// Authenticated user route — get my assigned coupons
+router.get('/my', auth_1.authenticate, (0, error_1.asyncHandler)(coupon_controller_1.couponController.getMyCoupons.bind(coupon_controller_1.couponController)));
 // Admin/Vendor routes
 router.use(auth_1.authenticate);
 router.use((0, auth_1.authorize)(types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN));

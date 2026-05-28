@@ -16,6 +16,7 @@ interface NotifyManyOptions {
     message: string;
     data?: Record<string, any>;
     link?: string;
+    skipPush?: boolean;
 }
 declare class NotificationService {
     /**
@@ -43,6 +44,8 @@ declare class NotificationService {
     priceDrop(userIds: string[], productName: string, oldPrice: number, newPrice: number, productId: string): Promise<void>;
     dealOrOffer(userIds: string[], title: string, message: string, data?: Record<string, any>): Promise<void>;
     pointsEarned(userId: string, points: number, reason: string): Promise<void>;
+    vCreditsExpiringSoon(userId: string, amount: number, daysLeft: number): Promise<void>;
+    pointsExpiringSoon(userId: string, totalPoints: number, daysLeft: number): Promise<void>;
     badgeEarned(userId: string, badge: string): Promise<void>;
     pointsRedeemed(userId: string, points: number, cashValue: number): Promise<void>;
     welcomeNotification(userId: string, firstName: string): Promise<void>;

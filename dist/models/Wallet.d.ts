@@ -14,6 +14,8 @@ export interface IWallet extends Document {
     user: Types.ObjectId;
     balance: number;
     vCredits: number;
+    vCreditsExpiresAt?: Date;
+    vCreditsRemindersSent: number[];
     totalEarned: number;
     totalSpent: number;
     totalWithdrawn: number;

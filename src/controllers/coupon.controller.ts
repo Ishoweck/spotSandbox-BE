@@ -22,6 +22,7 @@ export class CouponController {
       applicableProducts,
       applicableCategories,
       excludedProducts,
+      assignedTo,
     } = req.body;
 
     // Check if code exists
@@ -43,6 +44,7 @@ export class CouponController {
       applicableProducts,
       applicableCategories,
       excludedProducts,
+      assignedTo: assignedTo?.length ? assignedTo : undefined,
     });
 
     res.status(201).json({
@@ -132,6 +134,29 @@ export class CouponController {
       return;
     }
 
+    // Check if coupon is restricted to specific users
+    if (coupon.assignedTo && coupon.assignedTo.length > 0) {
+      if (!req.user) {
+        res.json({
+          success: false,
+          message: 'This coupon is for specific users only. Please log in.',
+          data: { valid: false },
+        });
+        return;
+      }
+      const isAssigned = coupon.assignedTo.some(
+        (id) => id.toString() === req.user!.id
+      );
+      if (!isAssigned) {
+        res.json({
+          success: false,
+          message: 'This coupon is not available for your account',
+          data: { valid: false },
+        });
+        return;
+      }
+    }
+
     // Check if user has already used
     if (req.user && coupon.usedBy.includes(req.user.id as any)) {
       res.json({
@@ -212,6 +237,34 @@ export class CouponController {
     res.json({
       success: true,
       message: 'Coupon deleted successfully',
+    });
+  }
+
+  /**
+   * Get coupons assigned to the logged-in user that they haven't used yet
+   * GET /api/v1/coupons/my
+   */
+  async getMyCoupons(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const userId = req.user!.id;
+    const now = new Date();
+
+    const coupons = await Coupon.find({
+      assignedTo: userId,
+      usedBy: { $ne: userId },
+      isActive: true,
+      validFrom: { $lte: now },
+      validUntil: { $gte: now },
+    })
+      .select('code description discountType discountValue minPurchase maxDiscount validUntil')
+      .sort({ validUntil: 1 })
+      .lean();
+
+    res.json({
+      success: true,
+      data: {
+        coupons,
+        count: coupons.length,
+      },
     });
   }
 

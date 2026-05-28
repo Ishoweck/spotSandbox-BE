@@ -88,6 +88,13 @@ const walletSchema = new mongoose_1.Schema({
         default: 0,
         min: 0,
     },
+    vCreditsExpiresAt: {
+        type: Date,
+    },
+    vCreditsRemindersSent: {
+        type: [Number],
+        default: [],
+    },
     totalEarned: {
         type: Number,
         default: 0,

@@ -1798,10 +1798,13 @@
       if (vCreditsApplied > 0) {
         try {
           // Atomic: deduct only if sufficient vCredits exist — prevents race condition on concurrent orders
+          // Using VCredits resets the 60-day expiry clock on the remaining balance
+          const { rewardController } = await import('./reward.controller');
           const vcWallet = await Wallet.findOneAndUpdate(
             { user: snapshot.userId, vCredits: { $gte: vCreditsApplied } },
             {
               $inc: { vCredits: -vCreditsApplied },
+              $set: { vCreditsExpiresAt: rewardController.vCreditsExpiry(), vCreditsRemindersSent: [] },
               $push: {
                 transactions: {
                   type: TransactionType.DEBIT,
@@ -1813,7 +1816,8 @@
                   timestamp: new Date(),
                 },
               },
-            }
+            },
+            { new: true }
           );
           if (vcWallet) {
             logger.info(`💎 VCredits deducted after payment confirmed: ${vCreditsApplied}`);
@@ -3700,6 +3704,8 @@
         const { rewardController } = await import('./reward.controller');
         await rewardController.awardOrderPoints(order._id.toString());
         logger.info(`✅ Points awarded on delivery for order ${order.orderNumber}`);
+        await rewardController.awardCashback(order._id.toString());
+        logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
 
         // Unlock vendor referral points if any vendor is making their first sale
         const uniqueVendorIds = [...new Set(order.items.map((item: any) => item.vendor.toString()))];
@@ -3849,6 +3855,8 @@
           const { rewardController } = await import('./reward.controller');
           await rewardController.awardOrderPoints(order._id.toString());
           logger.info(`✅ Points awarded on full shipment receipt for order ${order.orderNumber}`);
+          await rewardController.awardCashback(order._id.toString());
+          logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
 
           // Unlock vendor referral points for first-sale vendors
           const uniqueVendorIds = [...new Set(order.items.map((item: any) => item.vendor.toString()))];

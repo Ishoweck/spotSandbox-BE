@@ -11,6 +11,7 @@ export interface IPointsTransaction extends Document {
   status: 'active' | 'locked' | 'expired';
   expiresAt?: Date;
   lockedForVendor?: Types.ObjectId;
+  remindersSent: number[]; // tracks which day-windows (14, 7, 3, 1) have been notified
   metadata?: {
     orderId?: string;
     productId?: string;
@@ -62,6 +63,10 @@ const pointsTransactionSchema = new Schema<IPointsTransaction>(
     lockedForVendor: {
       type: Schema.Types.ObjectId,
       ref: 'User',
+    },
+    remindersSent: {
+      type: [Number],
+      default: [],
     },
     metadata: {
       type: Schema.Types.Mixed,

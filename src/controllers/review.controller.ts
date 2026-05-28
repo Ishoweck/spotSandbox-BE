@@ -6,6 +6,7 @@ import Product from '../models/Product';
 import Order from '../models/Order';
 import User from '../models/User';
 import Wallet from '../models/Wallet';
+import VendorProfile from '../models/VendorProfile';
 import { AppError } from '../middleware/error';
 import { notificationService } from '../services/notification.service';
 import { logger } from '../utils/logger';
@@ -294,7 +295,7 @@ export class ReviewController {
   }
 
   /**
-   * Update product rating (internal helper)
+   * Update product rating then roll up to the vendor profile.
    */
   private async updateProductRating(productId: string): Promise<void> {
     const reviews = await Review.find({ product: productId });
@@ -302,10 +303,37 @@ export class ReviewController {
     const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
     const averageRating = reviews.length > 0 ? totalRating / reviews.length : 0;
 
-    await Product.findByIdAndUpdate(productId, {
-      averageRating: Math.round(averageRating * 10) / 10,
-      totalReviews: reviews.length,
-    });
+    const updatedProduct = await Product.findByIdAndUpdate(
+      productId,
+      {
+        averageRating: Math.round(averageRating * 10) / 10,
+        totalReviews: reviews.length,
+      },
+      { new: true }
+    );
+
+    // Roll up to vendor profile
+    if (updatedProduct?.vendor) {
+      await this.updateVendorRating(updatedProduct.vendor.toString());
+    }
+  }
+
+  /**
+   * Recompute vendor averageRating and totalReviews from all their products.
+   */
+  private async updateVendorRating(vendorUserId: string): Promise<void> {
+    const products = await Product.find({ vendor: vendorUserId }).select('averageRating totalReviews');
+
+    const totalReviews = products.reduce((sum, p) => sum + (p.totalReviews || 0), 0);
+    const weightedSum = products.reduce((sum, p) => sum + ((p.averageRating || 0) * (p.totalReviews || 0)), 0);
+    const averageRating = totalReviews > 0
+      ? Math.round((weightedSum / totalReviews) * 10) / 10
+      : 0;
+
+    await VendorProfile.findOneAndUpdate(
+      { user: vendorUserId },
+      { averageRating, totalReviews }
+    );
   }
 }
 

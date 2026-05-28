@@ -15,6 +15,8 @@ import { initializeSocket } from './config/socket';
 import { setSocketInstance } from './services/notification.service';
 import { setupDailyBackup } from './utils/backup';
 import { setupOrderAutoComplete } from './utils/order-autocomplete';
+import { setupPointsExpiryReminders } from './utils/points-expiry-reminder';
+import { setupVCreditsExpiry } from './utils/vcredits-expiry';
 
 // Load environment variables
 dotenv.config();
@@ -175,6 +177,10 @@ server.listen(PORT, () => {
   setupDailyBackup();
   // Auto-release vendor funds 7 days after delivery if customer hasn't confirmed
   setupOrderAutoComplete();
+  // Send points expiry reminders at 14, 7, 3, and 1 day before expiry
+  setupPointsExpiryReminders();
+  // VCredits expiry — reminders + zero-out after 60 days of inactivity
+  setupVCreditsExpiry();
 });
 
 // SET SERVER TIMEOUT

@@ -50,6 +50,22 @@ export declare class RewardController {
      * Award points after order completion
      */
     awardOrderPoints(orderId: string): Promise<void>;
+    /** Returns a Date 60 days from now — used to (re)set vCredits expiry */
+    vCreditsExpiry(): Date;
+    /**
+     * Cashback rates per tier (applied to order total on delivery)
+     */
+    private getTierCashbackRate;
+    /**
+     * Points → VCredits conversion rate (₦ per point) per tier
+     */
+    private getTierConversionRate;
+    private getTierName;
+    /**
+     * Award tier-based cashback to buyer's wallet after order delivery
+     * Called alongside awardOrderPoints — safe to call multiple times (uses orderId reference guard)
+     */
+    awardCashback(orderId: string): Promise<void>;
 }
 export declare const rewardController: RewardController;
 //# sourceMappingURL=reward.controller.d.ts.map

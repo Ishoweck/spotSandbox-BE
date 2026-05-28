@@ -33,6 +33,8 @@ import {
   ChatMessage,
 } from '../models/Additional';
 import { notificationService } from '../services/notification.service';
+import { sendEmail } from '../utils/email';
+import { sendPushNotification } from '../config/firebase';
 import { getPaginationMeta, generateSlug } from '../utils/helpers';
 import { asyncHandler } from '../utils/ayncHandler';
 import { logger } from '../utils/logger';
@@ -628,35 +630,85 @@ export const getUserDetails = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const { id } = req.params;
 
-    const [user, wallet, orderStats, vendorProfile, pointsBalance] = await Promise.all([
-      User.findById(id).select(
-        '-password -otp -resetPasswordToken -resetPasswordExpires'
-      ),
-      Wallet.findOne({ user: id }),
-      Order.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(id) } },
-        {
-          $group: {
-            _id: null,
-            totalOrders: { $sum: 1 },
-            totalSpent: { $sum: '$total' },
-            completedOrders: {
-              $sum: { $cond: [{ $eq: ['$status', OrderStatus.DELIVERED] }, 1, 0] },
+    const userId = new mongoose.Types.ObjectId(id);
+    const now = new Date();
+
+    const [user, wallet, orderStats, vendorProfile, pointsSummary, recentOrders, assignedCoupons, lastActivities, recentReviews] =
+      await Promise.all([
+        User.findById(id).select('-password -otp -resetPasswordToken -resetPasswordExpires'),
+        Wallet.findOne({ user: id }),
+        Order.aggregate([
+          { $match: { user: userId } },
+          {
+            $group: {
+              _id: null,
+              totalOrders: { $sum: 1 },
+              totalSpent: { $sum: '$total' },
+              completedOrders: {
+                $sum: { $cond: [{ $eq: ['$status', OrderStatus.DELIVERED] }, 1, 0] },
+              },
+              cancelledOrders: {
+                $sum: { $cond: [{ $eq: ['$status', OrderStatus.CANCELLED] }, 1, 0] },
+              },
             },
           },
-        },
-      ]),
-      VendorProfile.findOne({ user: id }),
-      PointsTransaction.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(id) } },
-        { $group: { _id: null, totalEarned: { $sum: '$points' } } },
-      ]),
-    ]);
+        ]),
+        VendorProfile.findOne({ user: id }),
+        PointsTransaction.aggregate([
+          { $match: { user: userId } },
+          {
+            $group: {
+              _id: '$type',
+              total: { $sum: '$points' },
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+        Order.find({ user: id })
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .select('orderNumber total status paymentStatus createdAt items')
+          .lean(),
+        Coupon.find({
+          assignedTo: userId,
+          isActive: true,
+          validUntil: { $gte: now },
+          usedBy: { $ne: userId },
+        })
+          .select('code discountType discountValue minPurchase maxDiscount validUntil description')
+          .lean(),
+        // Last 10 activity records (login, purchase, review, referral, redemption, etc.)
+        PointsTransaction.find({ user: userId })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .select('type activity points description createdAt status')
+          .lean(),
+        // Last 3 reviews written by this user
+        Review.find({ user: userId })
+          .sort({ createdAt: -1 })
+          .limit(3)
+          .populate('product', 'name images')
+          .select('rating title comment status createdAt product')
+          .lean(),
+      ]);
 
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
+
+    // Referral info: who referred this user + how many they've referred
+    const [referredByUser, referralsCount] = await Promise.all([
+      user.referredBy
+        ? User.findById(user.referredBy).select('firstName lastName email').lean()
+        : null,
+      User.countDocuments({ referredBy: id }),
+    ]);
+
+    // Points summary map
+    const pointsMap = Object.fromEntries(
+      pointsSummary.map((p: any) => [p._id, { total: p.total, count: p.count }])
+    );
 
     res.json({
       success: true,
@@ -665,15 +717,30 @@ export const getUserDetails = asyncHandler(
         wallet: wallet
           ? {
               balance: wallet.balance,
+              vCredits: wallet.vCredits,
+              vCreditsExpiresAt: wallet.vCreditsExpiresAt,
               totalEarned: wallet.totalEarned,
               totalSpent: wallet.totalSpent,
               totalWithdrawn: wallet.totalWithdrawn,
               pendingBalance: wallet.pendingBalance,
             }
           : null,
-        orderStats: orderStats[0] || { totalOrders: 0, totalSpent: 0, completedOrders: 0 },
+        orderStats: orderStats[0] || { totalOrders: 0, totalSpent: 0, completedOrders: 0, cancelledOrders: 0 },
         vendorProfile,
-        pointsBalance: pointsBalance[0]?.totalEarned || 0,
+        pointsSummary: {
+          earned: pointsMap['earn'] ?? { total: 0, count: 0 },
+          spent: pointsMap['spend'] ?? { total: 0, count: 0 },
+          expired: pointsMap['expire'] ?? { total: 0, count: 0 },
+          balance: user.points ?? 0,
+        },
+        recentOrders,
+        assignedCoupons,
+        lastActivities,
+        recentReviews,
+        referralInfo: {
+          referredBy: referredByUser ?? null,
+          referralsCount,
+        },
       },
     });
   }
@@ -929,18 +996,27 @@ export const getVendorDetails = asyncHandler(
       return;
     }
 
-    const [productStats, orderStats, recentOrders, wallet] = await Promise.all([
+    const vendorUserId = vendor.user._id;
+    const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+
+    const [
+      productStats,
+      orderStats,
+      orderStatusBreakdown,
+      recentOrders,
+      wallet,
+      openDisputesCount,
+      topProducts,
+      monthlyRevenue,
+      vendorProductIds,
+      vendorProducts,
+    ] = await Promise.all([
       Product.aggregate([
-        { $match: { vendor: vendor.user._id } },
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 },
-          },
-        },
+        { $match: { vendor: vendorUserId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       Order.aggregate([
-        { $match: { 'items.vendor': vendor.user._id } },
+        { $match: { 'items.vendor': vendorUserId } },
         {
           $group: {
             _id: null,
@@ -949,12 +1025,90 @@ export const getVendorDetails = asyncHandler(
           },
         },
       ]),
-      Order.find({ 'items.vendor': vendor.user._id })
+      Order.aggregate([
+        { $match: { 'items.vendor': vendorUserId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Order.find({ 'items.vendor': vendorUserId })
         .sort({ createdAt: -1 })
         .limit(5)
-        .populate('user', 'firstName lastName'),
-      Wallet.findOne({ user: vendor.user._id }),
+        .populate('user', 'firstName lastName')
+        .select('orderNumber total status paymentStatus createdAt user')
+        .lean(),
+      Wallet.findOne({ user: vendorUserId }),
+      Dispute.countDocuments({
+        vendor: vendorUserId,
+        status: { $in: ['open', 'vendor_responded', 'under_review'] },
+      }),
+      // Top 5 products by revenue
+      Order.aggregate([
+        { $match: { 'items.vendor': vendorUserId } },
+        { $unwind: '$items' },
+        { $match: { 'items.vendor': vendorUserId } },
+        {
+          $group: {
+            _id: '$items.product',
+            productName: { $first: '$items.productName' },
+            totalQuantity: { $sum: '$items.quantity' },
+            totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+            orderCount: { $sum: 1 },
+          },
+        },
+        { $sort: { totalRevenue: -1 } },
+        { $limit: 5 },
+      ]),
+      // Monthly revenue – last 6 months
+      Order.aggregate([
+        {
+          $match: {
+            'items.vendor': vendorUserId,
+            paymentStatus: PaymentStatus.COMPLETED,
+            createdAt: { $gte: sixMonthsAgo },
+          },
+        },
+        {
+          $group: {
+            _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+            revenue: { $sum: '$total' },
+            orders: { $sum: 1 },
+          },
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } },
+      ]),
+      Product.distinct('_id', { vendor: vendorUserId }),
+      // Full product list for this vendor
+      Product.find({ vendor: vendorUserId })
+        .select('name images price status averageRating totalReviews slug category createdAt')
+        .populate('category', 'name')
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean(),
     ]);
+
+    const recentReviews = await Review.find({ product: { $in: vendorProductIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('user', 'firstName lastName avatar')
+      .populate('product', 'name images')
+      .select('rating title comment status createdAt vendorResponse')
+      .lean();
+
+    const statusBreakdown = orderStatusBreakdown.reduce(
+      (acc: Record<string, number>, item: any) => ({ ...acc, [item._id]: item.count }),
+      {}
+    );
+    const totalOrders = orderStats[0]?.totalOrders || 0;
+    const cancelledCount = statusBreakdown['cancelled'] || 0;
+    const cancellationRate = totalOrders > 0
+      ? +((cancelledCount / totalOrders) * 100).toFixed(1)
+      : 0;
+
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const formattedMonthlyRevenue = monthlyRevenue.map((m: any) => ({
+      label: `${MONTH_NAMES[m._id.month - 1]} ${m._id.year}`,
+      revenue: m.revenue,
+      orders: m.orders,
+    }));
 
     res.json({
       success: true,
@@ -964,15 +1118,32 @@ export const getVendorDetails = asyncHandler(
           (acc, item) => ({ ...acc, [item._id]: item.count }),
           {}
         ),
-        orderStats: orderStats[0] || { totalOrders: 0, totalRevenue: 0 },
+        orderStats: {
+          ...(orderStats[0] || { totalOrders: 0, totalRevenue: 0 }),
+          statusBreakdown,
+          cancellationRate,
+        },
         recentOrders,
         wallet: wallet
           ? {
               balance: wallet.balance,
-              totalEarned: wallet.totalEarned,
-              pendingBalance: wallet.pendingBalance,
+              totalEarned: wallet.totalEarned || 0,
+              totalSpent: (wallet as any).totalSpent || 0,
+              totalWithdrawn: wallet.totalWithdrawn || 0,
+              pendingBalance: wallet.pendingBalance || 0,
             }
           : null,
+        openDisputesCount,
+        topProducts,
+        vendorProducts,
+        monthlyRevenue: formattedMonthlyRevenue,
+        recentReviews,
+        performance: {
+          responseRate: vendor.responseRate || 0,
+          responseSpeed: vendor.responseSpeed || 0,
+          cancellationRate,
+          openDisputesCount,
+        },
       },
     });
   }
@@ -1378,6 +1549,7 @@ export const getAllOrders = asyncHandler(
       search,
       startDate,
       endDate,
+      hasDispute,
       sort = 'createdAt',
       order = 'desc',
     } = req.query;
@@ -1399,6 +1571,10 @@ export const getAllOrders = asyncHandler(
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate as string);
       if (endDate) filter.createdAt.$lte = new Date(endDate as string);
+    }
+    if (hasDispute === 'true') {
+      const disputedOrderIds = await Dispute.distinct('order');
+      filter._id = { $in: disputedOrderIds };
     }
 
     const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
@@ -1438,9 +1614,25 @@ export const getOrderDetails = asyncHandler(
       return;
     }
 
+    const orderId = order._id as mongoose.Types.ObjectId;
+
+    const [linkedDispute, orderReviews] = await Promise.all([
+      Dispute.findOne({ order: orderId })
+        .select('disputeNumber status reason description createdAt resolvedAt refundAmount refundType')
+        .lean(),
+      Review.find({ order: orderId })
+        .populate('product', 'name images')
+        .select('rating title comment status product createdAt vendorResponse')
+        .lean(),
+    ]);
+
     res.json({
       success: true,
-      data: order,
+      data: {
+        ...order.toObject(),
+        linkedDispute: linkedDispute || null,
+        orderReviews: orderReviews || [],
+      },
     });
   }
 );
@@ -1491,6 +1683,31 @@ export const updateOrderStatus = asyncHandler(
       message: `Order status updated to ${status}`,
       data: { id: order._id, status: order.status },
     });
+  }
+);
+
+/**
+ * PUT /admin/orders/:id/note
+ * Add or update an internal admin note on an order
+ */
+export const addAdminNote = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { note } = req.body;
+    if (typeof note !== 'string') {
+      res.status(400).json({ success: false, message: 'Note must be a string' });
+      return;
+    }
+    const order = await Order.findByIdAndUpdate(
+      id,
+      { $set: { adminNote: note } },
+      { new: true }
+    );
+    if (!order) {
+      res.status(404).json({ success: false, message: 'Order not found' });
+      return;
+    }
+    res.json({ success: true, message: 'Admin note saved', data: { adminNote: order.adminNote } });
   }
 );
 
@@ -1581,6 +1798,11 @@ export const processRefund = asyncHandler(
  */
 export const getFinancialOverview = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const now = new Date();
+    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
     const [
       totalRevenue,
       totalCommissions,
@@ -1588,6 +1810,12 @@ export const getFinancialOverview = asyncHandler(
       pendingWithdrawals,
       walletBalances,
       monthlyRevenue,
+      refundStats,
+      paymentMethodBreakdown,
+      topVendorsByCommission,
+      vCreditsCirculation,
+      thisMonthRevenue,
+      lastMonthRevenue,
     ] = await Promise.all([
       Order.aggregate([
         { $match: { paymentStatus: PaymentStatus.COMPLETED } },
@@ -1595,71 +1823,78 @@ export const getFinancialOverview = asyncHandler(
       ]),
       Wallet.aggregate([
         { $unwind: '$transactions' },
-        {
-          $match: {
-            'transactions.purpose': WalletPurpose.COMMISSION,
-            'transactions.status': 'completed',
-          },
-        },
+        { $match: { 'transactions.purpose': WalletPurpose.COMMISSION, 'transactions.status': 'completed' } },
         { $group: { _id: null, total: { $sum: '$transactions.amount' } } },
       ]),
       Wallet.aggregate([
         { $unwind: '$transactions' },
-        {
-          $match: {
-            'transactions.purpose': WalletPurpose.WITHDRAWAL,
-            'transactions.status': 'completed',
-          },
-        },
+        { $match: { 'transactions.purpose': WalletPurpose.WITHDRAWAL, 'transactions.status': 'completed' } },
         { $group: { _id: null, total: { $sum: '$transactions.amount' } } },
       ]),
       Wallet.aggregate([
         { $unwind: '$transactions' },
-        {
-          $match: {
-            'transactions.purpose': WalletPurpose.WITHDRAWAL,
-            'transactions.status': 'pending',
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: '$transactions.amount' },
-            count: { $sum: 1 },
-          },
-        },
+        { $match: { 'transactions.purpose': WalletPurpose.WITHDRAWAL, 'transactions.status': 'pending' } },
+        { $group: { _id: null, total: { $sum: '$transactions.amount' }, count: { $sum: 1 } } },
       ]),
       Wallet.aggregate([
-        {
-          $group: {
-            _id: null,
-            totalBalance: { $sum: '$balance' },
-            totalPending: { $sum: '$pendingBalance' },
-          },
-        },
+        { $group: { _id: null, totalBalance: { $sum: '$balance' }, totalPending: { $sum: '$pendingBalance' }, totalEarned: { $sum: '$totalEarned' }, totalWithdrawn: { $sum: '$totalWithdrawn' } } },
       ]),
       Order.aggregate([
         { $match: { paymentStatus: PaymentStatus.COMPLETED } },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$createdAt' },
-              month: { $month: '$createdAt' },
-            },
-            revenue: { $sum: '$total' },
-            orders: { $sum: 1 },
-          },
-        },
+        { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
         { $sort: { '_id.year': -1, '_id.month': -1 } },
         { $limit: 12 },
       ]),
+      Order.aggregate([
+        { $match: { 'refundAmount': { $gt: 0 } } },
+        { $group: { _id: null, total: { $sum: '$refundAmount' }, count: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: { paymentStatus: PaymentStatus.COMPLETED } },
+        { $group: { _id: '$paymentMethod', total: { $sum: '$total' }, count: { $sum: 1 } } },
+        { $sort: { total: -1 } },
+      ]),
+      Wallet.aggregate([
+        { $unwind: '$transactions' },
+        { $match: { 'transactions.purpose': WalletPurpose.COMMISSION, 'transactions.status': 'completed' } },
+        { $group: { _id: '$user', totalCommission: { $sum: '$transactions.amount' } } },
+        { $sort: { totalCommission: -1 } },
+        { $limit: 5 },
+        { $lookup: { from: 'vendorprofiles', localField: '_id', foreignField: 'user', as: 'vendor' } },
+        { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $project: { businessName: { $ifNull: ['$vendor.businessName', { $concat: ['$user.firstName', ' ', '$user.lastName'] }] }, totalCommission: 1, vendorId: '$vendor._id' } },
+      ]),
+      Wallet.aggregate([
+        { $group: { _id: null, totalVCredits: { $sum: '$vCredits' } } },
+      ]),
+      Order.aggregate([
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfThisMonth } } },
+        { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth } } },
+        { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
+      ]),
     ]);
+
+    const totalRev = totalRevenue[0]?.total || 0;
+    const totalRef = refundStats[0]?.total || 0;
+    const totalComm = totalCommissions[0]?.total || 0;
+    const netRevenue = totalRev - totalRef;
+    const refundRate = totalRev > 0 ? +((totalRef / totalRev) * 100).toFixed(1) : 0;
+
+    const thisMonthRev = thisMonthRevenue[0]?.total || 0;
+    const lastMonthRev = lastMonthRevenue[0]?.total || 0;
+    const monthGrowth = lastMonthRev > 0 ? +((( thisMonthRev - lastMonthRev) / lastMonthRev) * 100).toFixed(1) : null;
 
     res.json({
       success: true,
       data: {
-        totalRevenue: totalRevenue[0]?.total || 0,
-        totalCommissions: totalCommissions[0]?.total || 0,
+        totalRevenue: totalRev,
+        netRevenue,
+        totalCommissions: totalComm,
         totalWithdrawals: totalWithdrawals[0]?.total || 0,
         pendingWithdrawals: {
           amount: pendingWithdrawals[0]?.total || 0,
@@ -1668,8 +1903,21 @@ export const getFinancialOverview = asyncHandler(
         walletBalances: {
           totalBalance: walletBalances[0]?.totalBalance || 0,
           totalPending: walletBalances[0]?.totalPending || 0,
+          totalEarned: walletBalances[0]?.totalEarned || 0,
+          totalWithdrawn: walletBalances[0]?.totalWithdrawn || 0,
         },
+        refundStats: {
+          total: totalRef,
+          count: refundStats[0]?.count || 0,
+          refundRate,
+        },
+        paymentMethodBreakdown,
+        topVendorsByCommission,
+        vCreditsInCirculation: vCreditsCirculation[0]?.totalVCredits || 0,
         monthlyRevenue,
+        thisMonth: { revenue: thisMonthRev, orders: thisMonthRevenue[0]?.count || 0 },
+        lastMonth: { revenue: lastMonthRev, orders: lastMonthRevenue[0]?.count || 0 },
+        monthGrowth,
       },
     });
   }
@@ -1756,50 +2004,77 @@ export const getAllTransactions = asyncHandler(
 );
 
 /**
+ * GET /admin/finance/transactions/:transactionId
+ * Get full detail for a single wallet transaction
+ */
+export const getTransactionById = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { transactionId } = req.params;
+
+    const result = await Wallet.aggregate([
+      { $unwind: '$transactions' },
+      { $match: { 'transactions._id': new mongoose.Types.ObjectId(transactionId) } },
+      { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'userInfo' } },
+      { $unwind: '$userInfo' },
+      { $lookup: { from: 'vendorprofiles', localField: 'user', foreignField: 'user', as: 'vendorProfile' } },
+      { $unwind: { path: '$vendorProfile', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          walletId: '$_id',
+          walletBalance: '$balance',
+          userId: '$user',
+          userName: { $concat: ['$userInfo.firstName', ' ', '$userInfo.lastName'] },
+          userEmail: '$userInfo.email',
+          userPhone: '$userInfo.phone',
+          businessName: '$vendorProfile.businessName',
+          payoutDetails: '$vendorProfile.payoutDetails',
+          transaction: '$transactions',
+        },
+      },
+      { $limit: 1 },
+    ]);
+
+    if (!result.length) {
+      res.status(404).json({ success: false, message: 'Transaction not found' });
+      return;
+    }
+
+    res.json({ success: true, data: result[0] });
+  }
+);
+
+/**
  * GET /admin/finance/withdrawals
  * Pending withdrawal requests
  */
 export const getPendingWithdrawals = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { page = 1, limit = 20, status = 'pending' } = req.query;
+    const { page = 1, limit = 20, status = 'pending', search, startDate, endDate } = req.query;
 
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
 
+    const txnMatch: any = { 'transactions.purpose': WalletPurpose.WITHDRAWAL };
+    if (status && status !== 'all') txnMatch['transactions.status'] = status;
+    if (startDate || endDate) {
+      txnMatch['transactions.timestamp'] = {};
+      if (startDate) txnMatch['transactions.timestamp'].$gte = new Date(startDate as string);
+      if (endDate) txnMatch['transactions.timestamp'].$lte = new Date(endDate as string);
+    }
+
     const pipeline: any[] = [
       { $unwind: '$transactions' },
-      {
-        $match: {
-          'transactions.purpose': WalletPurpose.WITHDRAWAL,
-          'transactions.status': status,
-        },
-      },
+      { $match: txnMatch },
       { $sort: { 'transactions.timestamp': -1 } },
       {
         $facet: {
           data: [
             { $skip: (pageNum - 1) * limitNum },
             { $limit: limitNum },
-            {
-              $lookup: {
-                from: 'users',
-                localField: 'user',
-                foreignField: '_id',
-                as: 'userInfo',
-              },
-            },
+            { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'userInfo' } },
             { $unwind: '$userInfo' },
-            {
-              $lookup: {
-                from: 'vendorprofiles',
-                localField: 'user',
-                foreignField: 'user',
-                as: 'vendorProfile',
-              },
-            },
-            {
-              $unwind: { path: '$vendorProfile', preserveNullAndEmptyArrays: true },
-            },
+            { $lookup: { from: 'vendorprofiles', localField: 'user', foreignField: 'user', as: 'vendorProfile' } },
+            { $unwind: { path: '$vendorProfile', preserveNullAndEmptyArrays: true } },
             {
               $project: {
                 walletId: '$_id',
@@ -1813,17 +2088,37 @@ export const getPendingWithdrawals = asyncHandler(
             },
           ],
           total: [{ $count: 'count' }],
+          stats: [
+            {
+              $group: {
+                _id: '$transactions.status',
+                count: { $sum: 1 },
+                total: { $sum: '$transactions.amount' },
+              },
+            },
+          ],
         },
       },
     ];
 
+    // Apply search post-lookup if needed (search by userName/userEmail)
     const result = await Wallet.aggregate(pipeline);
-    const data = result[0]?.data || [];
-    const total = result[0]?.total[0]?.count || 0;
+    let data = result[0]?.data || [];
 
+    if (search) {
+      const q = (search as string).toLowerCase();
+      data = data.filter((d: any) =>
+        d.userName?.toLowerCase().includes(q) || d.userEmail?.toLowerCase().includes(q)
+      );
+    }
+
+    const total = result[0]?.total[0]?.count || 0;
+    const stats = result[0]?.stats || [];
+
+    const withdrawalStats = stats.reduce((acc: any, s: any) => ({ ...acc, [s._id]: { count: s.count, total: s.total } }), {});
     res.json({
       success: true,
-      data,
+      data: { withdrawals: data, withdrawalStats },
       meta: getPaginationMeta(total, pageNum, limitNum),
     });
   }
@@ -1921,6 +2216,10 @@ export const getAllReviews = asyncHandler(
       status,
       reported,
       rating,
+      search,
+      startDate,
+      endDate,
+      vendor,
       sort = 'createdAt',
       order = 'desc',
     } = req.query;
@@ -1932,30 +2231,107 @@ export const getAllReviews = asyncHandler(
     if (status) filter.status = status;
     if (reported === 'true') filter.reported = true;
     if (rating) filter.rating = Number(rating);
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate as string);
+      if (endDate) filter.createdAt.$lte = new Date(endDate as string);
+    }
+
+    // Search across comment, user name/email, product name
+    if (search) {
+      const searchRegex = new RegExp(search as string, 'i');
+      const [matchingUserIds, matchingProductIds] = await Promise.all([
+        User.find({
+          $or: [{ firstName: searchRegex }, { lastName: searchRegex }, { email: searchRegex }],
+        }).distinct('_id'),
+        Product.find({ name: searchRegex }).distinct('_id'),
+      ]);
+      filter.$or = [
+        { user: { $in: matchingUserIds } },
+        { product: { $in: matchingProductIds } },
+        { comment: searchRegex },
+        { title: searchRegex },
+      ];
+    }
+
+    // Filter by vendor's products
+    if (vendor) {
+      const vendorProductIds = await Product.distinct('_id', { vendor: new mongoose.Types.ObjectId(vendor as string) });
+      filter.product = { $in: vendorProductIds };
+    }
 
     const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
 
-    const [reviews, total] = await Promise.all([
-      Review.find(filter)
-        .populate('user', 'firstName lastName email')
-        .populate('product', 'name images slug')
-        .sort(sortObj)
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
-      Review.countDocuments(filter),
+    const [[reviews, total], globalStats, ratingDist] = await Promise.all([
+      Promise.all([
+        Review.find(filter)
+          .populate('user', 'firstName lastName email avatar')
+          .populate('product', 'name images slug vendor')
+          .populate('order', 'orderNumber')
+          .sort(sortObj)
+          .skip((pageNum - 1) * limitNum)
+          .limit(limitNum)
+          .lean(),
+        Review.countDocuments(filter),
+      ]),
+      Review.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+            approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            reported: { $sum: { $cond: [{ $eq: ['$reported', true] }, 1, 0] } },
+            avgRating: { $avg: '$rating' },
+          },
+        },
+      ]),
+      Review.aggregate([
+        { $group: { _id: '$rating', count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
     res.json({
       success: true,
-      data: reviews,
+      data: {
+        reviews,
+        stats: globalStats[0] || { total: 0, pending: 0, approved: 0, rejected: 0, reported: 0, avgRating: 0 },
+        ratingDist,
+      },
       meta: getPaginationMeta(total, pageNum, limitNum),
     });
   }
 );
 
 /**
+ * GET /admin/reviews/:id
+ * Get a single review with full context (order, vendor info)
+ */
+export const getReviewById = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const review = await Review.findById(id)
+      .populate('user', 'firstName lastName email avatar')
+      .populate('product', 'name images slug vendor')
+      .populate('order', 'orderNumber total status paymentStatus createdAt')
+      .lean();
+    if (!review) {
+      res.status(404).json({ success: false, message: 'Review not found' });
+      return;
+    }
+    const vendorUserId = (review.product as any)?.vendor;
+    const vendorProfile = vendorUserId
+      ? await VendorProfile.findOne({ user: vendorUserId }).select('_id businessName').lean()
+      : null;
+    res.json({ success: true, data: { ...review, vendorProfile } });
+  }
+);
+
+/**
  * PUT /admin/reviews/:id/status
- * Approve or reject a review
+ * Approve, reject, or reset a review to pending
  */
 export const updateReviewStatus = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
@@ -1970,11 +2346,10 @@ export const updateReviewStatus = asyncHandler(
       return;
     }
 
-    const review = await Review.findByIdAndUpdate(
-      id,
-      { status, reported: false },
-      { new: true }
-    );
+    const updateFields: any = { status };
+    if (status !== 'pending') updateFields.reported = false;
+
+    const review = await Review.findByIdAndUpdate(id, updateFields, { new: true });
 
     if (!review) {
       res.status(404).json({ success: false, message: 'Review not found' });
@@ -1997,6 +2372,19 @@ export const updateReviewStatus = asyncHandler(
       }
     }
 
+    // Recalculate product rating on approve/reject
+    if (status === 'approved' || status === 'rejected') {
+      const approvedReviews = await Review.find({ product: review.product, status: 'approved' });
+      const avgRating =
+        approvedReviews.length > 0
+          ? approvedReviews.reduce((sum, r) => sum + r.rating, 0) / approvedReviews.length
+          : 0;
+      await Product.findByIdAndUpdate(review.product, {
+        averageRating: Math.round(avgRating * 10) / 10,
+        totalReviews: approvedReviews.length,
+      });
+    }
+
     res.json({
       success: true,
       message: `Review ${status}`,
@@ -2007,7 +2395,7 @@ export const updateReviewStatus = asyncHandler(
 
 /**
  * DELETE /admin/reviews/:id
- * Delete a review
+ * Delete a review and recalculate product rating
  */
 export const deleteReview = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
@@ -2019,16 +2407,15 @@ export const deleteReview = asyncHandler(
       return;
     }
 
-    // Update product rating
-    const reviews = await Review.find({ product: review.product, status: 'approved' });
+    const remainingReviews = await Review.find({ product: review.product, status: 'approved' });
     const avgRating =
-      reviews.length > 0
-        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+      remainingReviews.length > 0
+        ? remainingReviews.reduce((sum, r) => sum + r.rating, 0) / remainingReviews.length
         : 0;
 
     await Product.findByIdAndUpdate(review.product, {
       averageRating: Math.round(avgRating * 10) / 10,
-      totalReviews: reviews.length,
+      totalReviews: remainingReviews.length,
     });
 
     res.json({
@@ -2052,6 +2439,10 @@ export const getAllDisputes = asyncHandler(
       page = 1,
       limit = 20,
       status,
+      reason,
+      search,
+      startDate,
+      endDate,
       sort = 'createdAt',
       order = 'desc',
     } = req.query;
@@ -2061,23 +2452,75 @@ export const getAllDisputes = asyncHandler(
 
     const filter: any = {};
     if (status) filter.status = status;
+    if (reason) filter.reason = reason;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate as string);
+      if (endDate) filter.createdAt.$lte = new Date(endDate as string);
+    }
+
+    if (search) {
+      const regex = new RegExp(search as string, 'i');
+      const matchingUserIds = await User.find({
+        $or: [{ firstName: regex }, { lastName: regex }, { email: regex }],
+      }).distinct('_id');
+      filter.$or = [
+        { disputeNumber: regex },
+        { orderNumber: regex },
+        { user: { $in: matchingUserIds } },
+        { vendor: { $in: matchingUserIds } },
+      ];
+    }
 
     const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
+    const expiringSoonCutoff = new Date(Date.now() + 48 * 60 * 60 * 1000);
 
-    const [disputes, total] = await Promise.all([
-      Dispute.find(filter)
-        .populate('user', 'firstName lastName email')
-        .populate('vendor', 'firstName lastName email')
-        .populate('order', 'orderNumber total')
-        .sort(sortObj)
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
-      Dispute.countDocuments(filter),
+    const [[disputes, total], globalStats, expiringSoon] = await Promise.all([
+      Promise.all([
+        Dispute.find(filter)
+          .populate('user', 'firstName lastName email')
+          .populate('vendor', 'firstName lastName email')
+          .populate('order', 'orderNumber total status')
+          .sort(sortObj)
+          .skip((pageNum - 1) * limitNum)
+          .limit(limitNum)
+          .lean(),
+        Dispute.countDocuments(filter),
+      ]),
+      Dispute.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            open: { $sum: { $cond: [{ $eq: ['$status', 'open'] }, 1, 0] } },
+            vendor_responded: { $sum: { $cond: [{ $eq: ['$status', 'vendor_responded'] }, 1, 0] } },
+            under_review: { $sum: { $cond: [{ $eq: ['$status', 'under_review'] }, 1, 0] } },
+            resolved: {
+              $sum: {
+                $cond: [
+                  { $in: ['$status', ['resolved_full_refund', 'resolved_partial_refund']] },
+                  1, 0,
+                ],
+              },
+            },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            closed: { $sum: { $cond: [{ $eq: ['$status', 'closed'] }, 1, 0] } },
+            totalRefunded: { $sum: { $ifNull: ['$refundAmount', 0] } },
+          },
+        },
+      ]),
+      Dispute.countDocuments({
+        status: { $in: ['open', 'vendor_responded', 'under_review'] },
+        expiresAt: { $lte: expiringSoonCutoff, $gte: new Date() },
+      }),
     ]);
 
     res.json({
       success: true,
-      data: disputes,
+      data: {
+        disputes,
+        stats: { ...(globalStats[0] || {}), expiringSoon },
+      },
       meta: getPaginationMeta(total, pageNum, limitNum),
     });
   }
@@ -2085,27 +2528,33 @@ export const getAllDisputes = asyncHandler(
 
 /**
  * GET /admin/disputes/:id
- * Get dispute details
+ * Get full dispute details including vendor business name
  */
 export const getDisputeDetails = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const { id } = req.params;
 
     const dispute = await Dispute.findById(id)
-      .populate('user', 'firstName lastName email phone')
+      .populate('user', 'firstName lastName email phone avatar')
       .populate('vendor', 'firstName lastName email phone')
-      .populate('order')
-      .populate('messages.sender', 'firstName lastName role')
-      .populate('resolvedBy', 'firstName lastName');
+      .populate('order', 'orderNumber total status paymentStatus createdAt items serviceCharge')
+      .populate('messages.sender', 'firstName lastName role avatar')
+      .populate('resolvedBy', 'firstName lastName')
+      .lean();
 
     if (!dispute) {
       res.status(404).json({ success: false, message: 'Dispute not found' });
       return;
     }
 
+    const vendorUserId = (dispute.vendor as any)?._id || dispute.vendor;
+    const vendorProfile = vendorUserId
+      ? await VendorProfile.findOne({ user: vendorUserId }).select('_id businessName').lean()
+      : null;
+
     res.json({
       success: true,
-      data: dispute,
+      data: { ...dispute, vendorProfile },
     });
   }
 );
@@ -2282,6 +2731,47 @@ export const addDisputeMessage = asyncHandler(
   }
 );
 
+/**
+ * PUT /admin/disputes/:id/close
+ * Close a dispute (admin-initiated, no refund)
+ */
+export const closeDispute = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { note } = req.body;
+
+    const dispute = await Dispute.findById(id);
+    if (!dispute) {
+      res.status(404).json({ success: false, message: 'Dispute not found' });
+      return;
+    }
+
+    if (['resolved_full_refund', 'resolved_partial_refund', 'closed'].includes(dispute.status)) {
+      res.status(400).json({ success: false, message: 'Dispute is already closed or resolved' });
+      return;
+    }
+
+    dispute.status = 'closed' as any;
+    if (note) {
+      dispute.messages.push({
+        sender: new mongoose.Types.ObjectId(req.user!.id),
+        senderRole: 'admin',
+        message: note,
+        createdAt: new Date(),
+      });
+    }
+    await dispute.save();
+
+    const msg = `Dispute #${dispute.disputeNumber} has been closed by admin.`;
+    await Promise.all([
+      notificationService.send({ userId: dispute.user.toString(), type: NotificationType.ORDER, title: 'Dispute Closed', message: msg }),
+      notificationService.send({ userId: dispute.vendor.toString(), type: NotificationType.ORDER, title: 'Dispute Closed', message: msg }),
+    ]);
+
+    res.json({ success: true, message: 'Dispute closed' });
+  }
+);
+
 // ================================================================
 // COUPON MANAGEMENT
 // ================================================================
@@ -2292,26 +2782,49 @@ export const addDisputeMessage = asyncHandler(
  */
 export const getAllCoupons = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { page = 1, limit = 20, active } = req.query;
+    const { page = 1, limit = 20, active, search, validity, sort = 'createdAt', order = 'desc' } = req.query;
 
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
+    const now = new Date();
 
     const filter: any = {};
     if (active === 'true') filter.isActive = true;
     if (active === 'false') filter.isActive = false;
+    if (validity === 'valid') { filter.validFrom = { $lte: now }; filter.validUntil = { $gte: now }; }
+    if (validity === 'expired') filter.validUntil = { $lt: now };
+    if (validity === 'upcoming') filter.validFrom = { $gt: now };
 
-    const [coupons, total] = await Promise.all([
-      Coupon.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
-      Coupon.countDocuments(filter),
+    if (search) {
+      const regex = new RegExp(search as string, 'i');
+      filter.$or = [{ code: regex }, { description: regex }];
+    }
+
+    const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
+
+    const [[coupons, total], globalStats] = await Promise.all([
+      Promise.all([
+        Coupon.find(filter).sort(sortObj).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
+        Coupon.countDocuments(filter),
+      ]),
+      Coupon.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            active: { $sum: { $cond: ['$isActive', 1, 0] } },
+            expired: { $sum: { $cond: [{ $lt: ['$validUntil', now] }, 1, 0] } },
+            upcoming: { $sum: { $cond: [{ $gt: ['$validFrom', now] }, 1, 0] } },
+            totalRedemptions: { $sum: '$usageCount' },
+            exhausted: { $sum: { $cond: [{ $and: [{ $gt: ['$usageLimit', 0] }, { $gte: ['$usageCount', '$usageLimit'] }] }, 1, 0] } },
+          },
+        },
+      ]),
     ]);
 
     res.json({
       success: true,
-      data: coupons,
+      data: { coupons, stats: globalStats[0] || { total: 0, active: 0, expired: 0, upcoming: 0, totalRedemptions: 0, exhausted: 0 } },
       meta: getPaginationMeta(total, pageNum, limitNum),
     });
   }
@@ -2336,6 +2849,7 @@ export const createCoupon = asyncHandler(
       applicableProducts,
       applicableCategories,
       excludedProducts,
+      assignedTo, // array of email strings from admin UI
     } = req.body;
 
     if (!code || !discountType || !discountValue || !validFrom || !validUntil) {
@@ -2355,6 +2869,22 @@ export const createCoupon = asyncHandler(
       return;
     }
 
+    // Resolve emails → user ObjectIds
+    let assignedToIds: mongoose.Types.ObjectId[] | undefined;
+    if (assignedTo?.length) {
+      const emails: string[] = Array.isArray(assignedTo) ? assignedTo : [assignedTo];
+      const users = await User.find({ email: { $in: emails.map((e: string) => e.toLowerCase().trim()) } })
+        .select('_id email')
+        .lean();
+      const foundEmails = users.map((u) => u.email);
+      const missing = emails.filter((e) => !foundEmails.includes(e.toLowerCase().trim()));
+      if (missing.length) {
+        res.status(400).json({ success: false, message: `No account found for: ${missing.join(', ')}` });
+        return;
+      }
+      assignedToIds = users.map((u) => u._id as mongoose.Types.ObjectId);
+    }
+
     const coupon = await Coupon.create({
       code: code.toUpperCase(),
       description,
@@ -2368,6 +2898,7 @@ export const createCoupon = asyncHandler(
       applicableProducts,
       applicableCategories,
       excludedProducts,
+      assignedTo: assignedToIds,
     });
 
     res.status(201).json({
@@ -2385,8 +2916,30 @@ export const createCoupon = asyncHandler(
 export const updateCoupon = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const { id } = req.params;
+    const { assignedTo, ...rest } = req.body;
 
-    const coupon = await Coupon.findByIdAndUpdate(id, req.body, {
+    // Resolve emails → ObjectIds if provided
+    let resolvedAssignedTo: mongoose.Types.ObjectId[] | undefined;
+    if (assignedTo !== undefined) {
+      if (Array.isArray(assignedTo) && assignedTo.length > 0) {
+        const emails: string[] = assignedTo.map((e: string) => e.toLowerCase().trim());
+        const users = await User.find({ email: { $in: emails } }).select('_id email').lean();
+        const foundEmails = users.map((u) => u.email);
+        const missing = emails.filter((e) => !foundEmails.includes(e));
+        if (missing.length) {
+          res.status(400).json({ success: false, message: `No account found for: ${missing.join(', ')}` });
+          return;
+        }
+        resolvedAssignedTo = users.map((u) => u._id as mongoose.Types.ObjectId);
+      } else {
+        resolvedAssignedTo = []; // empty array = make public
+      }
+    }
+
+    const updatePayload: any = { ...rest };
+    if (resolvedAssignedTo !== undefined) updatePayload.assignedTo = resolvedAssignedTo;
+
+    const coupon = await Coupon.findByIdAndUpdate(id, updatePayload, {
       new: true,
       runValidators: true,
     });
@@ -2425,23 +2978,133 @@ export const deleteCoupon = asyncHandler(
   }
 );
 
+/**
+ * GET /admin/coupons/:id/usage
+ * List users who have redeemed this coupon
+ */
+export const getCouponUsage = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const coupon = await Coupon.findById(id)
+      .populate('usedBy', 'firstName lastName email avatar createdAt')
+      .populate('assignedTo', 'firstName lastName email')
+      .lean();
+
+    if (!coupon) {
+      res.status(404).json({ success: false, message: 'Coupon not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        code: coupon.code,
+        usageCount: coupon.usageCount,
+        usageLimit: coupon.usageLimit,
+        usedBy: coupon.usedBy || [],
+        assignedTo: coupon.assignedTo || [],
+      },
+    });
+  }
+);
+
+/**
+ * PUT /admin/coupons/:id/toggle
+ * Toggle coupon active/inactive
+ */
+export const toggleCouponActive = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const coupon = await Coupon.findById(id);
+    if (!coupon) {
+      res.status(404).json({ success: false, message: 'Coupon not found' });
+      return;
+    }
+
+    coupon.isActive = !coupon.isActive;
+    await coupon.save();
+
+    res.json({
+      success: true,
+      message: `Coupon ${coupon.isActive ? 'activated' : 'deactivated'}`,
+      data: { isActive: coupon.isActive },
+    });
+  }
+);
+
 // ================================================================
 // CATEGORY MANAGEMENT
 // ================================================================
 
 /**
  * GET /admin/categories
- * List all categories (including inactive)
+ * List all categories with search, status, level filters + global stats
  */
 export const getAllCategories = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const categories = await Category.find()
-      .populate('parent', 'name slug')
-      .sort({ order: 1, name: 1 });
+    const { search, status, level } = req.query as Record<string, string>;
+
+    const filter: any = {};
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (status === 'active') filter.isActive = true;
+    else if (status === 'inactive') filter.isActive = false;
+    if (level === 'top') filter.level = 0;
+    else if (level === 'sub') filter.level = { $gt: 0 };
+
+    const [categories, statsAgg] = await Promise.all([
+      Category.find(filter)
+        .populate('parent', 'name slug')
+        .sort({ level: 1, order: 1, name: 1 })
+        .lean(),
+      Category.aggregate([
+        {
+          $facet: {
+            total: [{ $count: 'n' }],
+            active: [{ $match: { isActive: true } }, { $count: 'n' }],
+            inactive: [{ $match: { isActive: false } }, { $count: 'n' }],
+            topLevel: [{ $match: { level: 0 } }, { $count: 'n' }],
+            subcategories: [{ $match: { level: { $gt: 0 } } }, { $count: 'n' }],
+            totalProducts: [{ $group: { _id: null, sum: { $sum: '$productCount' } } }],
+          },
+        },
+      ]),
+    ]);
+
+    // Build subcategory count per parent from the full unfiltered set
+    const allCats = await Category.find({}, '_id parent').lean();
+    const subCountMap: Record<string, number> = {};
+    for (const c of allCats) {
+      if (c.parent) {
+        const parentId = c.parent.toString();
+        subCountMap[parentId] = (subCountMap[parentId] || 0) + 1;
+      }
+    }
+
+    const s = statsAgg[0];
+    const stats = {
+      total: s.total[0]?.n || 0,
+      active: s.active[0]?.n || 0,
+      inactive: s.inactive[0]?.n || 0,
+      topLevel: s.topLevel[0]?.n || 0,
+      subcategories: s.subcategories[0]?.n || 0,
+      totalProducts: s.totalProducts[0]?.sum || 0,
+    };
+
+    const categoriesWithSub = categories.map((c: any) => ({
+      ...c,
+      subcategoryCount: subCountMap[c._id.toString()] || 0,
+    }));
 
     res.json({
       success: true,
-      data: categories,
+      data: { categories: categoriesWithSub, stats },
       meta: { total: categories.length },
     });
   }
@@ -2575,6 +3238,31 @@ export const deleteCategory = asyncHandler(
   }
 );
 
+/**
+ * PUT /admin/categories/:id/toggle
+ * Toggle category active status
+ */
+export const toggleCategoryStatus = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const category = await Category.findById(id);
+    if (!category) {
+      res.status(404).json({ success: false, message: 'Category not found' });
+      return;
+    }
+
+    category.isActive = !category.isActive;
+    await category.save();
+
+    res.json({
+      success: true,
+      message: `Category ${category.isActive ? 'activated' : 'deactivated'}`,
+      data: { isActive: category.isActive },
+    });
+  }
+);
+
 // ================================================================
 // NOTIFICATION MANAGEMENT
 // ================================================================
@@ -2585,48 +3273,147 @@ export const deleteCategory = asyncHandler(
  */
 export const broadcastNotification = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { title, message, type = NotificationType.SYSTEM, segment, link } = req.body;
+    // Accept both `segment` and `targetAudience` (frontend compat)
+    const rawSegment: string = req.body.segment || req.body.targetAudience || 'all';
+    const rawType = req.body.type;
+    const { title, message, link } = req.body;
+
+    // channels: which delivery methods to use (defaults to inapp + push for backwards compat)
+    const channels: string[] = Array.isArray(req.body.channels) && req.body.channels.length > 0
+      ? req.body.channels
+      : ['inapp', 'push'];
+
+    // Map to a valid NotificationType (fall back to SYSTEM for unrecognised values)
+    const validTypes = Object.values(NotificationType) as string[];
+    const type: NotificationType = validTypes.includes(rawType)
+      ? rawType
+      : NotificationType.SYSTEM;
 
     if (!title || !message) {
-      res.status(400).json({
-        success: false,
-        message: 'title and message are required',
-      });
+      res.status(400).json({ success: false, message: 'title and message are required' });
       return;
     }
 
     // Build user filter based on segment
     const userFilter: any = { status: UserStatus.ACTIVE };
-    if (segment === 'customers') userFilter.role = UserRole.CUSTOMER;
-    else if (segment === 'vendors') userFilter.role = UserRole.VENDOR;
-    else if (segment === 'affiliates') userFilter.isAffiliate = true;
+    if (rawSegment === 'customers') userFilter.role = UserRole.CUSTOMER;
+    else if (rawSegment === 'vendors') userFilter.role = UserRole.VENDOR;
+    else if (rawSegment === 'affiliates') userFilter.isAffiliate = true;
 
-    const users = await User.find(userFilter).select('_id');
-    const userIds = users.map((u) => u._id.toString());
+    // Fetch all fields we might need across channels
+    const users = await User.find(userFilter)
+      .select('_id email firstName lastName fcmTokens')
+      .lean();
 
-    if (userIds.length === 0) {
-      res.status(400).json({
-        success: false,
-        message: 'No users match the selected segment',
-      });
+    if (users.length === 0) {
+      res.status(400).json({ success: false, message: 'No users match the selected segment' });
       return;
     }
 
-    await notificationService.sendToMany({
-      userIds,
-      type,
-      title,
-      message,
-      link,
-    });
+    const userIds = users.map((u) => u._id.toString());
+    const recipientCount = users.length;
 
+    // Respond immediately — all channel sends are fire-and-forget
     res.json({
       success: true,
-      message: `Notification broadcast to ${userIds.length} user(s)`,
-      data: { recipientCount: userIds.length },
+      message: `Notification broadcast queued for ${recipientCount} user(s)`,
+      data: { recipientCount, segment: rawSegment, type, channels },
     });
+
+    // ── IN-APP channel (DB insert + socket emit) ──
+    if (channels.includes('inapp')) {
+      notificationService
+        .sendToMany({ userIds, type, title, message, link, skipPush: true })
+        .catch((err: any) => logger.error('Broadcast in-app failed:', err?.message));
+    }
+
+    // ── PUSH channel (Expo push tokens) ──
+    if (channels.includes('push')) {
+      const allTokens: string[] = users
+        .flatMap((u: any) => u.fcmTokens || [])
+        .filter((t: string) => typeof t === 'string' && t.startsWith('ExponentPushToken'));
+
+      if (allTokens.length > 0) {
+        const pushData: Record<string, string> = {
+          type,
+          ...(link ? { link } : {}),
+        };
+        sendPushNotification(allTokens, title, message, pushData)
+          .catch((err: any) => logger.error('Broadcast push failed:', err?.message));
+      } else {
+        logger.info('Broadcast push: no valid Expo tokens found');
+      }
+    }
+
+    // ── EMAIL channel (Resend) ──
+    if (channels.includes('email')) {
+      const html = buildBroadcastEmailHtml(title, message, link);
+
+      // Send concurrently in batches of 20 to avoid flooding Resend
+      const batchSize = 20;
+      const sendEmailBatch = async () => {
+        for (let i = 0; i < users.length; i += batchSize) {
+          const batch = users.slice(i, i + batchSize);
+          await Promise.allSettled(
+            batch.map((u: any) =>
+              sendEmail({ to: u.email, subject: title, html }).catch((err: any) =>
+                logger.warn(`Broadcast email failed for ${u.email}:`, err?.message)
+              )
+            )
+          );
+        }
+        logger.info(`Broadcast email: sent to ${users.length} users`);
+      };
+
+      sendEmailBatch().catch((err: any) =>
+        logger.error('Broadcast email batch failed:', err?.message)
+      );
+    }
   }
 );
+
+function buildBroadcastEmailHtml(title: string, message: string, link?: string): string {
+  const year = new Date().getFullYear();
+  const ctaButton = link
+    ? `<div style="text-align:center;margin:28px 0;">
+        <a href="${link}" style="display:inline-block;padding:12px 28px;background:#ff6600;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;">
+          View Details
+        </a>
+       </div>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:100%;">
+        <!-- Header -->
+        <tr>
+          <td style="background:#ff6600;padding:24px 32px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.5px;">VendorSpot</h1>
+          </td>
+        </tr>
+        <!-- Body -->
+        <tr>
+          <td style="padding:36px 32px;">
+            <h2 style="margin:0 0 16px;color:#1a1a1a;font-size:22px;font-weight:700;">${title}</h2>
+            <p style="margin:0 0 24px;color:#555555;font-size:16px;line-height:1.7;">${message.replace(/\n/g, '<br>')}</p>
+            ${ctaButton}
+            <hr style="border:none;border-top:1px solid #eeeeee;margin:24px 0;">
+            <p style="margin:0;color:#999999;font-size:13px;line-height:1.6;">
+              You received this message because you are a VendorSpot user.<br>
+              © ${year} VendorSpot. All rights reserved.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
 
 /**
  * GET /admin/notifications
@@ -2634,26 +3421,51 @@ export const broadcastNotification = asyncHandler(
  */
 export const getNotificationHistory = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { page = 1, limit = 20, type } = req.query;
+    const { page = 1, limit = 20, type, read, search } = req.query as Record<string, string>;
 
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
 
     const filter: any = {};
     if (type) filter.type = type;
+    if (read === 'true') filter.read = true;
+    if (read === 'false') filter.read = false;
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { message: { $regex: search, $options: 'i' } },
+      ];
+    }
 
-    const [notifications, total] = await Promise.all([
+    const [notifications, total, statsAgg] = await Promise.all([
       Notification.find(filter)
-        .populate('user', 'firstName lastName email')
+        .populate('user', 'firstName lastName email avatar')
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
+        .limit(limitNum)
+        .lean(),
       Notification.countDocuments(filter),
+      Notification.aggregate([
+        {
+          $facet: {
+            total: [{ $count: 'n' }],
+            unread: [{ $match: { read: false } }, { $count: 'n' }],
+            byType: [{ $group: { _id: '$type', count: { $sum: 1 } } }, { $sort: { count: -1 } }],
+          },
+        },
+      ]),
     ]);
+
+    const s = statsAgg[0];
+    const stats = {
+      total: s.total[0]?.n || 0,
+      unread: s.unread[0]?.n || 0,
+      byType: s.byType as { _id: string; count: number }[],
+    };
 
     res.json({
       success: true,
-      data: notifications,
+      data: { notifications, stats },
       meta: getPaginationMeta(total, pageNum, limitNum),
     });
   }
@@ -2838,66 +3650,140 @@ export const rejectAccountDeletion = asyncHandler(
 
 /**
  * GET /admin/affiliates
- * List all affiliates with stats
+ * List all affiliates with search, status filter, and global stats
  */
 export const getAllAffiliates = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { page = 1, limit = 20, sort = 'totalEarned', order = 'desc' } = req.query;
+    const { page = 1, limit = 20, sort = 'totalEarned', order = 'desc', search, status } = req.query as Record<string, string>;
 
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
 
-    const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
+    const sortObj: any = { [sort]: order === 'asc' ? 1 : -1 };
 
-    const [affiliates, total] = await Promise.all([
+    // Pre-query users for search / status filters
+    const userFilter: any = {};
+    if (search) {
+      userFilter.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (status === 'active') userFilter.isAffiliate = true;
+    else if (status === 'inactive') userFilter.isAffiliate = false;
+
+    let matchingUserIds: any[] | undefined;
+    if (search || status) {
+      matchingUserIds = await User.find(userFilter).distinct('_id');
+    }
+
+    const linkMatch: any = {};
+    if (matchingUserIds) linkMatch.user = { $in: matchingUserIds };
+
+    const pipeline: any[] = [
+      ...(Object.keys(linkMatch).length ? [{ $match: linkMatch }] : []),
+      {
+        $group: {
+          _id: '$user',
+          totalLinks: { $sum: 1 },
+          totalClicks: { $sum: '$clicks' },
+          totalConversions: { $sum: '$conversions' },
+          totalEarned: { $sum: '$totalEarned' },
+          activeLinks: { $sum: { $cond: ['$isActive', 1, 0] } },
+        },
+      },
+      { $sort: sortObj },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'user',
+        },
+      },
+      { $unwind: '$user' },
+      {
+        $project: {
+          userId: '$_id',
+          firstName: '$user.firstName',
+          lastName: '$user.lastName',
+          email: '$user.email',
+          avatar: '$user.avatar',
+          affiliateCode: '$user.affiliateCode',
+          status: '$user.status',
+          isAffiliate: '$user.isAffiliate',
+          totalLinks: 1,
+          totalClicks: 1,
+          totalConversions: 1,
+          totalEarned: 1,
+          activeLinks: 1,
+        },
+      },
+    ];
+
+    // Count total (run pipeline without skip/limit)
+    const countPipeline = [...pipeline, { $count: 'n' }];
+    const [affiliatesFull, countResult, statsAgg, totalAffiliates] = await Promise.all([
+      AffiliateLink.aggregate([...pipeline, { $skip: (pageNum - 1) * limitNum }, { $limit: limitNum }]),
+      AffiliateLink.aggregate(countPipeline),
       AffiliateLink.aggregate([
         {
           $group: {
-            _id: '$user',
-            totalLinks: { $sum: 1 },
+            _id: null,
             totalClicks: { $sum: '$clicks' },
             totalConversions: { $sum: '$conversions' },
             totalEarned: { $sum: '$totalEarned' },
-            activeLinks: {
-              $sum: { $cond: ['$isActive', 1, 0] },
-            },
-          },
-        },
-        { $sort: sortObj },
-        { $skip: (pageNum - 1) * limitNum },
-        { $limit: limitNum },
-        {
-          $lookup: {
-            from: 'users',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'user',
-          },
-        },
-        { $unwind: '$user' },
-        {
-          $project: {
-            userId: '$_id',
-            firstName: '$user.firstName',
-            lastName: '$user.lastName',
-            email: '$user.email',
-            affiliateCode: '$user.affiliateCode',
-            status: '$user.status',
-            totalLinks: 1,
-            totalClicks: 1,
-            totalConversions: 1,
-            totalEarned: 1,
-            activeLinks: 1,
           },
         },
       ]),
       User.countDocuments({ isAffiliate: true }),
     ]);
 
+    const filteredTotal = countResult[0]?.n || 0;
+    const s = statsAgg[0] || {};
+    const stats = {
+      totalAffiliates,
+      totalClicks: s.totalClicks || 0,
+      totalConversions: s.totalConversions || 0,
+      totalEarned: s.totalEarned || 0,
+      avgConversionRate: s.totalClicks > 0
+        ? +((s.totalConversions / s.totalClicks) * 100).toFixed(1)
+        : 0,
+    };
+
     res.json({
       success: true,
-      data: affiliates,
-      meta: getPaginationMeta(total, pageNum, limitNum),
+      data: { affiliates: affiliatesFull, stats },
+      meta: getPaginationMeta(filteredTotal, pageNum, limitNum),
+    });
+  }
+);
+
+/**
+ * GET /admin/affiliates/:userId/links
+ * Get all affiliate links for a specific user
+ */
+export const getAffiliateLinks = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { userId } = req.params;
+
+    const [user, links] = await Promise.all([
+      User.findById(userId).select('firstName lastName email avatar affiliateCode isAffiliate status').lean(),
+      AffiliateLink.find({ user: userId })
+        .populate('product', 'name images price slug')
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: { user, links },
     });
   }
 );
@@ -3073,41 +3959,78 @@ export const deleteChallenge = asyncHandler(
 
 /**
  * GET /admin/reports/sales
- * Sales report with filters
+ * Sales report — supports period (days), custom startDate/endDate, groupBy
  */
 export const getSalesReport = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { startDate, endDate, groupBy = 'day' } = req.query;
+    const { period = '30', startDate, endDate, groupBy = 'day' } = req.query;
 
-    const dateFilter: any = { paymentStatus: PaymentStatus.COMPLETED };
-    if (startDate) dateFilter.createdAt = { $gte: new Date(startDate as string) };
-    if (endDate) {
-      dateFilter.createdAt = dateFilter.createdAt || {};
-      dateFilter.createdAt.$lte = new Date(endDate as string);
-    }
+    const endDateVal = endDate ? new Date(endDate as string) : new Date();
+    const startDateVal = startDate
+      ? new Date(startDate as string)
+      : new Date(endDateVal.getTime() - Number(period) * 24 * 60 * 60 * 1000);
+    const periodMs = endDateVal.getTime() - startDateVal.getTime();
+    const prevStartDate = new Date(startDateVal.getTime() - periodMs);
 
     const dateFormat =
-      groupBy === 'month'
-        ? '%Y-%m'
-        : groupBy === 'week'
-        ? '%Y-W%V'
-        : '%Y-%m-%d';
+      groupBy === 'month' ? '%Y-%m' : groupBy === 'week' ? '%G-W%V' : '%Y-%m-%d';
 
-    const [salesData, topProducts, salesByCategory] = await Promise.all([
+    const completedFilter = {
+      paymentStatus: PaymentStatus.COMPLETED,
+      createdAt: { $gte: startDateVal, $lte: endDateVal },
+    };
+    const prevCompletedFilter = {
+      paymentStatus: PaymentStatus.COMPLETED,
+      createdAt: { $gte: prevStartDate, $lte: startDateVal },
+    };
+    const allOrdersFilter = { createdAt: { $gte: startDateVal, $lte: endDateVal } };
+
+    const [
+      currentSummary,
+      prevSummary,
+      dailyRevenue,
+      topProducts,
+      salesByCategory,
+      revenueByPaymentMethod,
+      orderStatusBreakdown,
+      refundStats,
+      newCustomers,
+    ] = await Promise.all([
       Order.aggregate([
-        { $match: dateFilter },
+        { $match: completedFilter },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$total' },
+            totalOrders: { $sum: 1 },
+            avgOrderValue: { $avg: '$total' },
+            totalServiceCharge: { $sum: { $ifNull: ['$serviceCharge', 0] } },
+          },
+        },
+      ]),
+      Order.aggregate([
+        { $match: prevCompletedFilter },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$total' },
+            totalOrders: { $sum: 1 },
+          },
+        },
+      ]),
+      Order.aggregate([
+        { $match: completedFilter },
         {
           $group: {
             _id: { $dateToString: { format: dateFormat, date: '$createdAt' } },
-            totalSales: { $sum: '$total' },
-            orderCount: { $sum: 1 },
-            avgOrderValue: { $avg: '$total' },
+            revenue: { $sum: '$total' },
+            orders: { $sum: 1 },
           },
         },
         { $sort: { _id: 1 } },
       ]),
       Order.aggregate([
-        { $match: dateFilter },
+        { $match: completedFilter },
         { $unwind: '$items' },
         {
           $group: {
@@ -3118,10 +4041,40 @@ export const getSalesReport = asyncHandler(
           },
         },
         { $sort: { totalRevenue: -1 } },
-        { $limit: 20 },
+        { $limit: 10 },
+        {
+          $lookup: {
+            from: 'vendorprofiles',
+            let: { productId: '$_id' },
+            pipeline: [
+              {
+                $lookup: {
+                  from: 'products',
+                  localField: 'user',
+                  foreignField: 'vendor',
+                  as: 'vp',
+                },
+              },
+              { $unwind: '$vp' },
+              { $match: { $expr: { $eq: ['$vp._id', '$$productId'] } } },
+              { $project: { _id: 1, businessName: 1 } },
+            ],
+            as: 'vendor',
+          },
+        },
+        {
+          $project: {
+            productId: '$_id',
+            productName: 1,
+            totalSold: 1,
+            totalRevenue: 1,
+            vendorId: { $arrayElemAt: ['$vendor._id', 0] },
+            businessName: { $arrayElemAt: ['$vendor.businessName', 0] },
+          },
+        },
       ]),
       Order.aggregate([
-        { $match: dateFilter },
+        { $match: completedFilter },
         { $unwind: '$items' },
         {
           $lookup: {
@@ -3144,21 +4097,76 @@ export const getSalesReport = asyncHandler(
         {
           $group: {
             _id: '$categoryInfo._id',
-            categoryName: { $first: '$categoryInfo.name' },
-            totalSales: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+            categoryName: { $first: { $ifNull: ['$categoryInfo.name', 'Uncategorized'] } },
+            revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
             itemsSold: { $sum: '$items.quantity' },
+            orders: { $sum: 1 },
           },
         },
-        { $sort: { totalSales: -1 } },
+        { $sort: { revenue: -1 } },
       ]),
+      Order.aggregate([
+        { $match: completedFilter },
+        {
+          $group: {
+            _id: '$paymentMethod',
+            revenue: { $sum: '$total' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { revenue: -1 } },
+      ]),
+      Order.aggregate([
+        { $match: allOrdersFilter },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]),
+      Order.aggregate([
+        { $match: { ...allOrdersFilter, status: OrderStatus.REFUNDED } },
+        {
+          $group: {
+            _id: null,
+            totalRefunds: { $sum: '$total' },
+            refundCount: { $sum: 1 },
+          },
+        },
+      ]),
+      User.countDocuments({
+        role: 'customer',
+        createdAt: { $gte: startDateVal, $lte: endDateVal },
+      }),
     ]);
+
+    const curr = currentSummary[0] || { totalRevenue: 0, totalOrders: 0, avgOrderValue: 0, totalServiceCharge: 0 };
+    const prev = prevSummary[0] || { totalRevenue: 0, totalOrders: 0 };
+
+    const pctRevenue =
+      prev.totalRevenue > 0
+        ? Number((((curr.totalRevenue - prev.totalRevenue) / prev.totalRevenue) * 100).toFixed(1))
+        : null;
+    const pctOrders =
+      prev.totalOrders > 0
+        ? Number((((curr.totalOrders - prev.totalOrders) / prev.totalOrders) * 100).toFixed(1))
+        : null;
 
     res.json({
       success: true,
       data: {
-        salesData,
+        summary: {
+          totalRevenue: curr.totalRevenue,
+          totalOrders: curr.totalOrders,
+          averageOrderValue: curr.avgOrderValue || 0,
+          totalServiceCharge: curr.totalServiceCharge,
+          totalRefunds: refundStats[0]?.totalRefunds || 0,
+          refundCount: refundStats[0]?.refundCount || 0,
+          newCustomers,
+          vsLastPeriod: { revenue: pctRevenue, orders: pctOrders },
+        },
+        dailyRevenue,
         topProducts,
         salesByCategory,
+        revenueByPaymentMethod,
+        orderStatusBreakdown,
       },
     });
   }
@@ -3166,102 +4174,257 @@ export const getSalesReport = asyncHandler(
 
 /**
  * GET /admin/reports/vendors
- * Vendor performance report
+ * Vendor performance report — supports period (days), custom date range
  */
 export const getVendorReport = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { startDate, endDate, limit: reportLimit = 20 } = req.query;
+    const { period = '30', startDate, endDate, limit: reportLimit = 20 } = req.query;
 
-    const dateFilter: any = {};
-    if (startDate || endDate) {
-      dateFilter.createdAt = {};
-      if (startDate) dateFilter.createdAt.$gte = new Date(startDate as string);
-      if (endDate) dateFilter.createdAt.$lte = new Date(endDate as string);
-    }
+    const endDateVal = endDate ? new Date(endDate as string) : new Date();
+    const startDateVal = startDate
+      ? new Date(startDate as string)
+      : new Date(endDateVal.getTime() - Number(period) * 24 * 60 * 60 * 1000);
 
-    const vendorPerformance = await Order.aggregate([
-      {
-        $match: {
-          paymentStatus: PaymentStatus.COMPLETED,
-          ...dateFilter,
+    const completedFilter = {
+      paymentStatus: PaymentStatus.COMPLETED,
+      createdAt: { $gte: startDateVal, $lte: endDateVal },
+    };
+
+    const [topVendors, platformSummary, newVendors, verificationBreakdown] = await Promise.all([
+      Order.aggregate([
+        { $match: completedFilter },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.vendor',
+            totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+            uniqueOrders: { $addToSet: '$_id' },
+            totalItemsSold: { $sum: '$items.quantity' },
+          },
         },
-      },
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: '$items.vendor',
-          totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
-          totalOrders: { $sum: 1 },
-          totalItemsSold: { $sum: '$items.quantity' },
+        { $addFields: { totalOrders: { $size: '$uniqueOrders' } } },
+        { $sort: { totalRevenue: -1 } },
+        { $limit: Number(reportLimit) },
+        {
+          $lookup: {
+            from: 'vendorprofiles',
+            localField: '_id',
+            foreignField: 'user',
+            as: 'profile',
+          },
         },
-      },
-      { $sort: { totalRevenue: -1 } },
-      { $limit: Number(reportLimit) },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'user',
+        { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            vendorId: '$profile._id',
+            userId: '$_id',
+            businessName: '$profile.businessName',
+            verificationStatus: '$profile.verificationStatus',
+            commissionRate: '$profile.commissionRate',
+            averageRating: '$profile.averageRating',
+            totalRevenue: 1,
+            totalOrders: 1,
+            totalItemsSold: 1,
+          },
         },
-      },
-      { $unwind: '$user' },
-      {
-        $lookup: {
-          from: 'vendorprofiles',
-          localField: '_id',
-          foreignField: 'user',
-          as: 'profile',
+      ]),
+      VendorProfile.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalVendors: { $sum: 1 },
+            verifiedVendors: {
+              $sum: { $cond: [{ $eq: ['$verificationStatus', VendorVerificationStatus.VERIFIED] }, 1, 0] },
+            },
+            pendingVendors: {
+              $sum: { $cond: [{ $eq: ['$verificationStatus', VendorVerificationStatus.PENDING] }, 1, 0] },
+            },
+          },
         },
-      },
-      { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          vendorId: '$_id',
-          firstName: '$user.firstName',
-          lastName: '$user.lastName',
-          email: '$user.email',
-          businessName: '$profile.businessName',
-          verificationStatus: '$profile.verificationStatus',
-          commissionRate: '$profile.commissionRate',
-          averageRating: '$profile.averageRating',
-          totalRevenue: 1,
-          totalOrders: 1,
-          totalItemsSold: 1,
-        },
-      },
+      ]),
+      VendorProfile.countDocuments({
+        createdAt: { $gte: startDateVal, $lte: endDateVal },
+      }),
+      VendorProfile.aggregate([
+        { $group: { _id: '$verificationStatus', count: { $sum: 1 } } },
+      ]),
     ]);
+
+    const plat = platformSummary[0] || { totalVendors: 0, verifiedVendors: 0, pendingVendors: 0 };
+    const totalRevenue = topVendors.reduce((sum: number, v: any) => sum + (v.totalRevenue || 0), 0);
 
     res.json({
       success: true,
-      data: vendorPerformance,
+      data: {
+        summary: {
+          totalVendors: plat.totalVendors,
+          verifiedVendors: plat.verifiedVendors,
+          pendingVendors: plat.pendingVendors,
+          newVendors,
+          totalRevenue,
+        },
+        topVendors,
+        verificationBreakdown,
+      },
     });
   }
 );
 
 /**
  * GET /admin/reports/products
- * Product performance report
+ * Product performance report — supports period (days), custom date range, category, sort
  */
 export const getProductReport = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
-    const { category, sort = 'totalSales', limit: reportLimit = 20 } = req.query;
+    const { period = '30', startDate, endDate, category, sort = 'revenue', limit: reportLimit = 20 } = req.query;
 
-    const filter: any = {};
-    if (category) filter.category = new mongoose.Types.ObjectId(category as string);
+    const endDateVal = endDate ? new Date(endDate as string) : new Date();
+    const startDateVal = startDate
+      ? new Date(startDate as string)
+      : new Date(endDateVal.getTime() - Number(period) * 24 * 60 * 60 * 1000);
 
-    const sortField = sort === 'views' ? 'views' : sort === 'rating' ? 'averageRating' : 'totalSales';
+    const completedFilter: any = {
+      paymentStatus: PaymentStatus.COMPLETED,
+      createdAt: { $gte: startDateVal, $lte: endDateVal },
+    };
+    const productFilter: any = {};
+    if (category) productFilter.category = new mongoose.Types.ObjectId(category as string);
 
-    const products = await Product.find(filter)
-      .populate('vendor', 'firstName lastName email')
-      .populate('category', 'name')
-      .sort({ [sortField]: -1 })
-      .limit(Number(reportLimit))
-      .select('name slug price status totalSales totalReviews averageRating views quantity isFeatured vendor category');
+    const sortStage = sort === 'units' ? { $sort: { totalSold: -1 } } : { $sort: { totalRevenue: -1 } };
+
+    const [topProducts, productSummary, categoryBreakdown, lowStockProducts] = await Promise.all([
+      Order.aggregate([
+        { $match: completedFilter },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            productName: { $first: '$items.productName' },
+            totalSold: { $sum: '$items.quantity' },
+            totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          },
+        },
+        sortStage as any,
+        { $limit: Number(reportLimit) },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'product',
+          },
+        },
+        { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
+        ...(category
+          ? [{ $match: { 'product.category': new mongoose.Types.ObjectId(category as string) } }]
+          : []),
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'product.category',
+            foreignField: '_id',
+            as: 'category',
+          },
+        },
+        { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: 'vendorprofiles',
+            localField: 'product.vendor',
+            foreignField: 'user',
+            as: 'vendorProfile',
+          },
+        },
+        { $unwind: { path: '$vendorProfile', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            productId: '$_id',
+            productName: 1,
+            totalSold: 1,
+            totalRevenue: 1,
+            price: '$product.price',
+            views: { $ifNull: ['$product.views', 0] },
+            averageRating: { $ifNull: ['$product.averageRating', 0] },
+            stock: { $ifNull: ['$product.quantity', 0] },
+            categoryName: '$category.name',
+            categoryId: '$category._id',
+            vendorId: '$vendorProfile._id',
+            businessName: '$vendorProfile.businessName',
+            image: { $arrayElemAt: ['$product.images', 0] },
+          },
+        },
+      ]),
+      Product.aggregate([
+        { $match: productFilter },
+        {
+          $group: {
+            _id: null,
+            totalProducts: { $sum: 1 },
+            activeProducts: {
+              $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] },
+            },
+            outOfStock: {
+              $sum: { $cond: [{ $lte: ['$quantity', 0] }, 1, 0] },
+            },
+            lowStock: {
+              $sum: { $cond: [{ $and: [{ $gt: ['$quantity', 0] }, { $lte: ['$quantity', 5] }] }, 1, 0] },
+            },
+            totalViews: { $sum: { $ifNull: ['$views', 0] } },
+          },
+        },
+      ]),
+      Order.aggregate([
+        { $match: completedFilter },
+        { $unwind: '$items' },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'items.product',
+            foreignField: '_id',
+            as: 'productInfo',
+          },
+        },
+        { $unwind: { path: '$productInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'productInfo.category',
+            foreignField: '_id',
+            as: 'categoryInfo',
+          },
+        },
+        { $unwind: { path: '$categoryInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: '$categoryInfo._id',
+            categoryName: { $first: { $ifNull: ['$categoryInfo.name', 'Uncategorized'] } },
+            revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+            itemsSold: { $sum: '$items.quantity' },
+            orderCount: { $sum: 1 },
+          },
+        },
+        { $sort: { revenue: -1 } },
+      ]),
+      Product.find({ ...productFilter, status: 'active', quantity: { $lte: 5 } })
+        .populate('category', 'name')
+        .populate({ path: 'vendor', model: 'User', select: 'firstName lastName' })
+        .sort({ quantity: 1 })
+        .limit(10)
+        .select('name price quantity averageRating vendor category images'),
+    ]);
+
+    const summary = productSummary[0] || { totalProducts: 0, activeProducts: 0, outOfStock: 0, lowStock: 0, totalViews: 0 };
+    const totalRevenue = topProducts.reduce((sum: number, p: any) => sum + (p.totalRevenue || 0), 0);
+    const totalUnitsSold = topProducts.reduce((sum: number, p: any) => sum + (p.totalSold || 0), 0);
 
     res.json({
       success: true,
-      data: products,
+      data: {
+        summary: { ...summary, totalRevenue, totalUnitsSold },
+        topProducts,
+        categoryBreakdown,
+        lowStockProducts,
+      },
     });
   }
 );
@@ -3448,5 +4611,305 @@ export const updateAppVersionConfig = asyncHandler(
     }
 
     res.json({ success: true, data: config, message: 'App version config updated successfully' });
+  }
+);
+
+// ================================================================
+// REWARDS & POINTS MANAGEMENT
+// ================================================================
+
+/**
+ * GET /admin/rewards/overview
+ * Platform-wide rewards stats: total points, tier breakdown, VCredits, expiring points
+ */
+export const getRewardsOverview = asyncHandler(
+  async (_req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const now = new Date();
+    const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const TIER_THRESHOLDS = { BRONZE: 0, SILVER: 500, GOLD: 2000, PLATINUM: 5000, DIAMOND: 10000 };
+
+    const [
+      totalPointsResult,
+      expiringIn7,
+      expiringIn30,
+      usersWithPoints,
+      vCreditsResult,
+      vCreditsExpiringIn7,
+      recentTransactions,
+      activityBreakdown,
+    ] = await Promise.all([
+      PointsTransaction.aggregate([
+        { $match: { type: 'earn', status: 'active' } },
+        { $group: { _id: null, total: { $sum: '$points' } } },
+      ]),
+      PointsTransaction.countDocuments({
+        type: 'earn',
+        status: 'active',
+        expiresAt: { $gte: now, $lte: in7Days },
+      }),
+      PointsTransaction.countDocuments({
+        type: 'earn',
+        status: 'active',
+        expiresAt: { $gte: now, $lte: in30Days },
+      }),
+      User.countDocuments({ points: { $gt: 0 } }),
+      Wallet.aggregate([
+        { $match: { vCredits: { $gt: 0 } } },
+        { $group: { _id: null, total: { $sum: '$vCredits' }, count: { $sum: 1 } } },
+      ]),
+      Wallet.countDocuments({
+        vCredits: { $gt: 0 },
+        vCreditsExpiresAt: { $gte: now, $lte: in7Days },
+      }),
+      PointsTransaction.find()
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate('user', 'firstName lastName email')
+        .lean(),
+      PointsTransaction.aggregate([
+        { $match: { type: 'earn', status: 'active' } },
+        { $group: { _id: '$activity', total: { $sum: '$points' }, count: { $sum: 1 } } },
+        { $sort: { total: -1 } },
+      ]),
+    ]);
+
+    // Tier breakdown from User.points
+    const [bronze, silver, gold, platinum, diamond] = await Promise.all([
+      User.countDocuments({ points: { $gte: TIER_THRESHOLDS.BRONZE, $lt: TIER_THRESHOLDS.SILVER } }),
+      User.countDocuments({ points: { $gte: TIER_THRESHOLDS.SILVER, $lt: TIER_THRESHOLDS.GOLD } }),
+      User.countDocuments({ points: { $gte: TIER_THRESHOLDS.GOLD, $lt: TIER_THRESHOLDS.PLATINUM } }),
+      User.countDocuments({ points: { $gte: TIER_THRESHOLDS.PLATINUM, $lt: TIER_THRESHOLDS.DIAMOND } }),
+      User.countDocuments({ points: { $gte: TIER_THRESHOLDS.DIAMOND } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        totalPointsInCirculation: totalPointsResult[0]?.total ?? 0,
+        usersWithPoints,
+        expiringIn7Days: expiringIn7,
+        expiringIn30Days: expiringIn30,
+        vCredits: {
+          totalBalance: vCreditsResult[0]?.total ?? 0,
+          usersWithVCredits: vCreditsResult[0]?.count ?? 0,
+          expiringIn7Days: vCreditsExpiringIn7,
+        },
+        tierBreakdown: { bronze, silver, gold, platinum, diamond },
+        activityBreakdown,
+        recentTransactions,
+      },
+    });
+  }
+);
+
+/**
+ * GET /admin/rewards/users
+ * Paginated list of users with their points balance and tier
+ */
+export const getRewardsUsers = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const search = req.query.search as string;
+    const tier = req.query.tier as string;
+
+    const TIER_RANGES: Record<string, { min: number; max?: number }> = {
+      bronze:   { min: 0,     max: 499 },
+      silver:   { min: 500,   max: 1999 },
+      gold:     { min: 2000,  max: 4999 },
+      platinum: { min: 5000,  max: 9999 },
+      diamond:  { min: 10000 },
+    };
+
+    const filter: any = { role: UserRole.CUSTOMER };
+    if (search) {
+      const re = new RegExp(escapeRegex(search), 'i');
+      filter.$or = [{ firstName: re }, { lastName: re }, { email: re }];
+    }
+    if (tier && TIER_RANGES[tier.toLowerCase()]) {
+      const range = TIER_RANGES[tier.toLowerCase()];
+      filter.points = { $gte: range.min };
+      if (range.max !== undefined) filter.points.$lte = range.max;
+    }
+
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select('firstName lastName email avatar points badges loginStreak createdAt')
+        .sort({ points: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(filter),
+    ]);
+
+    res.json({
+      success: true,
+      data: users,
+      meta: getPaginationMeta(total, page, limit),
+    });
+  }
+);
+
+/**
+ * POST /admin/rewards/users/:userId/adjust
+ * Manually add or deduct points from a user
+ */
+export const adjustUserPoints = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { userId } = req.params;
+    const { points, type, reason } = req.body;
+
+    if (!points || typeof points !== 'number' || points <= 0) {
+      res.status(400).json({ success: false, message: 'points must be a positive number' });
+      return;
+    }
+    if (!['add', 'deduct'].includes(type)) {
+      res.status(400).json({ success: false, message: 'type must be "add" or "deduct"' });
+      return;
+    }
+    if (!reason?.trim()) {
+      res.status(400).json({ success: false, message: 'reason is required' });
+      return;
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const adjustedPoints = type === 'add' ? points : -points;
+    const newBalance = (user.points ?? 0) + adjustedPoints;
+    if (newBalance < 0) {
+      res.status(400).json({ success: false, message: 'Cannot deduct more points than user has' });
+      return;
+    }
+
+    user.points = newBalance;
+    await user.save();
+
+    // Record the transaction
+    const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+    await PointsTransaction.create({
+      user: userId,
+      type: type === 'add' ? 'earn' : 'spend',
+      activity: 'bonus',
+      points: Math.abs(points),
+      description: `Admin adjustment: ${reason}`,
+      status: 'active',
+      expiresAt: type === 'add' ? expiresAt : undefined,
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully ${type === 'add' ? 'added' : 'deducted'} ${points} points`,
+      data: { userId, newBalance, adjusted: adjustedPoints },
+    });
+  }
+);
+
+/**
+ * GET /admin/rewards/transactions
+ * All points transactions across all users (paginated)
+ */
+export const getPointsTransactions = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const type = req.query.type as string;
+    const activity = req.query.activity as string;
+    const status = req.query.status as string;
+    const search = req.query.search as string;
+
+    const filter: any = {};
+    if (type) filter.type = type;
+    if (activity) filter.activity = activity;
+    if (status) filter.status = status;
+
+    // If search, find matching users first then filter transactions
+    if (search) {
+      const re = new RegExp(escapeRegex(search), 'i');
+      const userIds = await User.find({ $or: [{ firstName: re }, { lastName: re }, { email: re }] })
+        .select('_id')
+        .lean();
+      filter.user = { $in: userIds.map((u) => u._id) };
+    }
+
+    const [transactions, total] = await Promise.all([
+      PointsTransaction.find(filter)
+        .populate('user', 'firstName lastName email avatar')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      PointsTransaction.countDocuments(filter),
+    ]);
+
+    res.json({
+      success: true,
+      data: transactions,
+      meta: getPaginationMeta(total, page, limit),
+    });
+  }
+);
+
+// ================================================================
+// CHALLENGE LEADERBOARD
+// ================================================================
+
+/**
+ * GET /admin/challenges/:id/leaderboard
+ * Top participants for a specific challenge
+ */
+export const getChallengeLeaderboard = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const challenge = await Challenge.findById(req.params.id).lean();
+    if (!challenge) {
+      res.status(404).json({ success: false, message: 'Challenge not found' });
+      return;
+    }
+
+    const sorted = [...challenge.participants].sort((a, b) => {
+      if (b.completed !== a.completed) return b.completed ? 1 : -1;
+      return b.progress - a.progress;
+    });
+
+    const top = sorted.slice(0, 50);
+    const userIds = top.map((p) => p.user);
+
+    const users = await User.find({ _id: { $in: userIds } })
+      .select('firstName lastName email avatar')
+      .lean();
+
+    const userMap = Object.fromEntries(users.map((u) => [u._id.toString(), u]));
+
+    const leaderboard = top.map((p, idx) => ({
+      rank: idx + 1,
+      user: userMap[p.user.toString()] ?? { _id: p.user, firstName: 'Unknown', lastName: '' },
+      progress: p.progress,
+      completed: p.completed,
+      completedAt: p.completedAt,
+      rewardClaimed: p.rewardClaimed,
+      progressPercent: Math.min(100, Math.round((p.progress / challenge.targetValue) * 100)),
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        challenge: {
+          _id: challenge._id,
+          title: challenge.title,
+          targetValue: challenge.targetValue,
+          targetType: challenge.targetType,
+          rewardType: challenge.rewardType,
+          rewardValue: challenge.rewardValue,
+          totalParticipants: challenge.participants.length,
+          completedCount: challenge.participants.filter((p) => p.completed).length,
+        },
+        leaderboard,
+      },
+    });
   }
 );

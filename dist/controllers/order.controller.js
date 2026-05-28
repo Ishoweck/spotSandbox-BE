@@ -1565,8 +1565,11 @@ class OrderController {
         if (vCreditsApplied > 0) {
             try {
                 // Atomic: deduct only if sufficient vCredits exist — prevents race condition on concurrent orders
+                // Using VCredits resets the 60-day expiry clock on the remaining balance
+                const { rewardController } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
                 const vcWallet = await Additional_1.Wallet.findOneAndUpdate({ user: snapshot.userId, vCredits: { $gte: vCreditsApplied } }, {
                     $inc: { vCredits: -vCreditsApplied },
+                    $set: { vCreditsExpiresAt: rewardController.vCreditsExpiry(), vCreditsRemindersSent: [] },
                     $push: {
                         transactions: {
                             type: types_1.TransactionType.DEBIT,
@@ -1578,7 +1581,7 @@ class OrderController {
                             timestamp: new Date(),
                         },
                     },
-                });
+                }, { new: true });
                 if (vcWallet) {
                     logger_1.logger.info(`💎 VCredits deducted after payment confirmed: ${vCreditsApplied}`);
                 }
@@ -3148,6 +3151,8 @@ class OrderController {
             const { rewardController } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
             await rewardController.awardOrderPoints(order._id.toString());
             logger_1.logger.info(`✅ Points awarded on delivery for order ${order.orderNumber}`);
+            await rewardController.awardCashback(order._id.toString());
+            logger_1.logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
             // Unlock vendor referral points if any vendor is making their first sale
             const uniqueVendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
             for (const vendorId of uniqueVendorIds) {
@@ -3285,6 +3290,8 @@ class OrderController {
                 const { rewardController } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
                 await rewardController.awardOrderPoints(order._id.toString());
                 logger_1.logger.info(`✅ Points awarded on full shipment receipt for order ${order.orderNumber}`);
+                await rewardController.awardCashback(order._id.toString());
+                logger_1.logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
                 // Unlock vendor referral points for first-sale vendors
                 const uniqueVendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
                 for (const vId of uniqueVendorIds) {

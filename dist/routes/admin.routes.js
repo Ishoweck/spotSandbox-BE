@@ -65,17 +65,20 @@ router.get('/orders', (0, auth_1.authorize)(...allAdmins), admin_controller_1.ge
 router.get('/orders/:id', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getOrderDetails);
 router.put('/orders/:id/status', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.updateOrderStatus);
 router.post('/orders/:id/refund', (0, auth_1.authorize)(...financialAdmins, types_1.UserRole.ADMIN), admin_controller_1.processRefund);
+router.put('/orders/:id/note', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.addAdminNote);
 // ================================================================
 // FINANCIAL MANAGEMENT
 // ================================================================
 router.get('/finance/overview', (0, auth_1.authorize)(...financialAdmins, types_1.UserRole.ADMIN), admin_controller_1.getFinancialOverview);
 router.get('/finance/transactions', (0, auth_1.authorize)(...financialAdmins, types_1.UserRole.ADMIN), admin_controller_1.getAllTransactions);
+router.get('/finance/transactions/:transactionId', (0, auth_1.authorize)(...financialAdmins, types_1.UserRole.ADMIN), admin_controller_1.getTransactionById);
 router.get('/finance/withdrawals', (0, auth_1.authorize)(...financialAdmins, types_1.UserRole.ADMIN), admin_controller_1.getPendingWithdrawals);
 router.post('/finance/withdrawals/:walletId/:transactionId/process', (0, auth_1.authorize)(...financialAdmins), admin_controller_1.processWithdrawal);
 // ================================================================
 // REVIEW MANAGEMENT
 // ================================================================
 router.get('/reviews', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getAllReviews);
+router.get('/reviews/:id', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getReviewById);
 router.put('/reviews/:id/status', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.updateReviewStatus);
 router.delete('/reviews/:id', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.deleteReview);
 // ================================================================
@@ -85,6 +88,7 @@ router.get('/disputes', (0, auth_1.authorize)(...generalAdmins), admin_controlle
 router.get('/disputes/:id', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getDisputeDetails);
 router.put('/disputes/:id/review', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.markDisputeUnderReview);
 router.put('/disputes/:id/resolve', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.resolveDispute);
+router.put('/disputes/:id/close', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.closeDispute);
 router.post('/disputes/:id/message', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.addDisputeMessage);
 // ================================================================
 // COUPON MANAGEMENT
@@ -92,6 +96,8 @@ router.post('/disputes/:id/message', (0, auth_1.authorize)(...generalAdmins), ad
 router.get('/coupons', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getAllCoupons);
 router.post('/coupons', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.createCoupon);
 router.put('/coupons/:id', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.updateCoupon);
+router.put('/coupons/:id/toggle', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.toggleCouponActive);
+router.get('/coupons/:id/usage', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getCouponUsage);
 router.delete('/coupons/:id', (0, auth_1.authorize)(types_1.UserRole.SUPER_ADMIN, types_1.UserRole.ADMIN), admin_controller_1.deleteCoupon);
 // ================================================================
 // CATEGORY MANAGEMENT
@@ -99,6 +105,7 @@ router.delete('/coupons/:id', (0, auth_1.authorize)(types_1.UserRole.SUPER_ADMIN
 router.get('/categories', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getAllCategories);
 router.post('/categories', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.createCategory);
 router.put('/categories/:id', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.updateCategory);
+router.put('/categories/:id/toggle', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.toggleCategoryStatus);
 router.delete('/categories/:id', (0, auth_1.authorize)(types_1.UserRole.SUPER_ADMIN, types_1.UserRole.ADMIN), admin_controller_1.deleteCategory);
 // ================================================================
 // NOTIFICATION MANAGEMENT
@@ -115,6 +122,7 @@ router.post('/account-deletions/:id/reject', (0, auth_1.authorize)(...generalAdm
 // AFFILIATE MANAGEMENT
 // ================================================================
 router.get('/affiliates', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getAllAffiliates);
+router.get('/affiliates/:userId/links', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getAffiliateLinks);
 router.put('/affiliates/:userId/status', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.toggleAffiliateStatus);
 // ================================================================
 // CHALLENGE MANAGEMENT
@@ -123,6 +131,7 @@ router.get('/challenges', (0, auth_1.authorize)(...generalAdmins), admin_control
 router.post('/challenges', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.createChallenge);
 router.put('/challenges/:id', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.updateChallenge);
 router.delete('/challenges/:id', (0, auth_1.authorize)(types_1.UserRole.SUPER_ADMIN, types_1.UserRole.ADMIN), admin_controller_1.deleteChallenge);
+router.get('/challenges/:id/leaderboard', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getChallengeLeaderboard);
 // ================================================================
 // REPORTS
 // ================================================================
@@ -134,6 +143,13 @@ router.get('/reports/products', (0, auth_1.authorize)(...allAdmins), admin_contr
 // ================================================================
 router.get('/activity-log', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getActivityLog);
 router.get('/search', (0, auth_1.authorize)(...allAdmins), admin_controller_1.globalSearch);
+// ================================================================
+// REWARDS & POINTS MANAGEMENT
+// ================================================================
+router.get('/rewards/overview', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getRewardsOverview);
+router.get('/rewards/users', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getRewardsUsers);
+router.post('/rewards/users/:userId/adjust', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.adjustUserPoints);
+router.get('/rewards/transactions', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getPointsTransactions);
 // ================================================================
 // APP VERSION MANAGEMENT
 // ================================================================

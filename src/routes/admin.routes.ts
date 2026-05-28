@@ -42,15 +42,18 @@ import {
   getOrderDetails,
   updateOrderStatus,
   processRefund,
+  addAdminNote,
 
   // Financial Management
   getFinancialOverview,
   getAllTransactions,
+  getTransactionById,
   getPendingWithdrawals,
   processWithdrawal,
 
   // Review Management
   getAllReviews,
+  getReviewById,
   updateReviewStatus,
   deleteReview,
 
@@ -60,18 +63,22 @@ import {
   markDisputeUnderReview,
   resolveDispute,
   addDisputeMessage,
+  closeDispute,
 
   // Coupon Management
   getAllCoupons,
   createCoupon,
   updateCoupon,
   deleteCoupon,
+  getCouponUsage,
+  toggleCouponActive,
 
   // Category Management
   getAllCategories,
   createCategory,
   updateCategory,
   deleteCategory,
+  toggleCategoryStatus,
 
   // Notification Management
   broadcastNotification,
@@ -85,6 +92,7 @@ import {
   // Affiliate Management
   getAllAffiliates,
   toggleAffiliateStatus,
+  getAffiliateLinks,
 
   // Challenge Management
   getAllChallenges,
@@ -104,6 +112,15 @@ import {
   // App Version
   getAppVersionConfig,
   updateAppVersionConfig,
+
+  // Rewards & Points
+  getRewardsOverview,
+  getRewardsUsers,
+  adjustUserPoints,
+  getPointsTransactions,
+
+  // Challenge Leaderboard
+  getChallengeLeaderboard,
 } from '../controllers/admin.controller';
 import { auditMiddleware } from '../middleware/audit';
 import { asyncHandler } from '../middleware/error';
@@ -178,12 +195,14 @@ router.get('/orders', authorize(...allAdmins), getAllOrders);
 router.get('/orders/:id', authorize(...allAdmins), getOrderDetails);
 router.put('/orders/:id/status', authorize(...generalAdmins), updateOrderStatus);
 router.post('/orders/:id/refund', authorize(...financialAdmins, UserRole.ADMIN), processRefund);
+router.put('/orders/:id/note', authorize(...generalAdmins), addAdminNote);
 
 // ================================================================
 // FINANCIAL MANAGEMENT
 // ================================================================
 router.get('/finance/overview', authorize(...financialAdmins, UserRole.ADMIN), getFinancialOverview);
 router.get('/finance/transactions', authorize(...financialAdmins, UserRole.ADMIN), getAllTransactions);
+router.get('/finance/transactions/:transactionId', authorize(...financialAdmins, UserRole.ADMIN), getTransactionById);
 router.get('/finance/withdrawals', authorize(...financialAdmins, UserRole.ADMIN), getPendingWithdrawals);
 router.post('/finance/withdrawals/:walletId/:transactionId/process', authorize(...financialAdmins), processWithdrawal);
 
@@ -191,6 +210,7 @@ router.post('/finance/withdrawals/:walletId/:transactionId/process', authorize(.
 // REVIEW MANAGEMENT
 // ================================================================
 router.get('/reviews', authorize(...generalAdmins), getAllReviews);
+router.get('/reviews/:id', authorize(...generalAdmins), getReviewById);
 router.put('/reviews/:id/status', authorize(...generalAdmins), updateReviewStatus);
 router.delete('/reviews/:id', authorize(...generalAdmins), deleteReview);
 
@@ -201,6 +221,7 @@ router.get('/disputes', authorize(...generalAdmins), getAllDisputes);
 router.get('/disputes/:id', authorize(...generalAdmins), getDisputeDetails);
 router.put('/disputes/:id/review', authorize(...generalAdmins), markDisputeUnderReview);
 router.put('/disputes/:id/resolve', authorize(...generalAdmins), resolveDispute);
+router.put('/disputes/:id/close', authorize(...generalAdmins), closeDispute);
 router.post('/disputes/:id/message', authorize(...generalAdmins), addDisputeMessage);
 
 // ================================================================
@@ -209,6 +230,8 @@ router.post('/disputes/:id/message', authorize(...generalAdmins), addDisputeMess
 router.get('/coupons', authorize(...allAdmins), getAllCoupons);
 router.post('/coupons', authorize(...generalAdmins), createCoupon);
 router.put('/coupons/:id', authorize(...generalAdmins), updateCoupon);
+router.put('/coupons/:id/toggle', authorize(...generalAdmins), toggleCouponActive);
+router.get('/coupons/:id/usage', authorize(...allAdmins), getCouponUsage);
 router.delete('/coupons/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteCoupon);
 
 // ================================================================
@@ -217,6 +240,7 @@ router.delete('/coupons/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), d
 router.get('/categories', authorize(...allAdmins), getAllCategories);
 router.post('/categories', authorize(...generalAdmins), createCategory);
 router.put('/categories/:id', authorize(...generalAdmins), updateCategory);
+router.put('/categories/:id/toggle', authorize(...generalAdmins), toggleCategoryStatus);
 router.delete('/categories/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteCategory);
 
 // ================================================================
@@ -236,6 +260,7 @@ router.post('/account-deletions/:id/reject', authorize(...generalAdmins), reject
 // AFFILIATE MANAGEMENT
 // ================================================================
 router.get('/affiliates', authorize(...generalAdmins), getAllAffiliates);
+router.get('/affiliates/:userId/links', authorize(...generalAdmins), getAffiliateLinks);
 router.put('/affiliates/:userId/status', authorize(...generalAdmins), toggleAffiliateStatus);
 
 // ================================================================
@@ -245,6 +270,7 @@ router.get('/challenges', authorize(...generalAdmins), getAllChallenges);
 router.post('/challenges', authorize(...generalAdmins), createChallenge);
 router.put('/challenges/:id', authorize(...generalAdmins), updateChallenge);
 router.delete('/challenges/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteChallenge);
+router.get('/challenges/:id/leaderboard', authorize(...allAdmins), getChallengeLeaderboard);
 
 // ================================================================
 // REPORTS
@@ -258,6 +284,14 @@ router.get('/reports/products', authorize(...allAdmins), getProductReport);
 // ================================================================
 router.get('/activity-log', authorize(...allAdmins), getActivityLog);
 router.get('/search', authorize(...allAdmins), globalSearch);
+
+// ================================================================
+// REWARDS & POINTS MANAGEMENT
+// ================================================================
+router.get('/rewards/overview', authorize(...allAdmins), getRewardsOverview);
+router.get('/rewards/users', authorize(...generalAdmins), getRewardsUsers);
+router.post('/rewards/users/:userId/adjust', authorize(...generalAdmins), adjustUserPoints);
+router.get('/rewards/transactions', authorize(...allAdmins), getPointsTransactions);
 
 // ================================================================
 // APP VERSION MANAGEMENT

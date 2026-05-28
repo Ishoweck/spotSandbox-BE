@@ -26,6 +26,11 @@ export declare class CouponController {
      */
     deleteCoupon(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
+     * Get coupons assigned to the logged-in user that they haven't used yet
+     * GET /api/v1/coupons/my
+     */
+    getMyCoupons(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
      * Get coupon usage statistics
      */
     getCouponStats(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;

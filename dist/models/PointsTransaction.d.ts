@@ -10,6 +10,7 @@ export interface IPointsTransaction extends Document {
     status: 'active' | 'locked' | 'expired';
     expiresAt?: Date;
     lockedForVendor?: Types.ObjectId;
+    remindersSent: number[];
     metadata?: {
         orderId?: string;
         productId?: string;

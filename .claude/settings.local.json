@@ -46,7 +46,14 @@
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); deps={**d.get\\('dependencies',{}\\), **d.get\\('devDependencies',{}\\)}; [print\\(k,v\\) for k,v in deps.items\\(\\) if any\\(x in k.lower\\(\\) for x in ['share','file','fs','image','download','media']\\)]\")",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); deps={**d.get\\('dependencies',{}\\), **d.get\\('devDependencies',{}\\)}; [print\\(k,v\\) for k,v in deps.items\\(\\) if 'expo' in k.lower\\(\\)]\")",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('dependencies',{}\\).get\\('react-native','not found'\\)\\)\")",
-      "Bash(npx expo *)"
+      "Bash(npx expo *)",
+      "Bash(grep -v \"Warning\\\\|warn\\\\|Use \\\\`node\")",
+      "Bash(Get-ChildItem *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\" -Recurse | Where-Object { $_.Name -match \"controller\" } | Select-Object -ExpandProperty FullName)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\src\" -Directory | Where-Object { $_.Name -eq 'lib' -or $_.Name -eq 'utils' })",
+      "Bash(Get-Content \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\\\\controllers\\\\admin.controller.ts\")",
+      "Bash(Measure-Object -Line)",
+      "Bash(Select-Object Lines)"
     ]
   }
 }

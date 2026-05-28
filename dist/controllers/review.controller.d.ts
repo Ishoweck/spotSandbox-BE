@@ -30,9 +30,13 @@ export declare class ReviewController {
      */
     getUserReviews(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
-     * Update product rating (internal helper)
+     * Update product rating then roll up to the vendor profile.
      */
     private updateProductRating;
+    /**
+     * Recompute vendor averageRating and totalReviews from all their products.
+     */
+    private updateVendorRating;
 }
 export declare const reviewController: ReviewController;
 //# sourceMappingURL=review.controller.d.ts.map

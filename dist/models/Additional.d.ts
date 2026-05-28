@@ -16,6 +16,7 @@ export interface ICoupon extends Document {
     applicableCategories?: Types.ObjectId[];
     excludedProducts?: Types.ObjectId[];
     usedBy: Types.ObjectId[];
+    assignedTo?: Types.ObjectId[];
 }
 export interface IAffiliateLink extends Document {
     user: Types.ObjectId;

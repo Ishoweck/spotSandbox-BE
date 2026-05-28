@@ -183,6 +183,7 @@ const orderSchema = new mongoose_1.Schema({
     shippingDetails: shippingDetailsSchema,
     couponCode: String,
     notes: String,
+    adminNote: String,
     deliveryType: {
         type: String,
         default: 'standard',
@@ -211,6 +212,7 @@ const orderSchema = new mongoose_1.Schema({
     affiliateCommission: Number,
     affiliateLinkId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'AffiliateLink' },
     affiliateCommissionPaid: { type: Boolean, default: false },
+    cashbackAwarded: { type: Boolean, default: false },
     statusHistory: [{
             status: {
                 type: String,

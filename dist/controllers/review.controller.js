@@ -10,6 +10,7 @@ const Product_1 = __importDefault(require("../models/Product"));
 const Order_1 = __importDefault(require("../models/Order"));
 const User_1 = __importDefault(require("../models/User"));
 const Wallet_1 = __importDefault(require("../models/Wallet"));
+const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const error_1 = require("../middleware/error");
 const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
@@ -249,16 +250,32 @@ class ReviewController {
         });
     }
     /**
-     * Update product rating (internal helper)
+     * Update product rating then roll up to the vendor profile.
      */
     async updateProductRating(productId) {
         const reviews = await Review_1.default.find({ product: productId });
         const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
         const averageRating = reviews.length > 0 ? totalRating / reviews.length : 0;
-        await Product_1.default.findByIdAndUpdate(productId, {
+        const updatedProduct = await Product_1.default.findByIdAndUpdate(productId, {
             averageRating: Math.round(averageRating * 10) / 10,
             totalReviews: reviews.length,
-        });
+        }, { new: true });
+        // Roll up to vendor profile
+        if (updatedProduct?.vendor) {
+            await this.updateVendorRating(updatedProduct.vendor.toString());
+        }
+    }
+    /**
+     * Recompute vendor averageRating and totalReviews from all their products.
+     */
+    async updateVendorRating(vendorUserId) {
+        const products = await Product_1.default.find({ vendor: vendorUserId }).select('averageRating totalReviews');
+        const totalReviews = products.reduce((sum, p) => sum + (p.totalReviews || 0), 0);
+        const weightedSum = products.reduce((sum, p) => sum + ((p.averageRating || 0) * (p.totalReviews || 0)), 0);
+        const averageRating = totalReviews > 0
+            ? Math.round((weightedSum / totalReviews) * 10) / 10
+            : 0;
+        await VendorProfile_1.default.findOneAndUpdate({ user: vendorUserId }, { averageRating, totalReviews });
     }
 }
 exports.ReviewController = ReviewController;

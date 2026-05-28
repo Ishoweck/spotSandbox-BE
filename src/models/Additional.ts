@@ -18,6 +18,7 @@ export interface ICoupon extends Document {
   applicableCategories?: Types.ObjectId[];
   excludedProducts?: Types.ObjectId[];
   usedBy: Types.ObjectId[];
+  assignedTo?: Types.ObjectId[]; // if set, only these users can redeem this coupon
 }
 
 const couponSchema = new Schema<ICoupon>({
@@ -77,12 +78,17 @@ const couponSchema = new Schema<ICoupon>({
     type: Schema.Types.ObjectId,
     ref: 'User',
   }],
+  assignedTo: [{
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  }],
 }, {
   timestamps: true,
 });
 
 couponSchema.index({ code: 1 });
 couponSchema.index({ validFrom: 1, validUntil: 1 });
+couponSchema.index({ assignedTo: 1, isActive: 1 });
 
 // Affiliate Link Model
 export interface IAffiliateLink extends Document {

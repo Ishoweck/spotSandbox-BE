@@ -38,6 +38,7 @@ export interface IOrder extends Document {
     shippingDetails?: IShippingDetails;
     couponCode?: string;
     notes?: string;
+    adminNote?: string;
     deliveryType?: string;
     isPickup: boolean;
     isDigital?: boolean;
@@ -55,6 +56,7 @@ export interface IOrder extends Document {
     affiliateCommission?: number;
     affiliateLinkId?: Types.ObjectId;
     affiliateCommissionPaid?: boolean;
+    cashbackAwarded?: boolean;
     statusHistory: {
         status: OrderStatus;
         timestamp: Date;

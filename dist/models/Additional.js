@@ -96,11 +96,16 @@ const couponSchema = new mongoose_1.Schema({
             type: mongoose_1.Schema.Types.ObjectId,
             ref: 'User',
         }],
+    assignedTo: [{
+            type: mongoose_1.Schema.Types.ObjectId,
+            ref: 'User',
+        }],
 }, {
     timestamps: true,
 });
 couponSchema.index({ code: 1 });
 couponSchema.index({ validFrom: 1, validUntil: 1 });
+couponSchema.index({ assignedTo: 1, isActive: 1 });
 const affiliateLinkSchema = new mongoose_1.Schema({
     user: {
         type: mongoose_1.Schema.Types.ObjectId,
