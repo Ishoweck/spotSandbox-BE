@@ -53,7 +53,14 @@
       "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\src\" -Directory | Where-Object { $_.Name -eq 'lib' -or $_.Name -eq 'utils' })",
       "Bash(Get-Content \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\\\\controllers\\\\admin.controller.ts\")",
       "Bash(Measure-Object -Line)",
-      "Bash(Select-Object Lines)"
+      "Bash(Select-Object Lines)",
+      "Bash(node -e \"require\\('sharp'\\)\")",
+      "Bash(node -e \"require\\('jimp'\\)\")",
+      "Bash(node -e \"require\\('./node_modules/jimp'\\)\")",
+      "Bash(node -e \"require\\('./node_modules/sharp'\\)\")",
+      "Bash(npm list *)",
+      "Bash(python *)",
+      "Bash(pip install *)"
     ]
   }
 }

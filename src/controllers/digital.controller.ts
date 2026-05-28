@@ -218,6 +218,22 @@ export class DigitalProductController {
       throw new AppError('Digital file not available', 404);
     }
 
+    // For external links, return the URL directly without generating a token
+    if ((product.digitalFile as any).isExternalLink) {
+      logger.info(`External link accessed for order ${orderId}, product ${product._id}`);
+      res.json({
+        success: true,
+        message: 'Access link retrieved',
+        data: {
+          downloadUrl: product.digitalFile.url,
+          fileName: product.digitalFile.fileName,
+          fileSize: product.digitalFile.fileSize,
+          version: product.digitalFile.version,
+        },
+      });
+      return;
+    }
+
     // Generate temporary download token (valid for 1 hour)
     const downloadToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour

@@ -104,8 +104,20 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
       delete productData.digitalFileBase64;
       delete productData.digitalFileName;
       delete productData.digitalFileVersion;
-      
+
       console.log('✅ Digital file uploaded successfully');
+    } else if (productData.productType === 'digital' && productData.digitalExternalLink) {
+      productData.digitalFile = {
+        url: productData.digitalExternalLink,
+        fileName: 'External Link',
+        fileSize: 0,
+        fileType: 'link',
+        version: '1.0',
+        uploadedAt: new Date(),
+        isExternalLink: true,
+      };
+      delete productData.digitalExternalLink;
+      console.log('✅ External digital link set');
     }
 
     // Drafts keep their status; all other new products go to PENDING_APPROVAL

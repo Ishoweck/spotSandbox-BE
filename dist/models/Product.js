@@ -157,6 +157,7 @@ const productSchema = new mongoose_1.Schema({
         fileType: String,
         version: String,
         uploadedAt: Date,
+        isExternalLink: { type: Boolean, default: false },
     },
     requiresLicense: {
         type: Boolean,

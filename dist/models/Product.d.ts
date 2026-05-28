@@ -38,6 +38,7 @@ export interface IProduct extends Document {
         fileType: string;
         version: string;
         uploadedAt: Date;
+        isExternalLink?: boolean;
     };
     requiresLicense?: boolean;
     licenseType?: 'lifetime' | 'subscription' | 'trial';

@@ -39,6 +39,7 @@ export interface IProduct extends Document {
     fileType: string;
     version: string;
     uploadedAt: Date;
+    isExternalLink?: boolean;
   };
   requiresLicense?: boolean;
   licenseType?: 'lifetime' | 'subscription' | 'trial';
@@ -193,6 +194,7 @@ const productSchema = new Schema<IProduct>({
     fileType: String,
     version: String,
     uploadedAt: Date,
+    isExternalLink: { type: Boolean, default: false },
   },
   requiresLicense: {
     type: Boolean,
