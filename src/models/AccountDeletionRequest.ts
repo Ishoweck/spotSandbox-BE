@@ -9,7 +9,7 @@ export interface IAccountDeletionRequest extends Document {
   user: Types.ObjectId;
   userEmail?: string;
   userFullName?: string;
-  reason: string;
+  reason: string; // free-form or one of the predefined user-facing values
   additionalDetails?: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   userRole: 'customer' | 'vendor';
@@ -35,16 +35,6 @@ const accountDeletionRequestSchema = new Schema<IAccountDeletionRequest>(
     reason: {
       type: String,
       required: true,
-      enum: [
-        'privacy_concerns',
-        'not_using_anymore',
-        'found_alternative',
-        'too_many_emails',
-        'bad_experience',
-        'technical_issues',
-        'account_security',
-        'other',
-      ],
     },
     additionalDetails: {
       type: String,

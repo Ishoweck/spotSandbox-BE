@@ -50,16 +50,6 @@ const accountDeletionRequestSchema = new mongoose_1.Schema({
     reason: {
         type: String,
         required: true,
-        enum: [
-            'privacy_concerns',
-            'not_using_anymore',
-            'found_alternative',
-            'too_many_emails',
-            'bad_experience',
-            'technical_issues',
-            'account_security',
-            'other',
-        ],
     },
     additionalDetails: {
         type: String,
