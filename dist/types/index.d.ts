@@ -296,6 +296,12 @@ export interface IUserDocument extends Document {
     };
     oauthProvider?: 'google' | 'apple' | 'facebook';
     oauthId?: string;
+    payoutDetails?: {
+        bankName?: string;
+        accountNumber?: string;
+        accountName?: string;
+        bankCode?: string;
+    };
     notificationPreferences?: {
         pushEnabled: boolean;
         order: {

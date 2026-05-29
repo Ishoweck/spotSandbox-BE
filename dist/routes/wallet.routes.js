@@ -31,6 +31,15 @@ router.get('/transactions', (0, error_1.asyncHandler)(wallet_controller_1.wallet
 // Top-up wallet
 router.post('/top-up', (0, validation_1.validate)(topUpValidation), (0, error_1.asyncHandler)(wallet_controller_1.walletController.topUpWallet.bind(wallet_controller_1.walletController)));
 router.get('/top-up/verify/:reference', (0, error_1.asyncHandler)(wallet_controller_1.walletController.verifyTopUp.bind(wallet_controller_1.walletController)));
+const bankAccountValidation = [
+    (0, express_validator_1.body)('bankName').notEmpty().withMessage('Bank name is required'),
+    (0, express_validator_1.body)('accountNumber').matches(/^\d{10}$/).withMessage('Account number must be 10 digits'),
+    (0, express_validator_1.body)('accountName').notEmpty().withMessage('Account name is required'),
+    (0, express_validator_1.body)('bankCode').notEmpty().withMessage('Bank code is required'),
+];
+// Customer bank account
+router.get('/bank-account', (0, error_1.asyncHandler)(wallet_controller_1.walletController.getCustomerBankAccount.bind(wallet_controller_1.walletController)));
+router.put('/bank-account', (0, validation_1.validate)(bankAccountValidation), (0, error_1.asyncHandler)(wallet_controller_1.walletController.updateCustomerBankAccount.bind(wallet_controller_1.walletController)));
 // Withdrawals
 router.post('/withdraw', (0, validation_1.validate)(withdrawalValidation), (0, error_1.asyncHandler)(wallet_controller_1.walletController.requestWithdrawal.bind(wallet_controller_1.walletController)));
 // Internal transfer

@@ -86,9 +86,8 @@ class AddressController {
             });
         }
         catch (error) {
-            logger_1.logger.warn('⚠️ ShipBubble validation failed, proceeding without validation:', error.message);
-            // Continue without ShipBubble validation - don't block address creation
-            shipBubbleData = undefined;
+            logger_1.logger.error('❌ ShipBubble address validation failed:', error.message);
+            throw new error_1.AppError('We couldn\'t verify this address. Please use the location button or adjust your address and try again.', 400);
         }
         // If this is set as default, unset other defaults
         if (isDefault) {
@@ -126,12 +125,10 @@ class AddressController {
         await user.save();
         res.status(201).json({
             success: true,
-            message: shipBubbleData
-                ? 'Address created and validated successfully'
-                : 'Address created successfully',
+            message: 'Address created and validated successfully',
             data: {
                 address: newAddress,
-                validated: !!shipBubbleData,
+                validated: true,
             },
         });
     }
@@ -181,8 +178,8 @@ class AddressController {
                 logger_1.logger.info('✅ Address revalidated successfully');
             }
             catch (error) {
-                logger_1.logger.warn('⚠️ ShipBubble revalidation failed:', error.message);
-                // Continue with update even if revalidation fails
+                logger_1.logger.error('❌ ShipBubble revalidation failed:', error.message);
+                throw new error_1.AppError('We couldn\'t verify the updated address. Please use the location button or check your address details.', 400);
             }
         }
         // If setting as default, unset others
@@ -191,7 +188,8 @@ class AddressController {
                 addr.isDefault = false;
             });
         }
-        // Update address fields
+        // Update address fields — city/state/country/postalCode already set from ShipBubble
+        // if revalidation ran; only update them from user input when no revalidation occurred
         if (label !== undefined)
             address.label = label;
         if (fullName !== undefined)
@@ -200,16 +198,19 @@ class AddressController {
             address.phone = phone;
         if (street !== undefined)
             address.street = street;
-        if (city !== undefined)
-            address.city = city;
-        if (state !== undefined)
-            address.state = state;
-        if (country !== undefined)
-            address.country = country;
-        if (postalCode !== undefined)
-            address.postalCode = postalCode;
         if (isDefault !== undefined)
             address.isDefault = isDefault;
+        // Only apply user-supplied location fields when address did not change (no revalidation)
+        if (!addressChanged) {
+            if (city !== undefined)
+                address.city = city;
+            if (state !== undefined)
+                address.state = state;
+            if (country !== undefined)
+                address.country = country;
+            if (postalCode !== undefined)
+                address.postalCode = postalCode;
+        }
         await user.save();
         res.json({
             success: true,

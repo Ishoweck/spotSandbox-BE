@@ -130,6 +130,14 @@ const userSchema = new Schema<IUserDocument>(
       sparse: true,
     },
 
+    // Bank account for withdrawals (customers)
+    payoutDetails: {
+      bankName: String,
+      accountNumber: String,
+      accountName: String,
+      bankCode: String,
+    },
+
     // Notification preferences
     notificationPreferences: {
       pushEnabled: { type: Boolean, default: true },

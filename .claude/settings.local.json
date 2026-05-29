@@ -60,7 +60,10 @@
       "Bash(node -e \"require\\('./node_modules/sharp'\\)\")",
       "Bash(npm list *)",
       "Bash(python *)",
-      "Bash(pip install *)"
+      "Bash(pip install *)",
+      "Bash(Select-Object Name)",
+      "Bash(npx kill-port *)",
+      "Bash(python3 *)"
     ]
   }
 }

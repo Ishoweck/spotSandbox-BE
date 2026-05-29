@@ -190,18 +190,66 @@ export class WalletController {
   }
 
   /**
+   * Get customer bank account details
+   */
+  async getCustomerBankAccount(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const user = await User.findById(req.user?.id).select('payoutDetails');
+    if (!user) throw new AppError('User not found', 404);
+
+    res.json({
+      success: true,
+      data: { payoutDetails: user.payoutDetails || null },
+    });
+  }
+
+  /**
+   * Save / update customer bank account details
+   */
+  async updateCustomerBankAccount(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { bankName, accountNumber, accountName, bankCode } = req.body;
+
+    if (!bankName || !accountNumber || !accountName || !bankCode) {
+      throw new AppError('All bank account fields are required', 400);
+    }
+    if (!/^\d{10}$/.test(accountNumber)) {
+      throw new AppError('Account number must be exactly 10 digits', 400);
+    }
+
+    await User.findByIdAndUpdate(req.user?.id, {
+      payoutDetails: { bankName, accountNumber, accountName, bankCode },
+    });
+
+    res.json({
+      success: true,
+      message: 'Bank account details saved successfully',
+    });
+  }
+
+  /**
    * Request withdrawal
    */
   async requestWithdrawal(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { amount, bankDetails } = req.body;
+    const { amount } = req.body;
 
     if (!amount || amount < 1000) {
       throw new AppError('Minimum withdrawal amount is ₦1,000', 400);
     }
 
-    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id }).select('isActive');
-    if (vendorProfile && vendorProfile.isActive === false) {
-      throw new AppError('Your account is currently inactive. Please contact support to withdraw funds.', 403);
+    // Check bank account — vendors store it on VendorProfile, customers on User
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id }).select('isActive payoutDetails');
+    if (vendorProfile) {
+      if (vendorProfile.isActive === false) {
+        throw new AppError('Your account is currently inactive. Please contact support to withdraw funds.', 403);
+      }
+      if (!vendorProfile.payoutDetails?.accountNumber) {
+        throw new AppError('Please set up your bank account details before withdrawing.', 400);
+      }
+    } else {
+      // Customer — check User.payoutDetails
+      const user = await User.findById(req.user?.id).select('payoutDetails');
+      if (!user?.payoutDetails?.accountNumber) {
+        throw new AppError('Please set up your bank account details before withdrawing.', 400);
+      }
     }
 
     const reference = `WD-${generateOrderNumber()}`;

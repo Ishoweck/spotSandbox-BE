@@ -18,6 +18,14 @@ export declare class WalletController {
      */
     verifyTopUp(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
+     * Get customer bank account details
+     */
+    getCustomerBankAccount(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Save / update customer bank account details
+     */
+    updateCustomerBankAccount(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
      * Request withdrawal
      */
     requestWithdrawal(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;

@@ -367,6 +367,14 @@ export interface IUserDocument extends Document {
   oauthProvider?: 'google' | 'apple' | 'facebook';
   oauthId?: string;
 
+  // Bank account for withdrawals (customers)
+  payoutDetails?: {
+    bankName?: string;
+    accountNumber?: string;
+    accountName?: string;
+    bankCode?: string;
+  };
+
   // Notification preferences
   notificationPreferences?: {
     pushEnabled: boolean;

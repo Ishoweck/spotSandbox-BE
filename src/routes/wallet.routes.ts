@@ -46,6 +46,21 @@ router.get(
   asyncHandler(walletController.verifyTopUp.bind(walletController))
 );
 
+const bankAccountValidation = [
+  body('bankName').notEmpty().withMessage('Bank name is required'),
+  body('accountNumber').matches(/^\d{10}$/).withMessage('Account number must be 10 digits'),
+  body('accountName').notEmpty().withMessage('Account name is required'),
+  body('bankCode').notEmpty().withMessage('Bank code is required'),
+];
+
+// Customer bank account
+router.get('/bank-account', asyncHandler(walletController.getCustomerBankAccount.bind(walletController)));
+router.put(
+  '/bank-account',
+  validate(bankAccountValidation),
+  asyncHandler(walletController.updateCustomerBankAccount.bind(walletController))
+);
+
 // Withdrawals
 router.post(
   '/withdraw',
