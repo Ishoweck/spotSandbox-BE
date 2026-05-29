@@ -116,6 +116,7 @@ router.get('/notifications', (0, auth_1.authorize)(...allAdmins), admin_controll
 // ACCOUNT DELETION MANAGEMENT
 // ================================================================
 router.get('/account-deletions', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.getAccountDeletionRequests);
+router.post('/account-deletions', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.adminCreateDeletionRequest);
 router.post('/account-deletions/:id/approve', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.approveAccountDeletion);
 router.post('/account-deletions/:id/reject', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.rejectAccountDeletion);
 // ================================================================

@@ -88,6 +88,7 @@ import {
   getAccountDeletionRequests,
   approveAccountDeletion,
   rejectAccountDeletion,
+  adminCreateDeletionRequest,
 
   // Affiliate Management
   getAllAffiliates,
@@ -253,6 +254,7 @@ router.get('/notifications', authorize(...allAdmins), getNotificationHistory);
 // ACCOUNT DELETION MANAGEMENT
 // ================================================================
 router.get('/account-deletions', authorize(...generalAdmins), getAccountDeletionRequests);
+router.post('/account-deletions', authorize(...generalAdmins), adminCreateDeletionRequest);
 router.post('/account-deletions/:id/approve', authorize(...generalAdmins), approveAccountDeletion);
 router.post('/account-deletions/:id/reject', authorize(...generalAdmins), rejectAccountDeletion);
 

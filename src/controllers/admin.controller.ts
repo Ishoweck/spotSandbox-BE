@@ -3645,6 +3645,72 @@ export const rejectAccountDeletion = asyncHandler(
   }
 );
 
+/**
+ * POST /admin/account-deletions
+ * Admin creates a deletion request on behalf of a user
+ */
+export const adminCreateDeletionRequest = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { userId, reason } = req.body;
+
+    if (!userId) {
+      res.status(400).json({ success: false, message: 'userId is required' });
+      return;
+    }
+
+    if (!reason || !String(reason).trim()) {
+      res.status(400).json({ success: false, message: 'Reason is required' });
+      return;
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const existing = await AccountDeletionRequest.findOne({ user: userId, status: 'pending' });
+    if (existing) {
+      res.status(400).json({ success: false, message: 'This user already has a pending deletion request' });
+      return;
+    }
+
+    const deletionRequest = await AccountDeletionRequest.create({
+      user: userId,
+      userEmail: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      reason: String(reason).trim(),
+      userRole: user.role,
+    });
+
+    if (user.role === 'vendor') {
+      const pendingOrders = await Order.countDocuments({
+        'items.vendor': userId,
+        status: { $in: ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'] },
+      });
+
+      if (pendingOrders > 0) {
+        (deletionRequest as any).hasPendingOrders = true;
+        (deletionRequest as any).pendingOrdersCount = pendingOrders;
+        await deletionRequest.save();
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Deletion request submitted successfully. A super admin must approve before the account is removed.',
+      data: {
+        deletionRequest: {
+          id: deletionRequest._id,
+          status: deletionRequest.status,
+          reason: deletionRequest.reason,
+          createdAt: deletionRequest.createdAt,
+        },
+      },
+    });
+  }
+);
+
 // ================================================================
 // AFFILIATE MANAGEMENT
 // ================================================================

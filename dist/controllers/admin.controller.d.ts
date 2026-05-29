@@ -305,6 +305,11 @@ export declare const approveAccountDeletion: (req: import("express").Request, re
  */
 export declare const rejectAccountDeletion: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * POST /admin/account-deletions
+ * Admin creates a deletion request on behalf of a user
+ */
+export declare const adminCreateDeletionRequest: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * GET /admin/affiliates
  * List all affiliates with search, status filter, and global stats
  */

@@ -37,7 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -3015,6 +3015,61 @@ exports.rejectAccountDeletion = (0, ayncHandler_1.asyncHandler)(async (req, res)
     res.json({
         success: true,
         message: 'Account deletion request rejected',
+    });
+});
+/**
+ * POST /admin/account-deletions
+ * Admin creates a deletion request on behalf of a user
+ */
+exports.adminCreateDeletionRequest = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { userId, reason } = req.body;
+    if (!userId) {
+        res.status(400).json({ success: false, message: 'userId is required' });
+        return;
+    }
+    if (!reason || !String(reason).trim()) {
+        res.status(400).json({ success: false, message: 'Reason is required' });
+        return;
+    }
+    const user = await User_1.default.findById(userId);
+    if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+    }
+    const existing = await AccountDeletionRequest_1.default.findOne({ user: userId, status: 'pending' });
+    if (existing) {
+        res.status(400).json({ success: false, message: 'This user already has a pending deletion request' });
+        return;
+    }
+    const deletionRequest = await AccountDeletionRequest_1.default.create({
+        user: userId,
+        userEmail: user.email,
+        userFullName: `${user.firstName} ${user.lastName}`,
+        reason: String(reason).trim(),
+        userRole: user.role,
+    });
+    if (user.role === 'vendor') {
+        const pendingOrders = await Order_1.default.countDocuments({
+            'items.vendor': userId,
+            status: { $in: ['pending', 'confirmed', 'processing', 'shipped', 'in_transit'] },
+        });
+        if (pendingOrders > 0) {
+            deletionRequest.hasPendingOrders = true;
+            deletionRequest.pendingOrdersCount = pendingOrders;
+            await deletionRequest.save();
+        }
+    }
+    res.status(201).json({
+        success: true,
+        message: 'Deletion request submitted successfully. A super admin must approve before the account is removed.',
+        data: {
+            deletionRequest: {
+                id: deletionRequest._id,
+                status: deletionRequest.status,
+                reason: deletionRequest.reason,
+                createdAt: deletionRequest.createdAt,
+            },
+        },
     });
 });
 // ================================================================
