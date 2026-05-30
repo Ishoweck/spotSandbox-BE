@@ -100,10 +100,12 @@ export class AddressController {
       });
     } catch (error: any) {
       logger.error('❌ ShipBubble address validation failed:', error.message);
-      throw new AppError(
-        'We couldn\'t verify this address. Please use the location button or adjust your address and try again.',
-        400
-      );
+      res.status(422).json({
+        success: false,
+        code: 'SHIPBUBBLE_VALIDATION_FAILED',
+        message: 'Our delivery carrier couldn\'t confirm this location. Please update your city and state, then try again.',
+      });
+      return;
     }
 
     // If this is set as default, unset other defaults
@@ -214,10 +216,12 @@ export class AddressController {
         logger.info('✅ Address revalidated successfully');
       } catch (error: any) {
         logger.error('❌ ShipBubble revalidation failed:', error.message);
-        throw new AppError(
-          'We couldn\'t verify the updated address. Please use the location button or check your address details.',
-          400
-        );
+        res.status(422).json({
+          success: false,
+          code: 'SHIPBUBBLE_VALIDATION_FAILED',
+          message: 'Our delivery carrier couldn\'t confirm this location. Please check your city and state, then try again.',
+        });
+        return;
       }
     }
 

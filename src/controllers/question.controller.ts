@@ -1,9 +1,11 @@
 // controllers/question.controller.ts
 import { Response } from 'express';
-import { AuthRequest, ApiResponse } from '../types';
+import { AuthRequest, ApiResponse, NotificationType } from '../types';
 import ProductQuestion from '../models/ProductQuestion';
 import Product from '../models/Product';
+import User from '../models/User';
 import { AppError } from '../middleware/error';
+import { notificationService } from '../services/notification.service';
 import { logger } from '../utils/logger';
 
 export class QuestionController {
@@ -41,6 +43,26 @@ export class QuestionController {
     await newQuestion.populate('user', 'firstName lastName avatar profileImage');
 
     logger.info(`Question asked: ${newQuestion._id} for product ${productId} by user ${req.user?.id}`);
+
+    // Notify vendor
+    try {
+      const asker = await User.findById(req.user?.id).select('firstName lastName');
+      const vendorId = product.vendor?.toString();
+      if (asker && vendorId) {
+        const preview = question.trim().length > 60
+          ? question.trim().substring(0, 60) + '…'
+          : question.trim();
+        await notificationService.send({
+          userId: vendorId,
+          type: NotificationType.REVIEW,
+          title: `New Question on "${product.name}"`,
+          message: `${asker.firstName} ${asker.lastName} asked: "${preview}"`,
+          data: { productId, questionId: newQuestion._id.toString() },
+        });
+      }
+    } catch (err: any) {
+      logger.error('Error sending question notification:', err.message);
+    }
 
     res.status(201).json({
       success: true,

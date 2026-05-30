@@ -177,13 +177,17 @@ class NotificationService {
 
   async orderStatusUpdated(orderId: string, orderNumber: string, status: string, customerId: string): Promise<void> {
     const statusConfig: Record<string, { title: string; message: string }> = {
-      confirmed:  { title: 'Order Confirmed ✅',    message: `Your vendor confirmed order #${orderNumber} and is getting it ready for you.` },
-      processing: { title: 'Order Being Packed 📦', message: `Order #${orderNumber} is being packed and prepped for dispatch.` },
-      shipped:    { title: 'Order Shipped 🚚',       message: `Order #${orderNumber} is on its way! Your courier has it — tap to track.` },
-      in_transit: { title: 'Out for Delivery 🚚',   message: `Your order #${orderNumber} is moving — expected delivery coming soon.` },
-      delivered:  { title: 'Order Delivered! 🎉',   message: `Order #${orderNumber} delivered! Hope you love it. Tap to confirm receipt.` },
-      cancelled:  { title: 'Order Cancelled',        message: `Order #${orderNumber} was cancelled. If you paid, a refund is on its way to your wallet.` },
-      refunded:   { title: 'Refund Processed 💸',   message: `Your refund for order #${orderNumber} has been processed and added to your wallet.` },
+      pending:            { title: 'Order Received 🛍️',          message: `Order #${orderNumber} has been placed and is waiting for vendor confirmation.` },
+      confirmed:          { title: 'Order Confirmed ✅',           message: `Your vendor confirmed order #${orderNumber} and is getting it ready for you.` },
+      processing:         { title: 'Order Being Packed 📦',        message: `Order #${orderNumber} is being packed and prepped for dispatch.` },
+      shipped:            { title: 'Order Shipped 🚚',             message: `Order #${orderNumber} is on its way! Your courier has it — tap to track.` },
+      in_transit:         { title: 'Out for Delivery 🚚',          message: `Your order #${orderNumber} is moving — expected delivery coming soon.` },
+      delivered:          { title: 'Order Delivered! 🎉',          message: `Order #${orderNumber} delivered! Hope you love it. Tap to confirm receipt.` },
+      cancelled:          { title: 'Order Cancelled',              message: `Order #${orderNumber} was cancelled. If you paid, a refund is on its way to your wallet.` },
+      refunded:           { title: 'Refund Processed 💸',          message: `Your refund for order #${orderNumber} has been processed and added to your wallet.` },
+      shipment_received:  { title: 'Delivery Confirmed 📬',        message: `Your customer confirmed delivery of order #${orderNumber}. Payment will be released to your wallet.` },
+      failed:             { title: 'Order Failed',                 message: `Something went wrong with order #${orderNumber}. Please contact support if you need help.` },
+      disputed:           { title: 'Order Disputed ⚠️',           message: `A dispute has been opened on order #${orderNumber}. Our team will review and reach out.` },
     };
 
     const { title, message } = statusConfig[status] ?? {

@@ -4,9 +4,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.questionController = exports.QuestionController = void 0;
+const types_1 = require("../types");
 const ProductQuestion_1 = __importDefault(require("../models/ProductQuestion"));
 const Product_1 = __importDefault(require("../models/Product"));
+const User_1 = __importDefault(require("../models/User"));
 const error_1 = require("../middleware/error");
+const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
 class QuestionController {
     /**
@@ -37,6 +40,26 @@ class QuestionController {
         // Populate user info for response
         await newQuestion.populate('user', 'firstName lastName avatar profileImage');
         logger_1.logger.info(`Question asked: ${newQuestion._id} for product ${productId} by user ${req.user?.id}`);
+        // Notify vendor
+        try {
+            const asker = await User_1.default.findById(req.user?.id).select('firstName lastName');
+            const vendorId = product.vendor?.toString();
+            if (asker && vendorId) {
+                const preview = question.trim().length > 60
+                    ? question.trim().substring(0, 60) + '…'
+                    : question.trim();
+                await notification_service_1.notificationService.send({
+                    userId: vendorId,
+                    type: types_1.NotificationType.REVIEW,
+                    title: `New Question on "${product.name}"`,
+                    message: `${asker.firstName} ${asker.lastName} asked: "${preview}"`,
+                    data: { productId, questionId: newQuestion._id.toString() },
+                });
+            }
+        }
+        catch (err) {
+            logger_1.logger.error('Error sending question notification:', err.message);
+        }
         res.status(201).json({
             success: true,
             message: 'Question submitted successfully',

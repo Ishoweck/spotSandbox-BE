@@ -63,7 +63,10 @@
       "Bash(pip install *)",
       "Bash(Select-Object Name)",
       "Bash(npx kill-port *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\" -Filter \"index.ts\" -Recurse -File 2>$null | Where-Object {$_.FullName -match \"types\"} | Select-Object -ExpandProperty FullName)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(xargs grep -l \"addNotificationResponseReceivedListener\\\\|Notifications.addNotificationResponseReceivedListener\")"
     ]
   }
 }
