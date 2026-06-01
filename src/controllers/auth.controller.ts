@@ -4,7 +4,7 @@ import User from '../models/User';
 import { Wallet } from '../models/Additional';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt';
 import { generateOTP, generateAffiliateCode, generateResetCode } from '../utils/helpers';
-import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail, sendBuyerFounderWelcomeEmail } from '../utils/email';
+import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendFounderWelcomeEmail, sendVendorWelcomeEmail, sendProductPostingGuideEmail, sendBuyerFounderWelcomeEmail } from '../utils/email';
 import { AppError } from '../middleware/error';
 import crypto from 'crypto';
 import { queueEmailsInBackground } from '../utils/email-queue';
@@ -66,7 +66,7 @@ export class AuthController {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`\n🔑 [DEV] Registration OTP for ${email}: ${otpCode}\n`);
     }
-    await sendOTPEmail(email, otpCode);
+    await sendOTPEmail(email, otpCode, firstName);
 
     res.status(201).json({
       success: true,
@@ -178,13 +178,12 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   // Buyers get welcome email + buyer founder's note only
   if (user.role === 'vendor') {
     queueEmailsInBackground([
-      () => sendWelcomeEmail(user.email, user.firstName),
-      () => sendFounderWelcomeEmail(user.email),
+      () => sendVendorWelcomeEmail(user.email, user.firstName),
+      () => sendFounderWelcomeEmail(user.email, user.firstName),
       () => sendProductPostingGuideEmail(user.email),
     ], 10000);
   } else {
     queueEmailsInBackground([
-      () => sendWelcomeEmail(user.email, user.firstName),
       () => sendBuyerFounderWelcomeEmail(user.email, user.firstName),
     ], 10000);
   }
@@ -256,7 +255,7 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`\n🔑 [DEV] Resend OTP for ${email}: ${otpCode}\n`);
     }
-    await sendOTPEmail(email, otpCode);
+    await sendOTPEmail(email, otpCode, user.firstName);
 
     res.json({
       success: true,
@@ -454,7 +453,7 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
     await user.save();
 
     // Send reset email with OTP
-    await sendPasswordResetEmail(email, otpCode);
+    await sendPasswordResetEmail(email, otpCode, user.firstName);
 
     if (process.env.NODE_ENV !== 'production') {
       console.log(`\n🔐 [DEV] Password reset OTP for ${email}: ${otpCode}\n`);

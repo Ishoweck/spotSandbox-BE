@@ -4,7 +4,7 @@ import User from '../models/User';
 import { Wallet } from '../models/Additional';
 import { generateTokens } from '../utils/jwt';
 import { generateAffiliateCode } from '../utils/helpers';
-import { sendWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
+import { sendWelcomeEmail, sendFounderWelcomeEmail, sendVendorWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
 import { AppError } from '../middleware/error';
 import { OAuth2Client } from 'google-auth-library';
 import axios from 'axios';
@@ -111,8 +111,8 @@ export class OAuthController {
         // Send welcome emails in background
         if (email_verified) {
           queueEmailsInBackground([
-            () => sendWelcomeEmail(user.email, user.firstName),
-            () => sendFounderWelcomeEmail(user.email),
+            () => sendVendorWelcomeEmail(user.email, user.firstName),
+            () => sendFounderWelcomeEmail(user.email, user.firstName),
             () => sendProductPostingGuideEmail(user.email),
           ], 10000);
         }
@@ -220,8 +220,8 @@ export class OAuthController {
         // Send welcome emails in background
         if (email_verified) {
           queueEmailsInBackground([
-            () => sendWelcomeEmail(user.email, user.firstName),
-            () => sendFounderWelcomeEmail(user.email),
+            () => sendVendorWelcomeEmail(user.email, user.firstName),
+            () => sendFounderWelcomeEmail(user.email, user.firstName),
             () => sendProductPostingGuideEmail(user.email),
           ], 10000);
         }

@@ -131,8 +131,8 @@ class OAuthController {
                 // Send welcome emails in background
                 if (email_verified) {
                     (0, email_queue_1.queueEmailsInBackground)([
-                        () => (0, email_1.sendWelcomeEmail)(user.email, user.firstName),
-                        () => (0, email_1.sendFounderWelcomeEmail)(user.email),
+                        () => (0, email_1.sendVendorWelcomeEmail)(user.email, user.firstName),
+                        () => (0, email_1.sendFounderWelcomeEmail)(user.email, user.firstName),
                         () => (0, email_1.sendProductPostingGuideEmail)(user.email),
                     ], 10000);
                 }
@@ -222,8 +222,8 @@ class OAuthController {
                 // Send welcome emails in background
                 if (email_verified) {
                     (0, email_queue_1.queueEmailsInBackground)([
-                        () => (0, email_1.sendWelcomeEmail)(user.email, user.firstName),
-                        () => (0, email_1.sendFounderWelcomeEmail)(user.email),
+                        () => (0, email_1.sendVendorWelcomeEmail)(user.email, user.firstName),
+                        () => (0, email_1.sendFounderWelcomeEmail)(user.email, user.firstName),
                         () => (0, email_1.sendProductPostingGuideEmail)(user.email),
                     ], 10000);
                 }

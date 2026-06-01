@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendProductPostingGuideEmail = exports.sendBuyerFounderWelcomeEmail = exports.sendFounderWelcomeEmail = exports.sendOrderConfirmationEmail = exports.sendWelcomeEmail = exports.sendPasswordResetEmail = exports.sendOTPEmail = exports.sendEmail = void 0;
+exports.sendProductPostingGuideEmail = exports.sendBuyerFounderWelcomeEmail = exports.sendFounderWelcomeEmail = exports.sendVendorWelcomeEmail = exports.sendOrderConfirmationEmail = exports.sendWelcomeEmail = exports.sendPasswordResetEmail = exports.sendOTPEmail = exports.sendEmail = void 0;
 const resend_1 = require("resend");
 const logger_1 = require("./logger");
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -30,15 +30,113 @@ const sendEmail = async (options) => {
     }
 };
 exports.sendEmail = sendEmail;
-const sendOTPEmail = async (email, otp) => {
+const sendOTPEmail = async (email, otp, name) => {
+    const displayName = name || 'there';
+    const formattedOtp = `${otp.slice(0, 3)} ${otp.slice(3)}`;
     const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #ff6600;">VendorSpot - Verification Code</h2>
-      <p>Your verification code is:</p>
-      <h1 style="color: #ff6600; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
-      <p>This code will expire in 10 minutes.</p>
-      <p>If you didn't request this code, please ignore this email.</p>
-    </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
+
+          <!-- Title -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <h1 style="margin:0;font-size:24px;font-weight:700;color:#111111;line-height:1.3;">OTP / Email Verification</h1>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hello ${displayName},</p>
+              <p style="margin:0 0 12px 0;font-size:15px;color:#374151;line-height:1.6;">
+                Welcome to Vendorspot. We are excited to have you as part of our trust system!
+              </p>
+              <p style="margin:0;font-size:15px;color:#374151;line-height:1.6;">
+                To continue with your account, use this code to verify your email address.
+              </p>
+            </td>
+          </tr>
+
+          <!-- OTP Box -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <div style="background:#f3f4f6;border-radius:8px;padding:20px;text-align:center;">
+                <span style="font-size:36px;font-weight:800;color:#CC3366;letter-spacing:6px;">${formattedOtp}</span>
+              </div>
+              <p style="margin:10px 0 0 0;font-size:12px;color:#9ca3af;text-align:center;">
+                This code expires in 10 minutes and is valid for one use only
+              </p>
+            </td>
+          </tr>
+
+          <!-- Ignore notice -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 8px 0;font-size:14px;color:#374151;">If you didn't request this, please ignore this email.</p>
+              <p style="margin:0;font-size:14px;color:#374151;font-weight:600;">Stay protected.</p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
   `;
     await (0, exports.sendEmail)({
         to: email,
@@ -47,20 +145,109 @@ const sendOTPEmail = async (email, otp) => {
     });
 };
 exports.sendOTPEmail = sendOTPEmail;
-const sendPasswordResetEmail = async (email, resetCode) => {
+const sendPasswordResetEmail = async (email, resetCode, name) => {
+    const displayName = name || 'there';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const resetLink = `${frontendUrl}/reset-password?code=${resetCode}`;
     const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #ff6600;">VendorSpot - Password Reset</h2>
-      <p>You requested to reset your password. Use the code below to reset it:</p>
-      <h1 style="color: #ff6600; font-size: 32px; letter-spacing: 5px; text-align: center;">${resetCode}</h1>
-      <p>Enter this code in the app to reset your password.</p>
-      <p>This code will expire in 1 hour.</p>
-      <p>If you didn't request this, please ignore this email.</p>
-    </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
+
+          <!-- Title -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <h1 style="margin:0;font-size:24px;font-weight:700;color:#111111;line-height:1.3;">Reset your Vendorspot password</h1>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hello ${displayName},</p>
+              <p style="margin:0 0 12px 0;font-size:15px;color:#374151;line-height:1.6;">
+                We received a request to reset the password for your Vendorspot account linked to this email address.
+              </p>
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;line-height:1.6;">
+                Click the button below to create a new password:
+              </p>
+
+              <!-- Reset link -->
+              <a href="${resetLink}" style="display:block;color:#CC3366;font-size:14px;font-weight:600;word-break:break-all;text-decoration:none;margin-bottom:8px;">${resetLink}</a>
+              <p style="margin:0 0 20px 0;font-size:12px;color:#9ca3af;">
+                This link is valid for 1 hour and can only be used once.
+              </p>
+
+              <p style="margin:0;font-size:14px;color:#374151;line-height:1.7;">
+                If you did not request this reset, please ignore this email, your password and account remain unchanged.
+                If you suspect unusual activity, contact us immediately.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
   `;
     await (0, exports.sendEmail)({
         to: email,
-        subject: 'VendorSpot - Password Reset Code',
+        subject: 'Reset your Vendorspot password',
         html,
     });
 };
@@ -87,220 +274,753 @@ const sendWelcomeEmail = async (email, name) => {
     });
 };
 exports.sendWelcomeEmail = sendWelcomeEmail;
-const sendOrderConfirmationEmail = async (email, orderNumber, total) => {
-    const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #ff6600;">Order Confirmation</h2>
-      <p>Thank you for your order!</p>
-      <p><strong>Order Number:</strong> ${orderNumber}</p>
-      <p><strong>Total:</strong> ₦${total.toLocaleString()}</p>
-      <p>We'll send you another email when your order ships.</p>
-      <a href="${process.env.FRONTEND_URL}/orders/${orderNumber}" style="display: inline-block; padding: 12px 24px; background-color: #ff6600; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0;">View Order</a>
-    </div>
-  `;
-    await (0, exports.sendEmail)({
-        to: email,
-        subject: `Order Confirmation - ${orderNumber}`,
-        html,
-    });
-};
-exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
-const sendFounderWelcomeEmail = async (email) => {
+const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items) => {
+    const displayName = name || 'there';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const orderUrl = `${frontendUrl}/orders/${orderNumber}`;
+    // Unique vendor names for summary
+    const vendorNames = [...new Set((items || []).map((i) => i.vendorName).filter(Boolean))];
+    const vendorLine = vendorNames.length > 0 ? vendorNames.join(', ') : null;
+    const itemRowsHtml = (items || []).map((item) => `
+    <tr>
+      <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;vertical-align:middle;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+          <tr>
+            <td style="width:72px;vertical-align:middle;padding-right:14px;">
+              <img
+                src="${item.productImage}"
+                alt="${item.productName}"
+                width="72"
+                height="72"
+                style="display:block;border-radius:8px;object-fit:cover;width:72px;height:72px;background:#f3f4f6;"
+              />
+            </td>
+            <td style="vertical-align:middle;">
+              <p style="margin:0 0 4px 0;font-size:14px;font-weight:600;color:#111111;">${item.productName}</p>
+              <p style="margin:0;font-size:12px;color:#6b7280;">Qty: ${item.quantity}</p>
+            </td>
+            <td style="vertical-align:middle;text-align:right;white-space:nowrap;">
+              <p style="margin:0;font-size:14px;font-weight:600;color:#111111;">₦${(item.price * item.quantity).toLocaleString()}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  `).join('');
     const html = `
 <!DOCTYPE html>
-<html>
-  <head>
-    <style>
-      .container { padding: 20px; font-family: Arial, sans-serif; color: #333; }
-      .subtext { font-size: 16px; margin-bottom: 20px; line-height: 1.6; }
-      .footer { font-size: 14px; color: #666; margin-top: 30px; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h2>Hello and welcome to Vendorspot,</h2>
-      
-      <p class="subtext">
-        I'm personally excited to have you onboard as a vendor. Thank you for creating your store and trusting Vendorspot as a platform to grow your business.
-      </p>
-      
-      <p class="subtext">
-        Vendorspot was built to help businesses like yours sell with confidence, reach the right customers, and operate in a safer, more structured online marketplace. Our team is committed to supporting you every step of the way.
-      </p>
-      
-      <p class="subtext">
-        Keep listing your products, share your store link, and stay active on the platform to unlock more visibility and opportunities.
-      </p>
-      
-      <p class="subtext">
-        We're glad to have you here, and we look forward to growing together.
-      </p>
-      
-      <p class="footer">Warm regards,</p>
-      <p class="footer"><strong>Olayinka Olasunkanmi</strong><br>Founder, Vendorspot</p>
-    </div>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
+
+          <!-- Title -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <h1 style="margin:0;font-size:24px;font-weight:700;color:#111111;line-height:1.3;">Order confirmed</h1>
+            </td>
+          </tr>
+
+          <!-- Greeting & message -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <p style="margin:0 0 12px 0;font-size:15px;color:#374151;">Hi ${displayName},</p>
+              <p style="margin:0;font-size:15px;color:#374151;line-height:1.6;">
+                Thank you for purchasing and trusting Vendorspot. Your payment is now held safely until you receive and complete your order.
+              </p>
+            </td>
+          </tr>
+
+          ${items && items.length > 0 ? `
+          <!-- Product images & items -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                ${itemRowsHtml}
+              </table>
+            </td>
+          </tr>
+          ` : ''}
+
+          <!-- Order Summary box -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;">
+                <p style="margin:0 0 10px 0;font-size:12px;font-weight:700;color:#111111;letter-spacing:0.5px;text-transform:uppercase;">Order Summary</p>
+                <p style="margin:0 0 6px 0;font-size:14px;color:#374151;">
+                  <span style="color:#6b7280;">Order number:</span>&nbsp;&nbsp;<strong>#${orderNumber}</strong>
+                </p>
+                ${items && items.length === 1 ? `
+                <p style="margin:0 0 6px 0;font-size:14px;color:#374151;">
+                  <span style="color:#6b7280;">Item:</span>&nbsp;&nbsp;<strong>${items[0].productName}</strong>
+                </p>
+                ` : items && items.length > 1 ? `
+                <p style="margin:0 0 6px 0;font-size:14px;color:#374151;">
+                  <span style="color:#6b7280;">Items:</span>&nbsp;&nbsp;<strong>${items.length} items</strong>
+                </p>
+                ` : ''}
+                <p style="margin:0 0 6px 0;font-size:14px;color:#374151;">
+                  <span style="color:#6b7280;">Total:</span>&nbsp;&nbsp;<strong>₦${total.toLocaleString()}</strong>
+                </p>
+                ${vendorLine ? `
+                <p style="margin:0;font-size:14px;color:#374151;">
+                  <span style="color:#6b7280;">Vendor:</span>&nbsp;&nbsp;<strong>${vendorLine}</strong>
+                </p>
+                ` : ''}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Ships message & CTA -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 20px 0;font-size:14px;color:#374151;">We will send you another email when your order ships.</p>
+              <a href="${orderUrl}"
+                style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;">
+                View Order
+              </a>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
 </html>
   `;
     await (0, exports.sendEmail)({
         to: email,
-        subject: 'Founder Welcome Note',
+        subject: `Order Confirmed - #${orderNumber}`,
+        html,
+    });
+};
+exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
+const sendVendorWelcomeEmail = async (email, firstName) => {
+    const displayName = firstName || 'there';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const dashboardLink = `${frontendUrl}/dashboard`;
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${displayName},</p>
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">Congratulations, your Vendorspot storefront is now active.</p>
+              <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">You're joining a marketplace built on trust, where buyers shop with full confidence because every payment is held safely until delivery is confirmed. This means more buyers, fewer disputes, and a platform that works for you and helps you build credibility.</p>
+              <p style="margin:0 0 12px 0;font-size:15px;font-weight:700;color:#111111;">Here's what you get as a Vendorspot vendor:</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+                ${['Safe and fast payouts after a completed order.', 'A public Trust Score that helps you grow', 'Rewards when you hit sales milestones', 'Priority visibility as your Trust Score rises', 'Dedicated vendor support when you need it'].map((item) => `<tr><td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;"><span style="color:#CC3366;margin-right:8px;">&#10003;</span>${item}</td></tr>`).join('')}
+              </table>
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;line-height:1.6;">Your next step: complete your KYC, add your first listing, and start selling.</p>
+              <p style="margin:0 0 20px 0;font-size:15px;">
+                <span style="color:#CC3366;margin-right:6px;">&#8594;</span>
+                <a href="${dashboardLink}" style="color:#CC3366;font-weight:600;text-decoration:none;">${dashboardLink}</a>
+              </p>
+              <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">The stronger your Trust Score, the more buyers will choose you. Every on-time delivery, every satisfied customer, and every quick response builds your reputation on Vendorspot.</p>
+              <p style="margin:0 0 4px 0;font-size:15px;color:#374151;">Let's grow together,</p>
+              <p style="margin:0 0 28px 0;font-size:15px;color:#374151;font-weight:600;">The Vendorspot Team</p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr><td style="padding:0 32px;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" /></td></tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a></p>
+              <p style="margin:0;font-size:13px;color:#374151;"><strong>Vendorspot</strong> — Confidence in every click.</p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+    await (0, exports.sendEmail)({
+        to: email,
+        subject: 'Your Vendorspot storefront is now active',
+        html,
+    });
+};
+exports.sendVendorWelcomeEmail = sendVendorWelcomeEmail;
+const sendFounderWelcomeEmail = async (email, firstName) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const ceoPhotoUrl = `${frontendUrl}/team/ceo.png`;
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <h2 style="margin:0 0 20px 0;font-size:20px;font-weight:700;color:#111111;line-height:1.3;">
+                Hello and welcome to Vendorspot,
+              </h2>
+
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;line-height:1.7;">
+                I'm personally excited to have you onboard as a vendor. Thank you for creating your store and trusting Vendorspot as a platform to grow your business.
+              </p>
+
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;line-height:1.7;">
+                Vendorspot was built to help businesses like yours sell with confidence, reach the right customers, build credibility, and operate in a safer, more structured online marketplace. Our team is committed to supporting you every step of the way.
+              </p>
+
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;line-height:1.7;">
+                Keep listing your products, share your store link, and stay active on the platform to unlock more visibility and opportunities.
+              </p>
+
+              <p style="margin:0 0 24px 0;font-size:15px;color:#374151;line-height:1.7;">
+                We're glad to have you here, and we look forward to growing together.
+              </p>
+
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Warm regards,</p>
+
+              <!-- Founder signature -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:28px;">
+                <tr>
+                  <td style="vertical-align:middle;padding-right:14px;">
+                    <img
+                      src="${ceoPhotoUrl}"
+                      alt="Olayinka Olasunkanmi"
+                      width="52"
+                      height="52"
+                      style="display:block;width:52px;height:52px;border-radius:50%;object-fit:cover;background:#f3f4f6;"
+                    />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <p style="margin:0 0 2px 0;font-size:14px;font-weight:700;color:#111111;">Olayinka Olasunkanmi</p>
+                    <p style="margin:0;font-size:13px;color:#6b7280;">Founder, Vendorspot</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+    await (0, exports.sendEmail)({
+        to: email,
+        subject: 'A personal welcome from our Founder',
         html,
     });
 };
 exports.sendFounderWelcomeEmail = sendFounderWelcomeEmail;
 const sendBuyerFounderWelcomeEmail = async (email, firstName) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const shopLink = `${frontendUrl}/products`;
     const html = `
 <!DOCTYPE html>
-<html>
-  <head>
-    <style>
-      .container { padding: 20px; font-family: Arial, sans-serif; color: #333; }
-      .subtext { font-size: 16px; margin-bottom: 20px; line-height: 1.6; }
-      .footer { font-size: 14px; color: #666; margin-top: 30px; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h2>Hello ${firstName},</h2>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
 
-      <p class="subtext">
-        Welcome to Vendorspot! I'm personally excited to have you join our growing community of shoppers.
-      </p>
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
 
-      <p class="subtext">
-        Vendorspot was built to give you a safer, more trusted way to shop online — connecting you with verified vendors and quality products all in one place.
-      </p>
+          <!-- Body -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
 
-      <p class="subtext">
-        Here's what you can do to get started:
-      </p>
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+                Welcome to Vendorspot — platform built to protect shoppers like you from scammers.
+              </p>
 
-      <ul style="font-size: 16px; line-height: 2;">
-        <li>Browse products from trusted vendors across Nigeria</li>
-        <li>Earn reward points every time you shop or log in daily</li>
-        <li>Refer friends and earn bonus points</li>
-        <li>Track your orders in real-time</li>
-      </ul>
+              <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+                You can now shop from verified vendors knowing your money is fully protected until you receive and complete your order. No risk. No stress. Just safe shopping.
+              </p>
 
-      <p class="subtext">
-        We're committed to making your shopping experience smooth, secure, and rewarding. If you ever need help, our support team is just a message away.
-      </p>
+              <p style="margin:0 0 12px 0;font-size:15px;font-weight:700;color:#111111;">
+                Here's what makes shopping on Vendorspot different:
+              </p>
 
-      <p class="subtext">
-        Welcome once again — happy shopping!
-      </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+                ${[
+        'Escrow protection on every order',
+        'Verified vendors with public Trust Scores',
+        'Earn rewards on every purchase you make',
+        'Earn more by referring friends and leaving reviews',
+        'Dispute support if anything ever goes wrong',
+    ].map((item) => `
+                <tr>
+                  <td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    <span style="color:#CC3366;margin-right:8px;">&#10003;</span>${item}
+                  </td>
+                </tr>`).join('')}
+              </table>
 
-      <p class="footer">Warm regards,</p>
-      <p class="footer"><strong>Olayinka Olasunkanmi</strong><br>Founder, Vendorspot</p>
-    </div>
-  </body>
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;line-height:1.6;">
+                Your account is ready. Start exploring trusted vendors today.
+              </p>
+
+              <!-- CTA link -->
+              <p style="margin:0 0 20px 0;font-size:15px;">
+                <span style="color:#CC3366;margin-right:6px;">&#8594;</span>
+                <a href="${shopLink}" style="color:#CC3366;font-weight:600;text-decoration:none;">${shopLink}</a>
+              </p>
+
+              <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+                If you ever have questions or need help, our team is always here.
+              </p>
+
+              <p style="margin:0 0 4px 0;font-size:15px;color:#374151;">Welcome aboard,</p>
+              <p style="margin:0 0 28px 0;font-size:15px;color:#374151;font-weight:600;">The Vendorspot Team</p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
 </html>
   `;
     await (0, exports.sendEmail)({
         to: email,
-        subject: "A Note from Our Founder — Welcome to Vendorspot!",
+        subject: "Welcome to Vendorspot — Start shopping safely today",
         html,
     });
 };
 exports.sendBuyerFounderWelcomeEmail = sendBuyerFounderWelcomeEmail;
 const sendProductPostingGuideEmail = async (email) => {
+    const steps = [
+        {
+            title: 'Access Your Product Dashboard',
+            points: [
+                'Log in to your Vendorspot account.',
+                'From your dashboard, click <strong>"My Products"</strong>.',
+                'Click <strong>"Add New Product"</strong>.',
+            ],
+        },
+        {
+            title: 'Upload Product Images',
+            points: [
+                'Upload a minimum of <strong>2 clear product images</strong>.',
+                'You can upload up to 5 images per product.',
+                'Use high-quality photos with good lighting to increase customer trust and improve sales.',
+            ],
+        },
+        {
+            title: 'Enter Your Product Name',
+            points: [
+                'Add a clear and descriptive product name.',
+                'You may use the <strong>AI Generate</strong> feature to improve or optimize your product title for better visibility.',
+                '<em>Example: Instead of "Sneakers," use "Men\'s White Casual Sneakers – Lightweight &amp; Comfortable."</em>',
+            ],
+        },
+        {
+            title: 'Select a Product Category',
+            points: [
+                'Choose the category that best matches your product to help customers find it easily.',
+            ],
+        },
+        {
+            title: 'Select Product Type',
+            points: [
+                '<strong>Physical Product</strong> – For items that require delivery.',
+                '<strong>Digital Product</strong> – For courses, eBooks, software, templates, digital downloads, and other virtual products.',
+            ],
+        },
+        {
+            title: 'Add a Product Description',
+            points: [
+                'Enter a detailed description of your product.',
+                'Highlight important features, specifications, benefits, and usage information.',
+                'You may use the <strong>AI Generate</strong> feature to create or improve your description.',
+            ],
+        },
+        {
+            title: 'Set Product Pricing',
+            points: [
+                '<strong>Original Price</strong> (optional)',
+                '<strong>Selling Price</strong>',
+                'Displaying both prices can help customers see the value of your offer.',
+            ],
+        },
+        {
+            title: 'Add Available Stock',
+            points: [
+                'Enter the quantity currently available.',
+                'Set a <strong>Low Stock Threshold</strong> to receive notifications when your inventory is running low.',
+            ],
+        },
+        {
+            title: 'Enter Product Weight (Optional)',
+            points: [
+                'If known, enter the product weight in kilograms (KG).',
+                'This helps improve shipping and delivery calculations.',
+                'If you do not know the weight, you may skip this section.',
+            ],
+        },
+        {
+            title: 'Add Product Tags and Keywords',
+            points: [
+                'Tags help customers discover your products through search.',
+                'Use words customers are likely to search for.',
+                '<em>Example for Sneakers: Shoes, Sneakers, Men\'s Footwear, Sports Shoes, Casual Shoes, Palm Slippers</em>',
+                'Adding relevant tags improves your product visibility and increases your chances of making sales.',
+            ],
+        },
+        {
+            title: 'Add Product Variations',
+            points: [
+                'If your product comes in different options, add: Sizes, Colors, Styles, or Variants.',
+                'This allows customers to select their preferred option before placing an order.',
+            ],
+        },
+        {
+            title: 'Enable Affiliate Selling (Optional)',
+            points: [
+                'You can allow affiliates and resellers to help promote and sell your products.',
+                'Enable <strong>Affiliate Selling</strong> and set the commission percentage you would like to pay for each successful sale.',
+                '<em>Note: The commission will be deducted from the product sale and paid to the affiliate who generated the order.</em>',
+            ],
+        },
+        {
+            title: 'Verify Product Pickup Location',
+            points: [
+                'Update the pickup address only if the product is stored at a different location from your default store address.',
+                'Useful for dropshippers, multiple warehouse locations, or supplier pickup arrangements.',
+                'You may add up to <strong>3 pickup locations</strong>. Ensure the address, postal code, and location details are accurate.',
+            ],
+        },
+        {
+            title: 'Submit for Review',
+            points: [
+                'Review your product details carefully.',
+                'Click <strong>"Submit for Review"</strong>.',
+                'Our team will review your product to ensure it complies with Vendorspot\'s marketplace policies before it goes live.',
+            ],
+        },
+    ];
+    const tips = [
+        'Use clear, professional product images.',
+        'Write detailed product descriptions.',
+        'Add accurate tags and keywords.',
+        'Keep your stock updated.',
+        'Enable affiliate selling to get more people promoting your products.',
+        'Respond quickly to customer inquiries and orders.',
+    ];
+    const stepsHtml = steps.map((step, i) => `
+    <tr>
+      <td style="padding:0 0 20px 0;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+          <tr>
+            <td style="vertical-align:top;padding-right:12px;width:28px;">
+              <div style="width:26px;height:26px;border-radius:50%;background:#CC3366;text-align:center;line-height:26px;font-size:12px;font-weight:700;color:#ffffff;">${i + 1}</div>
+            </td>
+            <td style="vertical-align:top;">
+              <p style="margin:0 0 8px 0;font-size:14px;font-weight:700;color:#111111;">${step.title}</p>
+              ${step.points.map((p) => `
+              <p style="margin:0 0 5px 0;font-size:13px;color:#374151;line-height:1.6;padding-left:12px;border-left:2px solid #f3f4f6;">
+                ${p}
+              </p>`).join('')}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  `).join('');
+    const tipsHtml = tips.map((tip) => `
+    <tr>
+      <td style="padding:3px 0;font-size:13px;color:#374151;line-height:1.6;">
+        <span style="color:#22C55E;margin-right:8px;font-size:14px;">&#10003;</span>${tip}
+      </td>
+    </tr>
+  `).join('');
     const html = `
 <!DOCTYPE html>
-<html>
-  <head>
-    <style>
-      .container { padding: 20px; font-family: Arial, sans-serif; color: #333; }
-      .subtext { font-size: 16px; margin-bottom: 15px; line-height: 1.6; }
-      .section-title { font-weight: bold; font-size: 18px; margin-top: 25px; margin-bottom: 10px; color: #D7195B; }
-      .step-list { margin-left: 20px; line-height: 1.8; }
-      .step-list li { margin-bottom: 10px; }
-      .example { background-color: #f5f5f5; padding: 10px; border-left: 3px solid #D7195B; margin: 10px 0; }
-      .link { color: #0071FC; text-decoration: underline; }
-      .footer { font-size: 14px; color: #666; margin-top: 30px; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h2>Dear Vendor,</h2>
-      
-      <p class="subtext">
-        Welcome to Vendorspot, and thank you for choosing to sell with us. We're excited to have you on the platform and look forward to supporting your business growth.
-      </p>
-      
-      <p class="subtext">
-        To ensure your products are approved quickly and visible to customers, please follow the steps below when posting your products:
-      </p>
-      
-      <div class="section-title">How to Post a Product on Vendorspot</div>
-      
-      <ol class="step-list">
-        <li>Log in to your dashboard and click the <strong>Menu</strong>.</li>
-        <li>Select <strong>Products</strong>, then click <strong>Add New Product</strong>.</li>
-        <li>When adding a product, kindly ensure the following details are provided correctly:</li>
-      </ol>
-      
-      <div style="margin-left: 40px;">
-        <p><strong>Product Name:</strong></p>
-        <div class="example">Example: Women's Ankara Handbag</div>
-        
-        <p><strong>Product Price:</strong></p>
-        <div class="example">Example: ₦15,000</div>
-        
-        <p><strong>Sale Price (optional):</strong></p>
-        <div class="example">Example: ₦12,000 (if discounted)</div>
-        
-        <p><strong>Product Quantity:</strong></p>
-        <div class="example">Example: 10 units available</div>
-        
-        <p><strong>Product Category:</strong></p>
-        <p class="subtext">Select the most appropriate category for your product.</p>
-        
-        <p><strong>Stock Status:</strong></p>
-        <p class="subtext">Change from <em>Out of Stock</em> to <em>In Stock</em>.</p>
-        
-        <p><strong>Product Images:</strong></p>
-        <ul>
-          <li>Upload at least 2 clear and sharp images of the product.</li>
-          <li>Images should not contain watermarks and should show only the product.</li>
-        </ul>
-        
-        <p><strong>Product Description:</strong></p>
-        <p class="subtext">Write a clear description of at least 200 characters, explaining what the product is, its features, size, material, and benefits.</p>
-        <div class="example">
-          <strong>Example:</strong><br>
-          This women's Ankara handbag is made with high-quality fabric, durable lining, and a secure zipper. It is stylish, lightweight, and suitable for casual and corporate outings.
-        </div>
-      </div>
-      
-      <div class="section-title">Additional Features You Can Use</div>
-      <ul class="step-list">
-        <li>Use <strong>Flash Sales</strong> if your product is highly discounted and ready for quick sales.</li>
-        <li>Use <strong>"Product Comes in Different Options"</strong> if your product has multiple sizes, colors, or variations. This helps customers buy easily without confusion.</li>
-      </ul>
-      
-      <p class="subtext">
-        For visual guidance, you can also watch our YouTube video on how to post products and navigate Vendorspot effectively: 
-        <a href="https://youtu.be/9Uc1eMx6F_A?si=hTVKikjVTE754tzt" class="link">https://youtu.be/9Uc1eMx6F_A?si=hTVKikjVTE754tzt</a>
-      </p>
-      
-      <p class="subtext">
-        If you need any assistance, please feel free to reply to this email or contact our support team. We're here to help you succeed.
-      </p>
-      
-      <p class="subtext">
-        Welcome once again, and happy selling on Vendorspot.
-      </p>
-      
-      <p class="footer">Warm regards,</p>
-      <p class="footer">The Vendorspot Team<br><a href="https://vendorspotng.com" class="link">Vendorspotng.com</a></p>
-    </div>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:560px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
+                <span style="color:#CC3366;">V</span>endorspot
+              </span>
+            </td>
+          </tr>
+
+          <!-- Title -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <h1 style="margin:0;font-size:20px;font-weight:700;color:#111111;line-height:1.3;">How to Post Your Products on Vendorspot and Start Selling</h1>
+            </td>
+          </tr>
+
+          <!-- Intro -->
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <p style="margin:0;font-size:14px;color:#374151;line-height:1.7;">
+                Welcome to Vendorspot! We are excited to have you join our marketplace. To help you get started, follow the simple steps below to upload your products and make them available to customers across Nigeria.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Steps heading -->
+          <tr>
+            <td style="padding:20px 32px 4px 32px;">
+              <p style="margin:0;font-size:15px;font-weight:700;color:#CC3366;">How to Post a Product — 14 Steps</p>
+            </td>
+          </tr>
+
+          <!-- Steps -->
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                ${stepsHtml}
+              </table>
+            </td>
+          </tr>
+
+          <!-- Tips heading -->
+          <tr>
+            <td style="padding:4px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 16px 0;" />
+              <p style="margin:0 0 12px 0;font-size:15px;font-weight:700;color:#111111;">Tips to Increase Your Sales</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                ${tipsHtml}
+              </table>
+            </td>
+          </tr>
+
+          <!-- Sign-off -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 4px 0;font-size:14px;color:#374151;">Thank you for choosing Vendorspot.</p>
+              <p style="margin:0 0 4px 0;font-size:14px;color:#374151;">Warm regards,</p>
+              <p style="margin:0;font-size:14px;font-weight:600;color:#374151;">The Vendorspot Team</p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you created a Vendorspot account.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
 </html>
   `;
     await (0, exports.sendEmail)({
         to: email,
-        subject: 'Welcome to Vendorspot - How to post product on Vendorspot',
+        subject: 'How to Post Your Products on Vendorspot and Start Selling',
         html,
     });
 };

@@ -996,7 +996,15 @@ class OrderController {
         logger_1.logger.info('📊 Product sales & stock updated');
         // Send confirmation email
         try {
-            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total);
+            const vendorNameMap = new Map((order.vendorShipments || []).map((s) => [s.vendor.toString(), s.vendorName]));
+            const emailItems = order.items.map((item) => ({
+                productName: item.productName,
+                productImage: item.productImage,
+                quantity: item.quantity,
+                price: item.price,
+                vendorName: vendorNameMap.get(item.vendor.toString()),
+            }));
+            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems);
         }
         catch (error) {
             logger_1.logger.error('Error sending confirmation email:', error);
@@ -1657,7 +1665,15 @@ class OrderController {
         // Points and affiliate commission credited on delivery — see completeOrder
         // Step 12: Send confirmation email
         try {
-            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total);
+            const vendorNameMap = new Map((order.vendorShipments || []).map((s) => [s.vendor.toString(), s.vendorName]));
+            const emailItems = order.items.map((item) => ({
+                productName: item.productName,
+                productImage: item.productImage,
+                quantity: item.quantity,
+                price: item.price,
+                vendorName: vendorNameMap.get(item.vendor.toString()),
+            }));
+            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems);
             logger_1.logger.info('✅ Confirmation email sent');
         }
         catch (error) {
@@ -2017,8 +2033,21 @@ class OrderController {
                 // Send confirmation email
                 const user = await User_1.default.findById(order.user);
                 if (user) {
-                    await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total);
-                    logger_1.logger.info('✅ Confirmation email sent');
+                    try {
+                        const vendorNameMap = new Map((order.vendorShipments || []).map((s) => [s.vendor.toString(), s.vendorName]));
+                        const emailItems = order.items.map((item) => ({
+                            productName: item.productName,
+                            productImage: item.productImage,
+                            quantity: item.quantity,
+                            price: item.price,
+                            vendorName: vendorNameMap.get(item.vendor.toString()),
+                        }));
+                        await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems);
+                        logger_1.logger.info('✅ Confirmation email sent');
+                    }
+                    catch (error) {
+                        logger_1.logger.error('Error sending confirmation email:', error);
+                    }
                 }
                 logger_1.logger.info('💳 ============================================');
                 logger_1.logger.info('💳 VERIFY PAYMENT COMPLETED');

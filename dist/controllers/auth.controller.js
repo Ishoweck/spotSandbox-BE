@@ -95,7 +95,7 @@ class AuthController {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`\n🔑 [DEV] Registration OTP for ${email}: ${otpCode}\n`);
         }
-        await (0, email_1.sendOTPEmail)(email, otpCode);
+        await (0, email_1.sendOTPEmail)(email, otpCode, firstName);
         res.status(201).json({
             success: true,
             message: 'Registration successful. Please verify your email.',
@@ -189,14 +189,13 @@ class AuthController {
         // Buyers get welcome email + buyer founder's note only
         if (user.role === 'vendor') {
             (0, email_queue_1.queueEmailsInBackground)([
-                () => (0, email_1.sendWelcomeEmail)(user.email, user.firstName),
-                () => (0, email_1.sendFounderWelcomeEmail)(user.email),
+                () => (0, email_1.sendVendorWelcomeEmail)(user.email, user.firstName),
+                () => (0, email_1.sendFounderWelcomeEmail)(user.email, user.firstName),
                 () => (0, email_1.sendProductPostingGuideEmail)(user.email),
             ], 10000);
         }
         else {
             (0, email_queue_1.queueEmailsInBackground)([
-                () => (0, email_1.sendWelcomeEmail)(user.email, user.firstName),
                 () => (0, email_1.sendBuyerFounderWelcomeEmail)(user.email, user.firstName),
             ], 10000);
         }
@@ -260,7 +259,7 @@ class AuthController {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`\n🔑 [DEV] Resend OTP for ${email}: ${otpCode}\n`);
         }
-        await (0, email_1.sendOTPEmail)(email, otpCode);
+        await (0, email_1.sendOTPEmail)(email, otpCode, user.firstName);
         res.json({
             success: true,
             message: 'OTP sent successfully',
@@ -430,7 +429,7 @@ class AuthController {
         user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
         await user.save();
         // Send reset email with OTP
-        await (0, email_1.sendPasswordResetEmail)(email, otpCode);
+        await (0, email_1.sendPasswordResetEmail)(email, otpCode, user.firstName);
         if (process.env.NODE_ENV !== 'production') {
             console.log(`\n🔐 [DEV] Password reset OTP for ${email}: ${otpCode}\n`);
         }
