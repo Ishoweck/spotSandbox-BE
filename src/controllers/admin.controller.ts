@@ -1181,9 +1181,34 @@ export const verifyVendor = asyncHandler(
     }
 
     vendor.verificationStatus = status;
+
     if (status === 'verified') {
       vendor.verifiedAt = new Date();
+      vendor.rejectionReason = undefined;
+      // Restore previously suspended products only if the store is currently active
+      if (vendor.isActive) {
+        await Product.updateMany(
+          { vendor: vendor.user, status: 'vendor_suspended' },
+          { $set: { status: 'active' } }
+        );
+      }
+    } else {
+      vendor.rejectionReason = rejectionReason;
+      // Cascade: suspend all currently active products
+      await Product.updateMany(
+        { vendor: vendor.user, status: 'active' },
+        { $set: { status: 'vendor_suspended' } }
+      );
     }
+
+    // Audit trail
+    vendor.statusHistory.push({
+      action: status,
+      changedBy: req.user?.id,
+      reason: rejectionReason || undefined,
+      at: new Date(),
+    });
+
     await vendor.save();
 
     // Send notification
@@ -1195,7 +1220,7 @@ export const verifyVendor = asyncHandler(
 
     res.json({
       success: true,
-      message: `Vendor ${status === 'verified' ? 'verified' : 'rejected'} successfully`,
+      message: `Vendor ${status === 'verified' ? 'approved' : 'rejected'} successfully`,
       data: { verificationStatus: vendor.verificationStatus },
     });
   }
@@ -1216,22 +1241,67 @@ export const toggleVendorStatus = asyncHandler(
       return;
     }
 
+    const wasActive = vendor.isActive;
     vendor.isActive = typeof isActive === 'boolean' ? isActive : !vendor.isActive;
+    const nowActive = vendor.isActive;
+
+    // Cascade product statuses + notify affected cart customers
+    if (!nowActive && wasActive) {
+      const activeProdIds = await Product.find({ vendor: vendor.user, status: 'active' }).select('_id').lean();
+      await Product.updateMany(
+        { vendor: vendor.user, status: 'active' },
+        { $set: { status: 'vendor_suspended' } }
+      );
+      if (activeProdIds.length > 0) {
+        try {
+          const Cart = require('../models/Cart').default;
+          const affectedCarts = await Cart.find({
+            'items.product': { $in: activeProdIds.map((p: any) => p._id) },
+          }).select('user').lean();
+          const affectedUserIds = [...new Set(affectedCarts.map((c: any) => c.user.toString()))];
+          if (affectedUserIds.length > 0) {
+            await notificationService.sendToMany({
+              userIds: affectedUserIds as string[],
+              type: NotificationType.ACCOUNT,
+              title: 'Cart Update',
+              message: 'Some items in your cart are no longer available. Please review your cart before checkout.',
+              data: { screen: 'Cart' },
+            });
+          }
+        } catch (err) {
+          logger.error('Error notifying cart customers on vendor deactivation:', err);
+        }
+      }
+    } else if (nowActive && !wasActive) {
+      await Product.updateMany(
+        { vendor: vendor.user, status: 'vendor_suspended' },
+        { $set: { status: 'active' } }
+      );
+    }
+
+    // Audit trail
+    vendor.statusHistory.push({
+      action: nowActive ? 'activated' : 'deactivated',
+      changedBy: req.user?.id,
+      at: new Date(),
+    });
+
     await vendor.save();
 
     // Notify vendor
     await notificationService.send({
       userId: vendor.user.toString(),
       type: NotificationType.ACCOUNT,
-      title: vendor.isActive ? 'Store Activated' : 'Store Deactivated',
-      message: vendor.isActive
-        ? 'Your vendor store has been activated by admin.'
-        : 'Your vendor store has been deactivated by admin. Contact support for more info.',
+      title: nowActive ? 'Store Activated' : 'Store Deactivated',
+      message: nowActive
+        ? 'Your store has been activated. Your products are now live again.'
+        : 'Your store has been deactivated by admin. Your products are no longer visible. Please contact support for more information.',
+      data: { screen: 'VendorDashboard' },
     });
 
     res.json({
       success: true,
-      message: `Vendor ${vendor.isActive ? 'activated' : 'deactivated'} successfully`,
+      message: `Vendor ${nowActive ? 'activated' : 'deactivated'} successfully`,
       data: { isActive: vendor.isActive },
     });
   }
@@ -1448,6 +1518,24 @@ export const updateProductStatus = asyncHandler(
       title: 'Product Status Updated',
       message: statusMessages[status] || `Your product "${product.name}" status changed to ${status}.`,
     });
+
+    // Notify followers only when product goes live for the first time
+    if (status === ProductStatus.ACTIVE) {
+      try {
+        const vendorProfile = await VendorProfile.findOne({ user: product.vendor }).select('followers businessName');
+        if (vendorProfile?.followers?.length > 0) {
+          const followerIds = vendorProfile.followers.map((f: any) => f.toString());
+          await notificationService.newProductFromFollowedVendor(
+            followerIds,
+            vendorProfile.businessName || 'A vendor you follow',
+            product.name,
+            product._id.toString()
+          );
+        }
+      } catch (err) {
+        logger.error('Error sending follower notification on product approval:', err);
+      }
+    }
 
     res.json({
       success: true,
@@ -2197,6 +2285,73 @@ export const processWithdrawal = asyncHandler(
         amount: txnAmount,
         status: newStatus,
       },
+    });
+  }
+);
+
+/**
+ * POST /admin/vendors/:id/wallet/resolve
+ * Admin-initiated resolution for a rejected/suspended vendor's frozen wallet balance.
+ * Creates a pending withdrawal record so it flows through the normal processWithdrawal flow.
+ */
+export const resolveVendorWallet = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { note } = req.body;
+
+    const vendor = await VendorProfile.findById(id).select('user verificationStatus isActive businessName');
+    if (!vendor) {
+      res.status(404).json({ success: false, message: 'Vendor not found' });
+      return;
+    }
+
+    const wallet = await Wallet.findOne({ user: vendor.user });
+    if (!wallet || wallet.balance <= 0) {
+      res.status(400).json({ success: false, message: 'Vendor has no balance to resolve' });
+      return;
+    }
+
+    const amount = wallet.balance;
+    const reference = `ADMIN-WD-${Date.now().toString(36).toUpperCase()}`;
+
+    const updated = await Wallet.findOneAndUpdate(
+      { user: vendor.user, balance: { $gte: amount } },
+      {
+        $inc: { balance: -amount, pendingBalance: amount },
+        $push: {
+          transactions: {
+            type: TransactionType.DEBIT,
+            amount,
+            purpose: WalletPurpose.WITHDRAWAL,
+            reference,
+            description: `Admin-initiated wallet resolution${note ? `: ${note}` : ''}`,
+            status: 'pending',
+            timestamp: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      res.status(400).json({ success: false, message: 'Failed to process wallet resolution' });
+      return;
+    }
+
+    // Notify the vendor
+    await notificationService.send({
+      userId: vendor.user.toString(),
+      type: NotificationType.PAYMENT,
+      title: 'Wallet Balance Under Review',
+      message: `Your wallet balance of ₦${amount.toLocaleString()} has been queued for processing by admin.${note ? ` Note: ${note}` : ''}`,
+    });
+
+    logger.info(`Admin ${req.user?.id} initiated wallet resolution of ₦${amount} for vendor ${vendor.user}`);
+
+    res.json({
+      success: true,
+      message: `₦${amount.toLocaleString()} queued for processing. It will appear in the pending withdrawals list.`,
+      data: { amount, reference },
     });
   }
 );

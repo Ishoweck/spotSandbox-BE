@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest, ApiResponse } from '../types';
 export declare class ProductController {
+    private getActiveVendorIds;
     createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;

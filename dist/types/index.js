@@ -33,6 +33,7 @@ var ProductStatus;
     ProductStatus["INACTIVE"] = "inactive";
     ProductStatus["OUT_OF_STOCK"] = "out_of_stock";
     ProductStatus["PENDING_APPROVAL"] = "pending_approval";
+    ProductStatus["VENDOR_SUSPENDED"] = "vendor_suspended";
 })(ProductStatus || (exports.ProductStatus = ProductStatus = {}));
 // Order Status
 var OrderStatus;

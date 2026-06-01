@@ -48,6 +48,13 @@ const helpers_1 = require("../utils/helpers");
 const cloudinary_1 = require("../utils/cloudinary");
 const notification_service_1 = require("../services/notification.service");
 class ProductController {
+    async getActiveVendorIds() {
+        const profiles = await VendorProfile_1.default.find({
+            isActive: true,
+            verificationStatus: types_1.VendorVerificationStatus.VERIFIED,
+        }).select('user').lean();
+        return profiles.map((p) => p.user);
+    }
     // COMPLETE FIXED createProduct method for product.controller.ts
     async createProduct(req, res) {
         try {
@@ -146,19 +153,6 @@ class ProductController {
             }
             // Format product for response
             const formattedProduct = this.formatProduct(product);
-            // Only notify followers when a product is actually published (not for drafts)
-            if (!isDraft) {
-                try {
-                    const vendorProfile = await VendorProfile_1.default.findOne({ user: req.user?.id }).select('followers businessName');
-                    if (vendorProfile && vendorProfile.followers && vendorProfile.followers.length > 0) {
-                        const followerIds = vendorProfile.followers.map((f) => f.toString());
-                        await notification_service_1.notificationService.newProductFromFollowedVendor(followerIds, vendorProfile.businessName || 'A vendor you follow', product.name, product._id.toString());
-                    }
-                }
-                catch (error) {
-                    console.error('Error sending new product notification:', error);
-                }
-            }
             console.log('✅ Sending success response to frontend');
             // ✅ SEND RESPONSE
             res.status(201).json({
@@ -185,7 +179,8 @@ class ProductController {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
-        const filter = { status: types_1.ProductStatus.ACTIVE };
+        const activeVendorIds = await this.getActiveVendorIds();
+        const filter = { status: types_1.ProductStatus.ACTIVE, vendor: { $in: activeVendorIds } };
         // Filters
         if (req.query.category)
             filter.category = req.query.category;
@@ -263,32 +258,36 @@ class ProductController {
             : Product_1.default.findOne({ slug: id }))
             .populate('vendor', 'firstName lastName email profileImage')
             .populate('category', 'name');
-        if (!product) {
+        if (!product || product.status !== 'active') {
             throw new error_1.AppError('Product not found', 404);
         }
-        // Increment views
-        product.views += 1;
-        await product.save();
-        const formatted = this.formatProduct(product);
-        // Enrich vendor with verification & premium status
+        // Verify vendor is approved and active before exposing the product
         if (product.vendor?._id) {
             const VendorProfile = require('../models/VendorProfile').default;
             const vendorProfile = await VendorProfile.findOne({ user: product.vendor._id })
-                .select('verificationStatus isPremium businessName businessLogo');
-            if (vendorProfile) {
-                formatted.vendor.verified = vendorProfile.verificationStatus === 'verified';
-                formatted.vendor.isPremium = vendorProfile.isPremium || false;
-                if (vendorProfile.businessName)
-                    formatted.vendor.name = vendorProfile.businessName;
-                if (vendorProfile.businessLogo)
-                    formatted.vendor.image = vendorProfile.businessLogo;
+                .select('verificationStatus isActive isPremium businessName businessLogo');
+            if (!vendorProfile || vendorProfile.verificationStatus !== 'verified' || !vendorProfile.isActive) {
+                throw new error_1.AppError('Product not found', 404);
             }
+            // Increment views only for valid, reachable products
+            product.views += 1;
+            await product.save();
+            const formatted = this.formatProduct(product);
+            formatted.vendor.verified = true;
+            formatted.vendor.isPremium = vendorProfile.isPremium || false;
+            if (vendorProfile.businessName)
+                formatted.vendor.name = vendorProfile.businessName;
+            if (vendorProfile.businessLogo)
+                formatted.vendor.image = vendorProfile.businessLogo;
+            res.json({
+                success: true,
+                message: 'Product fetched successfully',
+                data: formatted,
+            });
+            return;
         }
-        res.json({
-            success: true,
-            message: 'Product fetched successfully',
-            data: formatted,
-        });
+        // No vendor info — treat as unavailable
+        throw new error_1.AppError('Product not found', 404);
     }
     // NEW: Get My Products (for authenticated vendor)
     async getMyProducts(req, res) {
@@ -469,20 +468,20 @@ class ProductController {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
-        const products = await Product_1.default.find({
+        const activeVendorIds = await this.getActiveVendorIds();
+        const categoryFilter = {
             status: types_1.ProductStatus.ACTIVE,
-            category: categoryId
-        })
+            category: categoryId,
+            vendor: { $in: activeVendorIds },
+        };
+        const products = await Product_1.default.find(categoryFilter)
             .populate('vendor', 'firstName lastName profileImage')
             .populate('category', 'name')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .lean();
-        const total = await Product_1.default.countDocuments({
-            status: types_1.ProductStatus.ACTIVE,
-            category: categoryId
-        });
+        const total = await Product_1.default.countDocuments(categoryFilter);
         const formattedProducts = products.map(this.formatProduct);
         res.json({
             success: true,
@@ -505,20 +504,20 @@ class ProductController {
         if (!query) {
             throw new error_1.AppError('Search query is required', 400);
         }
-        const products = await Product_1.default.find({
+        const activeVendorIds = await this.getActiveVendorIds();
+        const searchFilter = {
             status: types_1.ProductStatus.ACTIVE,
-            $text: { $search: query }
-        })
+            $text: { $search: query },
+            vendor: { $in: activeVendorIds },
+        };
+        const products = await Product_1.default.find(searchFilter)
             .populate('vendor', 'firstName lastName profileImage')
             .populate('category', 'name')
             .sort({ score: { $meta: 'textScore' } })
             .skip(skip)
             .limit(limit)
             .lean();
-        const total = await Product_1.default.countDocuments({
-            status: types_1.ProductStatus.ACTIVE,
-            $text: { $search: query }
-        });
+        const total = await Product_1.default.countDocuments(searchFilter);
         const formattedProducts = products.map(this.formatProduct);
         res.json({
             success: true,
@@ -539,10 +538,12 @@ class ProductController {
         // Products created in last 30 days
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const activeVendorIds = await this.getActiveVendorIds();
         const products = await Product_1.default.find({
             status: types_1.ProductStatus.ACTIVE,
             createdAt: { $gte: thirtyDaysAgo },
-            quantity: { $gt: 0 }
+            quantity: { $gt: 0 },
+            vendor: { $in: activeVendorIds },
         })
             .populate('vendor', 'firstName lastName profileImage')
             .populate('category', 'name')
@@ -565,12 +566,14 @@ class ProductController {
     // NEW: Get Products On Sale
     async getProductsOnSale(req, res) {
         const limit = parseInt(req.query.limit) || 10;
+        const activeVendorIds = await this.getActiveVendorIds();
         // Products with compareAtPrice set (indicating discount)
         const products = await Product_1.default.find({
             status: types_1.ProductStatus.ACTIVE,
             compareAtPrice: { $exists: true, $gt: 0 },
             $expr: { $lt: ['$price', '$compareAtPrice'] },
-            quantity: { $gt: 0 }
+            quantity: { $gt: 0 },
+            vendor: { $in: activeVendorIds },
         })
             .populate('vendor', 'firstName lastName profileImage')
             .populate('category', 'name')
@@ -596,12 +599,14 @@ class ProductController {
     async getFlashSaleProducts(req, res) {
         const limit = parseInt(req.query.limit) || 20;
         const now = new Date();
+        const activeVendorIds = await this.getActiveVendorIds();
         const products = await Product_1.default.find({
             status: types_1.ProductStatus.ACTIVE,
             isFlashSale: true,
             quantity: { $gt: 0 },
             compareAtPrice: { $exists: true, $gt: 0 },
             $expr: { $lt: ['$price', '$compareAtPrice'] },
+            vendor: { $in: activeVendorIds },
             $or: [
                 { flashSaleEndsAt: null },
                 { flashSaleEndsAt: { $gt: now } },

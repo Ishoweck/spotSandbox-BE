@@ -294,12 +294,14 @@ export class ChallengeController {
 
       await wallet.save();
     } else if (challenge.rewardType === 'points') {
-      // Add points to user
-      const user = await User.findById(req.user?.id);
-      if (user) {
-        user.points = (user.points || 0) + challenge.rewardValue;
-        await user.save();
-      }
+      const { rewardController } = await import('./reward.controller');
+      await rewardController.awardPoints(
+        req.user?.id as string,
+        challenge.rewardValue,
+        'bonus',
+        `Reward for completing: ${challenge.title}`,
+        { challengeId: challenge._id.toString() }
+      );
     }
 
     // Mark reward as claimed

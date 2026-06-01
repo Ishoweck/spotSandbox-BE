@@ -31,10 +31,13 @@ export class CartController {
       return;
     }
 
-    // Filter out products that are no longer available
+    // Filter out products that are no longer available (out of stock, vendor suspended, etc.)
+    const removedNames: string[] = [];
     const validItems = cart.items.filter((item: any) => {
       const product = item.product;
-      return product && product.status === 'active' && product.quantity > 0;
+      const available = product && product.status === 'active' && product.quantity > 0;
+      if (!available && product?.name) removedNames.push(product.name);
+      return available;
     });
 
     if (validItems.length !== cart.items.length) {
@@ -44,7 +47,13 @@ export class CartController {
 
     res.json({
       success: true,
-      data: { cart },
+      data: {
+        cart,
+        ...(removedNames.length > 0 && {
+          removedItems: removedNames,
+          removedItemsMessage: `${removedNames.length} item${removedNames.length > 1 ? 's were' : ' was'} removed from your cart because ${removedNames.length > 1 ? 'they are' : 'it is'} no longer available.`,
+        }),
+      },
     });
   }
 

@@ -31,7 +31,8 @@ export enum ProductStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
   OUT_OF_STOCK = 'out_of_stock',
-  PENDING_APPROVAL = 'pending_approval'
+  PENDING_APPROVAL = 'pending_approval',
+  VENDOR_SUSPENDED = 'vendor_suspended',
 }
 
 // Order Status

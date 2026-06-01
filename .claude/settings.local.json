@@ -66,7 +66,8 @@
       "Bash(python3 *)",
       "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src\" -Filter \"index.ts\" -Recurse -File 2>$null | Where-Object {$_.FullName -match \"types\"} | Select-Object -ExpandProperty FullName)",
       "PowerShell(Get-NetTCPConnection *)",
-      "Bash(xargs grep -l \"addNotificationResponseReceivedListener\\\\|Notifications.addNotificationResponseReceivedListener\")"
+      "Bash(xargs grep -l \"addNotificationResponseReceivedListener\\\\|Notifications.addNotificationResponseReceivedListener\")",
+      "Bash(grep -rn 'User.*findByIdAndUpdate.*points\\\\|User.*findOneAndUpdate.*points\\\\|$inc.*points' 'C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src')"
     ]
   }
 }

@@ -1,8 +1,17 @@
 import { Response } from 'express';
-import { AuthRequest, ApiResponse } from '../types';
+import { AuthRequest, ApiResponse, VendorVerificationStatus } from '../types';
 import Product from '../models/Product';
 import Category from '../models/Category';
+import VendorProfile from '../models/VendorProfile';
 import { escapeRegex } from '../utils/helpers';
+
+async function getActiveVendorIds(): Promise<any[]> {
+  const profiles = await VendorProfile.find({
+    isActive: true,
+    verificationStatus: VendorVerificationStatus.VERIFIED,
+  }).select('user').lean();
+  return profiles.map((p: any) => p.user);
+}
 
 export class SearchController {
   /**
@@ -26,7 +35,8 @@ export class SearchController {
     const skip = (pageNum - 1) * limitNum;
 
     // Build search filter
-    const filter: any = { status: 'active' };
+    const activeVendorIds = await getActiveVendorIds();
+    const filter: any = { status: 'active', vendor: { $in: activeVendorIds } };
 
     // Text search
     if (q) {
@@ -145,8 +155,10 @@ export class SearchController {
     }
 
     const safeQ = escapeRegex(q as string);
+    const activeVendorIds = await getActiveVendorIds();
     const products = await Product.find({
       status: 'active',
+      vendor: { $in: activeVendorIds },
       $or: [
         { name: { $regex: safeQ, $options: 'i' } },
         { tags: { $in: [new RegExp(safeQ, 'i')] } },
@@ -172,7 +184,8 @@ export class SearchController {
   async getTrendingSearches(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     // This would ideally come from a search analytics collection
     // For now, return popular products
-    const trending = await Product.find({ status: 'active' })
+    const activeVendorIds = await getActiveVendorIds();
+    const trending = await Product.find({ status: 'active', vendor: { $in: activeVendorIds } })
       .sort({ views: -1 })
       .limit(10)
       .select('name slug');
@@ -198,9 +211,12 @@ export class SearchController {
       return;
     }
 
+    const activeVendorIds = await getActiveVendorIds();
+    const categoryMatchFilter = { category: categoryId, status: 'active', vendor: { $in: activeVendorIds } };
+
     // Get price range in category
     const priceStats = await Product.aggregate([
-      { $match: { category: categoryId, status: 'active' } },
+      { $match: categoryMatchFilter },
       {
         $group: {
           _id: null,
@@ -212,7 +228,7 @@ export class SearchController {
 
     // Get available brands/vendors
     const vendors = await Product.aggregate([
-      { $match: { category: categoryId, status: 'active' } },
+      { $match: categoryMatchFilter },
       { $group: { _id: '$vendor', count: { $sum: 1 } } },
       { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'vendor' } },
       { $unwind: '$vendor' },

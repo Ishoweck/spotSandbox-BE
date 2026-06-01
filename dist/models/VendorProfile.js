@@ -167,6 +167,13 @@ const vendorProfileSchema = new mongoose_1.Schema({
         max: 100,
     },
     statsComputedAt: Date,
+    rejectionReason: String,
+    statusHistory: [{
+            action: { type: String, required: true },
+            changedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+            reason: String,
+            at: { type: Date, default: Date.now },
+        }],
 }, {
     timestamps: true,
 });

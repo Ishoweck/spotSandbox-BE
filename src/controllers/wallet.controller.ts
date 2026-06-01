@@ -236,10 +236,13 @@ export class WalletController {
     }
 
     // Check bank account — vendors store it on VendorProfile, customers on User
-    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id }).select('isActive payoutDetails');
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id }).select('isActive verificationStatus payoutDetails');
     if (vendorProfile) {
+      if (vendorProfile.verificationStatus !== 'verified') {
+        throw new AppError('Your store is not approved. Please contact support for assistance.', 403);
+      }
       if (vendorProfile.isActive === false) {
-        throw new AppError('Your account is currently inactive. Please contact support to withdraw funds.', 403);
+        throw new AppError('Your store is currently deactivated. Please contact support to withdraw funds.', 403);
       }
       if (!vendorProfile.payoutDetails?.accountNumber) {
         throw new AppError('Please set up your bank account details before withdrawing.', 400);

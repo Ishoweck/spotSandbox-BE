@@ -175,6 +175,12 @@ export declare const getPendingWithdrawals: (req: import("express").Request, res
  */
 export declare const processWithdrawal: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * POST /admin/vendors/:id/wallet/resolve
+ * Admin-initiated resolution for a rejected/suspended vendor's frozen wallet balance.
+ * Creates a pending withdrawal record so it flows through the normal processWithdrawal flow.
+ */
+export declare const resolveVendorWallet: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * GET /admin/reviews
  * List all reviews with filtering
  */

@@ -514,38 +514,51 @@ class RewardController {
         logger_1.logger.info(`Unlocked ${lockedTx.points} referral points for user ${lockedTx.user} (vendor ${vendorId} first sale)`);
     }
     /**
-     * Award points after order completion
+     * Award points after order completion — 1 pt per ₦100 spent
      */
     async awardOrderPoints(orderId) {
         const order = await Order_1.default.findById(orderId);
-        if (!order || order.paymentStatus !== 'completed') {
+        if (!order || order.paymentStatus !== 'completed')
             return;
-        }
-        // Award 1 point per ₦100 spent
+        // Idempotency: bail if points were already awarded for this order
+        const alreadyAwarded = await PointsTransaction_1.default.findOne({
+            user: order.user,
+            activity: 'purchase',
+            'metadata.orderId': order._id,
+        });
+        if (alreadyAwarded)
+            return;
         const points = Math.floor(order.total / 100);
         if (points > 0) {
             await this.awardPoints(order.user.toString(), points, 'purchase', `Order ${order.orderNumber}`, { orderId: order._id, orderTotal: order.total });
         }
-        // Check for badge awards
         await this.checkBadges(order.user.toString());
+    }
+    /**
+     * Award points to a referrer when their referred customer completes their first order
+     */
+    async awardCustomerReferralPoints(buyerUserId, orderId) {
+        const REFERRER_BONUS = 200;
+        const buyer = await User_1.default.findById(buyerUserId).select('referredBy');
+        if (!buyer?.referredBy)
+            return;
+        // Only on first completed order
+        const completedCount = await Order_1.default.countDocuments({ user: buyerUserId, status: 'delivered' });
+        if (completedCount !== 1)
+            return;
+        // Idempotency: one referral reward per referred user
+        const alreadyRewarded = await PointsTransaction_1.default.findOne({
+            user: buyer.referredBy,
+            activity: 'referral',
+            'metadata.referredUserId': buyerUserId,
+        });
+        if (alreadyRewarded)
+            return;
+        await this.awardPoints(buyer.referredBy.toString(), REFERRER_BONUS, 'referral', 'Your referral made their first purchase!', { referredUserId: buyerUserId, orderId });
     }
     /** Returns a Date 60 days from now — used to (re)set vCredits expiry */
     vCreditsExpiry() {
         return new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
-    }
-    /**
-     * Cashback rates per tier (applied to order total on delivery)
-     */
-    getTierCashbackRate(points) {
-        if (points >= 10000)
-            return 0.01; // Diamond  1%
-        if (points >= 5000)
-            return 0.01; // Platinum 1%
-        if (points >= 2000)
-            return 0.007; // Gold     0.7%
-        if (points >= 500)
-            return 0.005; // Silver   0.5%
-        return 0.004; // Bronze   0.4%
     }
     /**
      * Points → VCredits conversion rate (₦ per point) per tier
@@ -571,52 +584,6 @@ class RewardController {
         if (points >= 500)
             return 'Silver';
         return 'Bronze';
-    }
-    /**
-     * Award tier-based cashback to buyer's wallet after order delivery
-     * Called alongside awardOrderPoints — safe to call multiple times (uses orderId reference guard)
-     */
-    async awardCashback(orderId) {
-        const order = await Order_1.default.findById(orderId).select('user total orderNumber paymentStatus cashbackAwarded');
-        if (!order || order.paymentStatus !== 'completed')
-            return;
-        if (order.cashbackAwarded)
-            return; // idempotency guard
-        const user = await User_1.default.findById(order.user).select('points');
-        if (!user)
-            return;
-        const rate = this.getTierCashbackRate(user.points || 0);
-        if (rate === 0)
-            return; // Bronze — no cashback
-        const cashbackAmount = Math.round(order.total * rate * 100) / 100;
-        if (cashbackAmount < 1)
-            return; // too small to bother
-        const tierName = this.getTierName(user.points || 0);
-        // Mark the order so we never double-credit
-        await Order_1.default.findByIdAndUpdate(orderId, { cashbackAwarded: true });
-        // Credit buyer's wallet
-        await Additional_1.Wallet.findOneAndUpdate({ user: order.user }, {
-            $inc: { balance: cashbackAmount, totalEarned: cashbackAmount },
-            $push: {
-                transactions: {
-                    type: 'credit',
-                    amount: cashbackAmount,
-                    purpose: 'cashback',
-                    reference: `cashback_${order.orderNumber}`,
-                    description: `${tierName} tier cashback (${Math.round(rate * 100)}%) on Order #${order.orderNumber}`,
-                    relatedOrder: order._id,
-                    status: 'completed',
-                    timestamp: new Date(),
-                },
-            },
-        }, { upsert: true });
-        logger_1.logger.info(`✅ Cashback ₦${cashbackAmount} (${Math.round(rate * 100)}% ${tierName}) awarded to user ${order.user} for order ${order.orderNumber}`);
-        try {
-            await notification_service_1.notificationService.pointsEarned(order.user.toString(), 0, `You earned ₦${cashbackAmount.toLocaleString()} cashback as a ${tierName} member! It has been added to your wallet.`);
-        }
-        catch (err) {
-            logger_1.logger.error('Error sending cashback notification:', err);
-        }
     }
 }
 exports.RewardController = RewardController;

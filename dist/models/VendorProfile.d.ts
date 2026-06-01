@@ -44,6 +44,12 @@ export interface IVendorProfile extends Document {
     responseSpeed: number;
     statsComputedAt?: Date;
     rejectionReason?: string;
+    statusHistory: {
+        action: string;
+        changedBy?: Types.ObjectId | string;
+        reason?: string;
+        at: Date;
+    }[];
 }
 declare const VendorProfile: mongoose.Model<IVendorProfile, {}, {}, {}, mongoose.Document<unknown, {}, IVendorProfile, {}, {}> & IVendorProfile & Required<{
     _id: Types.ObjectId;

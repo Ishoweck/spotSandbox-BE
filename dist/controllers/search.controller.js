@@ -4,9 +4,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchController = exports.SearchController = void 0;
+const types_1 = require("../types");
 const Product_1 = __importDefault(require("../models/Product"));
 const Category_1 = __importDefault(require("../models/Category"));
+const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const helpers_1 = require("../utils/helpers");
+async function getActiveVendorIds() {
+    const profiles = await VendorProfile_1.default.find({
+        isActive: true,
+        verificationStatus: types_1.VendorVerificationStatus.VERIFIED,
+    }).select('user').lean();
+    return profiles.map((p) => p.user);
+}
 class SearchController {
     /**
      * Advanced product search
@@ -18,7 +27,8 @@ class SearchController {
         const limitNum = parseInt(limit);
         const skip = (pageNum - 1) * limitNum;
         // Build search filter
-        const filter = { status: 'active' };
+        const activeVendorIds = await getActiveVendorIds();
+        const filter = { status: 'active', vendor: { $in: activeVendorIds } };
         // Text search
         if (q) {
             const safeQ = (0, helpers_1.escapeRegex)(q);
@@ -125,8 +135,10 @@ class SearchController {
             return;
         }
         const safeQ = (0, helpers_1.escapeRegex)(q);
+        const activeVendorIds = await getActiveVendorIds();
         const products = await Product_1.default.find({
             status: 'active',
+            vendor: { $in: activeVendorIds },
             $or: [
                 { name: { $regex: safeQ, $options: 'i' } },
                 { tags: { $in: [new RegExp(safeQ, 'i')] } },
@@ -149,7 +161,8 @@ class SearchController {
     async getTrendingSearches(req, res) {
         // This would ideally come from a search analytics collection
         // For now, return popular products
-        const trending = await Product_1.default.find({ status: 'active' })
+        const activeVendorIds = await getActiveVendorIds();
+        const trending = await Product_1.default.find({ status: 'active', vendor: { $in: activeVendorIds } })
             .sort({ views: -1 })
             .limit(10)
             .select('name slug');
@@ -171,9 +184,11 @@ class SearchController {
             });
             return;
         }
+        const activeVendorIds = await getActiveVendorIds();
+        const categoryMatchFilter = { category: categoryId, status: 'active', vendor: { $in: activeVendorIds } };
         // Get price range in category
         const priceStats = await Product_1.default.aggregate([
-            { $match: { category: categoryId, status: 'active' } },
+            { $match: categoryMatchFilter },
             {
                 $group: {
                     _id: null,
@@ -184,7 +199,7 @@ class SearchController {
         ]);
         // Get available brands/vendors
         const vendors = await Product_1.default.aggregate([
-            { $match: { category: categoryId, status: 'active' } },
+            { $match: categoryMatchFilter },
             { $group: { _id: '$vendor', count: { $sum: 1 } } },
             { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'vendor' } },
             { $unwind: '$vendor' },

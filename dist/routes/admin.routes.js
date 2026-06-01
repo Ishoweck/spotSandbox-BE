@@ -49,6 +49,7 @@ router.put('/vendors/:id/verify', (0, auth_1.authorize)(...generalAdmins), admin
 router.put('/vendors/:id/status', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.toggleVendorStatus);
 router.put('/vendors/:id/premium', (0, auth_1.authorize)(...generalAdmins), admin_controller_1.toggleVendorPremium);
 router.put('/vendors/:id/commission', (0, auth_1.authorize)(...allAdmins), admin_controller_1.updateVendorCommission);
+router.post('/vendors/:id/wallet/resolve', (0, auth_1.authorize)(types_1.UserRole.SUPER_ADMIN), admin_controller_1.resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', (0, auth_1.authorize)(types_1.UserRole.SUPER_ADMIN), admin_controller_1.fixLegacyCommissionRates);
 // ================================================================
 // PRODUCT MANAGEMENT

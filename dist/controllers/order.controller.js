@@ -643,6 +643,18 @@ class OrderController {
                 throw new error_1.AppError(`Insufficient stock for ${product.name}. Only ${product.quantity} available`, 400);
             }
         }
+        // Verify all vendors in the cart are active and approved
+        const uniqueVendorIds = [...new Set(cart.items.map((item) => item.product.vendor._id.toString()))];
+        const activeVendors = await VendorProfile_1.default.find({
+            user: { $in: uniqueVendorIds },
+            isActive: true,
+            verificationStatus: types_1.VendorVerificationStatus.VERIFIED,
+        }).select('user').lean();
+        if (activeVendors.length < uniqueVendorIds.length) {
+            const activeIds = new Set(activeVendors.map((v) => v.user.toString()));
+            const blockedItem = cart.items.find((item) => !activeIds.has(item.product.vendor._id.toString()));
+            throw new error_1.AppError(`"${blockedItem?.product?.name}" is from a store that is not currently accepting orders. Please remove it from your cart.`, 400);
+        }
         const user = await User_1.default.findById(req.user?.id);
         if (!user) {
             throw new error_1.AppError('User not found', 404);
@@ -3146,13 +3158,12 @@ class OrderController {
         catch (walletError) {
             logger_1.logger.error(`Error crediting vendor wallets for order ${order.orderNumber}:`, walletError);
         }
-        // Award purchase reward points on delivery (1% = 1pt per ₦100 spent)
+        // Award points on delivery
         try {
             const { rewardController } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
             await rewardController.awardOrderPoints(order._id.toString());
+            await rewardController.awardCustomerReferralPoints(order.user.toString(), order._id.toString());
             logger_1.logger.info(`✅ Points awarded on delivery for order ${order.orderNumber}`);
-            await rewardController.awardCashback(order._id.toString());
-            logger_1.logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
             // Unlock vendor referral points if any vendor is making their first sale
             const uniqueVendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
             for (const vendorId of uniqueVendorIds) {
@@ -3285,13 +3296,12 @@ class OrderController {
             order.status = types_1.OrderStatus.DELIVERED;
             order.deliveredAt = order.deliveredAt || new Date();
             order.fundsReleased = true;
-            // Award purchase points now that all shipments are confirmed received
+            // Award points now that all shipments are confirmed received
             try {
                 const { rewardController } = await Promise.resolve().then(() => __importStar(require('./reward.controller')));
                 await rewardController.awardOrderPoints(order._id.toString());
+                await rewardController.awardCustomerReferralPoints(order.user.toString(), order._id.toString());
                 logger_1.logger.info(`✅ Points awarded on full shipment receipt for order ${order.orderNumber}`);
-                await rewardController.awardCashback(order._id.toString());
-                logger_1.logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
                 // Unlock vendor referral points for first-sale vendors
                 const uniqueVendorIds = [...new Set(order.items.map((item) => item.vendor.toString()))];
                 for (const vId of uniqueVendorIds) {

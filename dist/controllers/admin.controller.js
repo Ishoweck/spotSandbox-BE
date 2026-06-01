@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = void 0;
+exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -997,7 +997,24 @@ exports.verifyVendor = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     vendor.verificationStatus = status;
     if (status === 'verified') {
         vendor.verifiedAt = new Date();
+        vendor.rejectionReason = undefined;
+        // Restore previously suspended products only if the store is currently active
+        if (vendor.isActive) {
+            await Product_1.default.updateMany({ vendor: vendor.user, status: 'vendor_suspended' }, { $set: { status: 'active' } });
+        }
     }
+    else {
+        vendor.rejectionReason = rejectionReason;
+        // Cascade: suspend all currently active products
+        await Product_1.default.updateMany({ vendor: vendor.user, status: 'active' }, { $set: { status: 'vendor_suspended' } });
+    }
+    // Audit trail
+    vendor.statusHistory.push({
+        action: status,
+        changedBy: req.user?.id,
+        reason: rejectionReason || undefined,
+        at: new Date(),
+    });
     await vendor.save();
     // Send notification
     if (status === 'verified') {
@@ -1008,7 +1025,7 @@ exports.verifyVendor = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     }
     res.json({
         success: true,
-        message: `Vendor ${status === 'verified' ? 'verified' : 'rejected'} successfully`,
+        message: `Vendor ${status === 'verified' ? 'approved' : 'rejected'} successfully`,
         data: { verificationStatus: vendor.verificationStatus },
     });
 });
@@ -1024,20 +1041,58 @@ exports.toggleVendorStatus = (0, ayncHandler_1.asyncHandler)(async (req, res) =>
         res.status(404).json({ success: false, message: 'Vendor not found' });
         return;
     }
+    const wasActive = vendor.isActive;
     vendor.isActive = typeof isActive === 'boolean' ? isActive : !vendor.isActive;
+    const nowActive = vendor.isActive;
+    // Cascade product statuses + notify affected cart customers
+    if (!nowActive && wasActive) {
+        const activeProdIds = await Product_1.default.find({ vendor: vendor.user, status: 'active' }).select('_id').lean();
+        await Product_1.default.updateMany({ vendor: vendor.user, status: 'active' }, { $set: { status: 'vendor_suspended' } });
+        if (activeProdIds.length > 0) {
+            try {
+                const Cart = require('../models/Cart').default;
+                const affectedCarts = await Cart.find({
+                    'items.product': { $in: activeProdIds.map((p) => p._id) },
+                }).select('user').lean();
+                const affectedUserIds = [...new Set(affectedCarts.map((c) => c.user.toString()))];
+                if (affectedUserIds.length > 0) {
+                    await notification_service_1.notificationService.sendToMany({
+                        userIds: affectedUserIds,
+                        type: types_1.NotificationType.ACCOUNT,
+                        title: 'Cart Update',
+                        message: 'Some items in your cart are no longer available. Please review your cart before checkout.',
+                        data: { screen: 'Cart' },
+                    });
+                }
+            }
+            catch (err) {
+                logger_1.logger.error('Error notifying cart customers on vendor deactivation:', err);
+            }
+        }
+    }
+    else if (nowActive && !wasActive) {
+        await Product_1.default.updateMany({ vendor: vendor.user, status: 'vendor_suspended' }, { $set: { status: 'active' } });
+    }
+    // Audit trail
+    vendor.statusHistory.push({
+        action: nowActive ? 'activated' : 'deactivated',
+        changedBy: req.user?.id,
+        at: new Date(),
+    });
     await vendor.save();
     // Notify vendor
     await notification_service_1.notificationService.send({
         userId: vendor.user.toString(),
         type: types_1.NotificationType.ACCOUNT,
-        title: vendor.isActive ? 'Store Activated' : 'Store Deactivated',
-        message: vendor.isActive
-            ? 'Your vendor store has been activated by admin.'
-            : 'Your vendor store has been deactivated by admin. Contact support for more info.',
+        title: nowActive ? 'Store Activated' : 'Store Deactivated',
+        message: nowActive
+            ? 'Your store has been activated. Your products are now live again.'
+            : 'Your store has been deactivated by admin. Your products are no longer visible. Please contact support for more information.',
+        data: { screen: 'VendorDashboard' },
     });
     res.json({
         success: true,
-        message: `Vendor ${vendor.isActive ? 'activated' : 'deactivated'} successfully`,
+        message: `Vendor ${nowActive ? 'activated' : 'deactivated'} successfully`,
         data: { isActive: vendor.isActive },
     });
 });
@@ -1210,6 +1265,19 @@ exports.updateProductStatus = (0, ayncHandler_1.asyncHandler)(async (req, res) =
         title: 'Product Status Updated',
         message: statusMessages[status] || `Your product "${product.name}" status changed to ${status}.`,
     });
+    // Notify followers only when product goes live for the first time
+    if (status === types_1.ProductStatus.ACTIVE) {
+        try {
+            const vendorProfile = await VendorProfile_1.default.findOne({ user: product.vendor }).select('followers businessName');
+            if (vendorProfile?.followers?.length > 0) {
+                const followerIds = vendorProfile.followers.map((f) => f.toString());
+                await notification_service_1.notificationService.newProductFromFollowedVendor(followerIds, vendorProfile.businessName || 'A vendor you follow', product.name, product._id.toString());
+            }
+        }
+        catch (err) {
+            logger_1.logger.error('Error sending follower notification on product approval:', err);
+        }
+    }
     res.json({
         success: true,
         message: `Product status updated to ${status}`,
@@ -1816,6 +1884,58 @@ exports.processWithdrawal = (0, ayncHandler_1.asyncHandler)(async (req, res) => 
             amount: txnAmount,
             status: newStatus,
         },
+    });
+});
+/**
+ * POST /admin/vendors/:id/wallet/resolve
+ * Admin-initiated resolution for a rejected/suspended vendor's frozen wallet balance.
+ * Creates a pending withdrawal record so it flows through the normal processWithdrawal flow.
+ */
+exports.resolveVendorWallet = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const { note } = req.body;
+    const vendor = await VendorProfile_1.default.findById(id).select('user verificationStatus isActive businessName');
+    if (!vendor) {
+        res.status(404).json({ success: false, message: 'Vendor not found' });
+        return;
+    }
+    const wallet = await Wallet_1.default.findOne({ user: vendor.user });
+    if (!wallet || wallet.balance <= 0) {
+        res.status(400).json({ success: false, message: 'Vendor has no balance to resolve' });
+        return;
+    }
+    const amount = wallet.balance;
+    const reference = `ADMIN-WD-${Date.now().toString(36).toUpperCase()}`;
+    const updated = await Wallet_1.default.findOneAndUpdate({ user: vendor.user, balance: { $gte: amount } }, {
+        $inc: { balance: -amount, pendingBalance: amount },
+        $push: {
+            transactions: {
+                type: types_1.TransactionType.DEBIT,
+                amount,
+                purpose: types_1.WalletPurpose.WITHDRAWAL,
+                reference,
+                description: `Admin-initiated wallet resolution${note ? `: ${note}` : ''}`,
+                status: 'pending',
+                timestamp: new Date(),
+            },
+        },
+    }, { new: true });
+    if (!updated) {
+        res.status(400).json({ success: false, message: 'Failed to process wallet resolution' });
+        return;
+    }
+    // Notify the vendor
+    await notification_service_1.notificationService.send({
+        userId: vendor.user.toString(),
+        type: types_1.NotificationType.PAYMENT,
+        title: 'Wallet Balance Under Review',
+        message: `Your wallet balance of ₦${amount.toLocaleString()} has been queued for processing by admin.${note ? ` Note: ${note}` : ''}`,
+    });
+    logger_1.logger.info(`Admin ${req.user?.id} initiated wallet resolution of ₦${amount} for vendor ${vendor.user}`);
+    res.json({
+        success: true,
+        message: `₦${amount.toLocaleString()} queued for processing. It will appear in the pending withdrawals list.`,
+        data: { amount, reference },
     });
 });
 // ================================================================

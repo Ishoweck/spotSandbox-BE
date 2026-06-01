@@ -2,7 +2,7 @@
   // ✅ FIXED: Added category detection, fixed default weight, pass categoryId to ShipBubble
   import { Response } from 'express';
   import mongoose from 'mongoose';
-  import { AuthRequest, ApiResponse, OrderStatus, PaymentStatus, PaymentMethod, TransactionType, WalletPurpose, NotificationType } from '../types';
+  import { AuthRequest, ApiResponse, OrderStatus, PaymentStatus, PaymentMethod, TransactionType, WalletPurpose, NotificationType, VendorVerificationStatus } from '../types';
   import { VendorGroup, VendorDeliveryRate, DeliveryRateResponse, VendorRateGroup } from '../types/shipping.types';
   import Order, { IVendorShipment } from '../models/Order';
   import Cart from '../models/Cart';
@@ -741,13 +741,30 @@
         // Check stock for physical products only
         const productType = product.productType?.toUpperCase();
         const isPhysical = productType !== 'DIGITAL' && productType !== 'SERVICE';
-        
+
         if (isPhysical && product.quantity < item.quantity) {
           throw new AppError(
             `Insufficient stock for ${product.name}. Only ${product.quantity} available`,
             400
           );
         }
+      }
+
+      // Verify all vendors in the cart are active and approved
+      const uniqueVendorIds = [...new Set(cart.items.map((item: any) => item.product.vendor._id.toString()))];
+      const activeVendors = await VendorProfile.find({
+        user: { $in: uniqueVendorIds },
+        isActive: true,
+        verificationStatus: VendorVerificationStatus.VERIFIED,
+      }).select('user').lean();
+
+      if (activeVendors.length < uniqueVendorIds.length) {
+        const activeIds = new Set(activeVendors.map((v: any) => v.user.toString()));
+        const blockedItem = cart.items.find((item: any) => !activeIds.has(item.product.vendor._id.toString())) as any;
+        throw new AppError(
+          `"${blockedItem?.product?.name}" is from a store that is not currently accepting orders. Please remove it from your cart.`,
+          400
+        );
       }
 
       const user = await User.findById(req.user?.id);
@@ -3699,13 +3716,12 @@
         logger.error(`Error crediting vendor wallets for order ${order.orderNumber}:`, walletError);
       }
 
-      // Award purchase reward points on delivery (1% = 1pt per ₦100 spent)
+      // Award points on delivery
       try {
         const { rewardController } = await import('./reward.controller');
         await rewardController.awardOrderPoints(order._id.toString());
+        await rewardController.awardCustomerReferralPoints(order.user.toString(), order._id.toString());
         logger.info(`✅ Points awarded on delivery for order ${order.orderNumber}`);
-        await rewardController.awardCashback(order._id.toString());
-        logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
 
         // Unlock vendor referral points if any vendor is making their first sale
         const uniqueVendorIds = [...new Set(order.items.map((item: any) => item.vendor.toString()))];
@@ -3850,13 +3866,12 @@
         (order as any).deliveredAt = (order as any).deliveredAt || new Date();
         (order as any).fundsReleased = true;
 
-        // Award purchase points now that all shipments are confirmed received
+        // Award points now that all shipments are confirmed received
         try {
           const { rewardController } = await import('./reward.controller');
           await rewardController.awardOrderPoints(order._id.toString());
+          await rewardController.awardCustomerReferralPoints(order.user.toString(), order._id.toString());
           logger.info(`✅ Points awarded on full shipment receipt for order ${order.orderNumber}`);
-          await rewardController.awardCashback(order._id.toString());
-          logger.info(`✅ Cashback evaluated for order ${order.orderNumber}`);
 
           // Unlock vendor referral points for first-sale vendors
           const uniqueVendorIds = [...new Set(order.items.map((item: any) => item.vendor.toString()))];

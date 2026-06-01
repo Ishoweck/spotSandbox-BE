@@ -46,6 +46,12 @@ export interface IVendorProfile extends Document {
   responseSpeed: number;
   statsComputedAt?: Date;
   rejectionReason?: string;
+  statusHistory: {
+    action: string;
+    changedBy?: Types.ObjectId | string;
+    reason?: string;
+    at: Date;
+  }[];
 }
 
 const vendorProfileSchema = new Schema<IVendorProfile>({
@@ -181,6 +187,13 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     max: 100,
   },
   statsComputedAt: Date,
+  rejectionReason: String,
+  statusHistory: [{
+    action: { type: String, required: true },
+    changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    reason: String,
+    at: { type: Date, default: Date.now },
+  }],
 }, {
   timestamps: true,
 });

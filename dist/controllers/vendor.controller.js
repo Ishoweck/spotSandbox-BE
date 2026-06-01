@@ -943,6 +943,16 @@ class VendorController {
         }
         vendorProfile.isActive = !vendorProfile.isActive;
         await vendorProfile.save();
+        // Cascade: hide all vendor products when deactivated, restore when reactivated
+        const Product = require('../models/Product').default;
+        if (vendorProfile.isActive) {
+            // Restore products that were suspended by deactivation
+            await Product.updateMany({ vendor: vendorProfile.user, status: 'vendor_suspended' }, { $set: { status: 'active' } });
+        }
+        else {
+            // Suspend only currently active products; leave drafts/inactive untouched
+            await Product.updateMany({ vendor: vendorProfile.user, status: 'active' }, { $set: { status: 'vendor_suspended' } });
+        }
         res.json({
             success: true,
             message: `Vendor ${vendorProfile.isActive ? 'activated' : 'deactivated'} successfully`,
@@ -954,11 +964,54 @@ class VendorController {
         if (!vendorProfile) {
             throw new error_1.AppError('Vendor profile not found', 404);
         }
+        // Rejected vendors cannot reopen their store
+        if (!vendorProfile.isActive && vendorProfile.verificationStatus !== types_1.VendorVerificationStatus.VERIFIED) {
+            throw new error_1.AppError('Your store cannot be opened. Please contact support.', 403);
+        }
+        const wasActive = vendorProfile.isActive;
         vendorProfile.isActive = !vendorProfile.isActive;
+        const nowActive = vendorProfile.isActive;
+        const Product = require('../models/Product').default;
+        if (!nowActive && wasActive) {
+            // Closing: suspend active products + notify cart customers
+            const activeProdIds = await Product.find({ vendor: vendorProfile.user, status: 'active' }).select('_id').lean();
+            await Product.updateMany({ vendor: vendorProfile.user, status: 'active' }, { $set: { status: 'vendor_suspended' } });
+            if (activeProdIds.length > 0) {
+                try {
+                    const Cart = require('../models/Cart').default;
+                    const affectedCarts = await Cart.find({
+                        'items.product': { $in: activeProdIds.map((p) => p._id) },
+                    }).select('user').lean();
+                    const affectedUserIds = [...new Set(affectedCarts.map((c) => c.user.toString()))];
+                    if (affectedUserIds.length > 0) {
+                        await notification_service_1.notificationService.sendToMany({
+                            userIds: affectedUserIds,
+                            type: types_1.NotificationType.ACCOUNT,
+                            title: 'Cart Update',
+                            message: 'Some items in your cart are no longer available. Please review your cart before checkout.',
+                            data: { screen: 'Cart' },
+                        });
+                    }
+                }
+                catch (err) {
+                    console.error('Error notifying cart customers on store close:', err.message);
+                }
+            }
+        }
+        else if (nowActive && !wasActive) {
+            // Opening: restore suspended products
+            await Product.updateMany({ vendor: vendorProfile.user, status: 'vendor_suspended' }, { $set: { status: 'active' } });
+        }
+        // Audit trail
+        vendorProfile.statusHistory.push({
+            action: nowActive ? 'self_opened' : 'self_closed',
+            changedBy: req.user?.id,
+            at: new Date(),
+        });
         await vendorProfile.save();
         res.json({
             success: true,
-            message: `Store ${vendorProfile.isActive ? 'opened' : 'closed'} successfully`,
+            message: `Store ${nowActive ? 'opened' : 'closed'} successfully`,
             data: { isActive: vendorProfile.isActive },
         });
     }

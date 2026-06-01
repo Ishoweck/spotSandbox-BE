@@ -29,6 +29,7 @@ import {
   toggleVendorPremium,
   updateVendorCommission,
   fixLegacyCommissionRates,
+  resolveVendorWallet,
 
   // Product Management
   getAllProducts,
@@ -178,6 +179,7 @@ router.put('/vendors/:id/verify', authorize(...generalAdmins), verifyVendor);
 router.put('/vendors/:id/status', authorize(...generalAdmins), toggleVendorStatus);
 router.put('/vendors/:id/premium', authorize(...generalAdmins), toggleVendorPremium);
 router.put('/vendors/:id/commission', authorize(...allAdmins), updateVendorCommission);
+router.post('/vendors/:id/wallet/resolve', authorize(UserRole.SUPER_ADMIN), resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', authorize(UserRole.SUPER_ADMIN), fixLegacyCommissionRates);
 
 // ================================================================
