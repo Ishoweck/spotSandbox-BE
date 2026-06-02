@@ -31,6 +31,20 @@ export interface IProduct extends Document {
         width: number;
         height: number;
     };
+    pickupAddress?: {
+        street: string;
+        city: string;
+        state: string;
+        country: string;
+        fullName?: string;
+        phone?: string;
+        shipBubble?: {
+            addressCode?: number;
+            formattedAddress?: string;
+            latitude?: number;
+            longitude?: number;
+        };
+    };
     digitalFile?: {
         url: string;
         fileName: string;

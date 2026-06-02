@@ -8,6 +8,8 @@ import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendFounderWelc
 import { AppError } from '../middleware/error';
 import crypto from 'crypto';
 import { queueEmailsInBackground } from '../utils/email-queue';
+import VendorProfile from '../models/VendorProfile';
+import { VendorVerificationStatus } from '../types';
 import { deleteFromCloudinary, uploadToCloudinary } from '../utils/cloudinary';
 import { notificationService } from '../services/notification.service';
 
@@ -173,16 +175,8 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   // Check verified-identity badge in background
   import('./reward.controller').then(({ rewardController: rc }) => rc.checkBadges(user._id.toString())).catch(() => {});
 
-  // Queue welcome emails in background with 10 second delays
-  // Only send vendor-specific emails (founder welcome + product posting guide) to vendors
-  // Buyers get welcome email + buyer founder's note only
-  if (user.role === 'vendor') {
-    queueEmailsInBackground([
-      () => sendVendorWelcomeEmail(user.email, user.firstName),
-      () => sendFounderWelcomeEmail(user.email, user.firstName),
-      () => sendProductPostingGuideEmail(user.email),
-    ], 10000);
-  } else {
+  // Vendor welcome emails are sent after admin approval, not at email verification
+  if (user.role !== 'vendor') {
     queueEmailsInBackground([
       () => sendBuyerFounderWelcomeEmail(user.email, user.firstName),
     ], 10000);
@@ -323,6 +317,12 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
  * Award daily login points with streak tracking and transaction logging
  */
 private async awardDailyLoginPoints(user: any): Promise<void> {
+  // Skip points for vendors whose store hasn't been approved yet
+  if (user.role === UserRole.VENDOR) {
+    const vendorProfile = await VendorProfile.findOne({ user: user._id }).select('verificationStatus');
+    if (!vendorProfile || vendorProfile.verificationStatus !== VendorVerificationStatus.VERIFIED) return;
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 

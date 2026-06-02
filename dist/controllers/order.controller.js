@@ -406,23 +406,27 @@ class OrderController {
             logger_1.logger.info(`📦 Getting shipping rates for ${vendorGroup.vendorName}`);
             const vendorProfile = await VendorProfile_1.default.findOne({ user: vendorGroup.vendorId });
             const vendor = await User_1.default.findById(vendorGroup.vendorId);
-            const hasValidAddress = vendorProfile?.businessAddress &&
+            // Prefer the product-level pickup address; fall back to vendor business address
+            const productPickup = vendorGroup.pickupAddress;
+            const hasProductPickup = productPickup?.street && productPickup?.city && productPickup?.state;
+            const hasValidAddress = hasProductPickup || (vendorProfile?.businessAddress &&
                 vendorProfile.businessAddress.street &&
                 vendorProfile.businessAddress.street.trim().length > 5 &&
                 vendorProfile.businessAddress.street !== '123 Main Street' &&
                 vendorProfile.businessAddress.city &&
-                vendorProfile.businessAddress.state;
+                vendorProfile.businessAddress.state);
             if (!hasValidAddress) {
                 logger_1.logger.warn(`⚠️ Vendor ${vendorGroup.vendorName} has invalid address - using fallback`);
                 result.rates.push(...this.getVendorFallbackRates());
                 return result;
             }
-            const senderFullAddress = `${vendorProfile.businessAddress.street}, ${vendorProfile.businessAddress.city}, ${vendorProfile.businessAddress.state}, ${vendorProfile.businessAddress.country || 'Nigeria'}`;
+            const pickupSrc = hasProductPickup ? productPickup : vendorProfile.businessAddress;
+            const senderFullAddress = `${pickupSrc.street}, ${pickupSrc.city}, ${pickupSrc.state}, ${pickupSrc.country || 'Nigeria'}`;
             const receiverFullAddress = `${destination.street}, ${destination.city}, ${destination.state}, Nigeria`;
             const senderAddress = {
-                name: vendorGroup.vendorName,
-                phone: vendorProfile.businessPhone || vendor?.phone || '+2348000000000',
-                email: vendorProfile.businessEmail || vendor?.email || 'sender@vendorspot.com',
+                name: hasProductPickup && productPickup.fullName ? productPickup.fullName : vendorGroup.vendorName,
+                phone: (hasProductPickup && productPickup.phone) || vendorProfile?.businessPhone || vendor?.phone || '+2348000000000',
+                email: vendorProfile?.businessEmail || vendor?.email || 'sender@vendorspot.com',
                 address: senderFullAddress,
             };
             const receiverAddress = {
@@ -522,6 +526,7 @@ class OrderController {
                     vendorLogo: vendorProfile?.businessLogo,
                     isVerified: vendorProfile?.verificationStatus === 'verified',
                     vendorAddress,
+                    pickupAddress: undefined,
                     items: [],
                     totalWeight: 0,
                 });
@@ -545,6 +550,10 @@ class OrderController {
             });
             if (isPhysical) {
                 group.totalWeight += weight * item.quantity;
+                // Use the product's chosen pickup address (first physical item wins)
+                if (!group.pickupAddress && product.pickupAddress?.street && product.pickupAddress?.city && product.pickupAddress?.state) {
+                    group.pickupAddress = product.pickupAddress;
+                }
             }
         }
         return Array.from(groups.values());

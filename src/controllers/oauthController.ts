@@ -108,14 +108,7 @@ export class OAuthController {
           await user.save();
         }
 
-        // Send welcome emails in background
-        if (email_verified) {
-          queueEmailsInBackground([
-            () => sendVendorWelcomeEmail(user.email, user.firstName),
-            () => sendFounderWelcomeEmail(user.email, user.firstName),
-            () => sendProductPostingGuideEmail(user.email),
-          ], 10000);
-        }
+        // Vendor welcome emails are sent after admin approval, not at OAuth registration
       }
 
       // Generate tokens
@@ -217,14 +210,7 @@ export class OAuthController {
           await user.save();
         }
 
-        // Send welcome emails in background
-        if (email_verified) {
-          queueEmailsInBackground([
-            () => sendVendorWelcomeEmail(user.email, user.firstName),
-            () => sendFounderWelcomeEmail(user.email, user.firstName),
-            () => sendProductPostingGuideEmail(user.email),
-          ], 10000);
-        }
+        // Vendor welcome emails are sent after admin approval, not at OAuth registration
       }
 
       // Generate tokens

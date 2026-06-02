@@ -46,6 +46,8 @@ const email_1 = require("../utils/email");
 const error_1 = require("../middleware/error");
 const crypto_1 = __importDefault(require("crypto"));
 const email_queue_1 = require("../utils/email-queue");
+const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
+const types_2 = require("../types");
 const cloudinary_1 = require("../utils/cloudinary");
 const notification_service_1 = require("../services/notification.service");
 class AuthController {
@@ -184,17 +186,8 @@ class AuthController {
         await user.save();
         // Check verified-identity badge in background
         Promise.resolve().then(() => __importStar(require('./reward.controller'))).then(({ rewardController: rc }) => rc.checkBadges(user._id.toString())).catch(() => { });
-        // Queue welcome emails in background with 10 second delays
-        // Only send vendor-specific emails (founder welcome + product posting guide) to vendors
-        // Buyers get welcome email + buyer founder's note only
-        if (user.role === 'vendor') {
-            (0, email_queue_1.queueEmailsInBackground)([
-                () => (0, email_1.sendVendorWelcomeEmail)(user.email, user.firstName),
-                () => (0, email_1.sendFounderWelcomeEmail)(user.email, user.firstName),
-                () => (0, email_1.sendProductPostingGuideEmail)(user.email),
-            ], 10000);
-        }
-        else {
+        // Vendor welcome emails are sent after admin approval, not at email verification
+        if (user.role !== 'vendor') {
             (0, email_queue_1.queueEmailsInBackground)([
                 () => (0, email_1.sendBuyerFounderWelcomeEmail)(user.email, user.firstName),
             ], 10000);
@@ -316,6 +309,12 @@ class AuthController {
      * Award daily login points with streak tracking and transaction logging
      */
     async awardDailyLoginPoints(user) {
+        // Skip points for vendors whose store hasn't been approved yet
+        if (user.role === types_1.UserRole.VENDOR) {
+            const vendorProfile = await VendorProfile_1.default.findOne({ user: user._id }).select('verificationStatus');
+            if (!vendorProfile || vendorProfile.verificationStatus !== types_2.VendorVerificationStatus.VERIFIED)
+                return;
+        }
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         // Use loginStreak.lastLoginDate as the source of truth — it's what this method updates,

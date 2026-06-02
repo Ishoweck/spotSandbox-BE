@@ -351,6 +351,23 @@ class VendorController {
         await User_1.default.findByIdAndUpdate(req.user?.id, {
             role: types_1.UserRole.VENDOR,
         });
+        // Sync business address into the vendor's saved user addresses
+        if (businessAddress?.street && businessAddress?.city && businessAddress?.state) {
+            await User_1.default.findByIdAndUpdate(req.user?.id, {
+                $push: {
+                    addresses: {
+                        street: businessAddress.street,
+                        city: businessAddress.city,
+                        state: businessAddress.state,
+                        country: businessAddress.country || 'Nigeria',
+                        label: 'Business Address',
+                        fullName: businessName || '',
+                        phone: businessPhone || '',
+                        isDefault: false,
+                    },
+                },
+            });
+        }
         logger_1.logger.info(`Vendor profile created: ${req.user?.id}`);
         res.status(201).json({
             success: true,
@@ -410,6 +427,43 @@ class VendorController {
             }
         });
         await vendorProfile.save();
+        // Keep business address in sync with user's saved addresses
+        if (req.body.businessAddress) {
+            const ba = req.body.businessAddress;
+            if (ba.street && ba.city && ba.state) {
+                const user = await User_1.default.findById(req.user?.id);
+                if (user) {
+                    const existingIdx = user.addresses.findIndex((a) => a.label === 'Business Address');
+                    if (existingIdx >= 0) {
+                        user.addresses[existingIdx].street = ba.street;
+                        user.addresses[existingIdx].city = ba.city;
+                        user.addresses[existingIdx].state = ba.state;
+                        user.addresses[existingIdx].country = ba.country || 'Nigeria';
+                        if (req.body.businessName)
+                            user.addresses[existingIdx].fullName = req.body.businessName;
+                        if (req.body.businessPhone)
+                            user.addresses[existingIdx].phone = req.body.businessPhone;
+                        await user.save();
+                    }
+                    else {
+                        await User_1.default.findByIdAndUpdate(req.user?.id, {
+                            $push: {
+                                addresses: {
+                                    street: ba.street,
+                                    city: ba.city,
+                                    state: ba.state,
+                                    country: ba.country || 'Nigeria',
+                                    label: 'Business Address',
+                                    fullName: vendorProfile.businessName || '',
+                                    phone: vendorProfile.businessPhone || '',
+                                    isDefault: false,
+                                },
+                            },
+                        });
+                    }
+                }
+            }
+        }
         res.json({
             success: true,
             message: 'Vendor profile updated successfully',

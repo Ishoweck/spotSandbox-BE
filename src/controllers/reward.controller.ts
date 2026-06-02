@@ -2,7 +2,7 @@
 
 import { Response } from 'express';
 import { Types } from 'mongoose';
-import { AuthRequest, ApiResponse } from '../types';
+import { AuthRequest, ApiResponse, UserRole, VendorVerificationStatus } from '../types';
 import User from '../models/User';
 import Order from '../models/Order';
 import PointsTransaction from '../models/PointsTransaction';
@@ -383,6 +383,12 @@ export class RewardController {
   async checkBadges(userId: string): Promise<void> {
     const user = await User.findById(userId);
     if (!user) return;
+
+    // Skip badge checks for vendors whose store hasn't been approved yet
+    if (user.role === UserRole.VENDOR) {
+      const vendorProfile = await VendorProfile.findOne({ user: userId }).select('verificationStatus');
+      if (!vendorProfile || vendorProfile.verificationStatus !== VendorVerificationStatus.VERIFIED) return;
+    }
 
     // Reload badges fresh so we don't use a stale snapshot from caller
     const badges: string[] = user.badges || [];

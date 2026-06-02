@@ -4,6 +4,7 @@ import Product from '../models/Product';
 import Order from '../models/Order';
 import Category from '../models/Category';
 import VendorProfile from '../models/VendorProfile';
+import User from '../models/User';
 import Groq from 'groq-sdk';
 import { AppError } from '../middleware/error';
 import { getPaginationMeta, generateSlug, generateSKU, escapeRegex } from '../utils/helpers';
@@ -126,6 +127,16 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
       };
       delete productData.digitalExternalLink;
       console.log('✅ External digital link set');
+    }
+
+    // Resolve pickupAddress _id → full address snapshot from vendor's saved addresses
+    if (productData.pickupAddress && typeof productData.pickupAddress === 'string') {
+      const addressId = productData.pickupAddress;
+      const vendor = await User.findById(req.user?.id).select('addresses');
+      const matched = vendor?.addresses?.find((a: any) => a._id.toString() === addressId);
+      productData.pickupAddress = matched
+        ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
+        : undefined;
     }
 
     // Drafts keep their status; all other new products go to PENDING_APPROVAL
@@ -974,6 +985,16 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
           return img;
         })
       );
+    }
+
+    // Resolve pickupAddress _id → full address snapshot
+    if (req.body.pickupAddress && typeof req.body.pickupAddress === 'string') {
+      const addressId = req.body.pickupAddress;
+      const vendor = await User.findById(req.user?.id).select('addresses');
+      const matched = vendor?.addresses?.find((a: any) => a._id.toString() === addressId);
+      req.body.pickupAddress = matched
+        ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
+        : undefined;
     }
 
     Object.assign(product, req.body);

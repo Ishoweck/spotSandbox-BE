@@ -22,7 +22,8 @@
     "migrate": "npx ts-node src/scripts/migrate-from-old-db.ts",
     "patch:pending": "npx ts-node src/scripts/patch-migrated-to-pending.ts",
     "seed:vendors": "npx ts-node src/scripts/seedVendors.ts",
-    "backfill:ratings": "npx ts-node src/scripts/backfillVendorRatings.ts"
+    "backfill:ratings": "npx ts-node src/scripts/backfillVendorRatings.ts",
+    "backfill:addresses": "npx ts-node src/scripts/backfillVendorAddresses.ts"
   },
   "keywords": [
     "ecommerce",

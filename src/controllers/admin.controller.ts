@@ -33,7 +33,8 @@ import {
   ChatMessage,
 } from '../models/Additional';
 import { notificationService } from '../services/notification.service';
-import { sendEmail } from '../utils/email';
+import { sendEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
+import { queueEmailsInBackground } from '../utils/email-queue';
 import { sendPushNotification } from '../config/firebase';
 import { getPaginationMeta, generateSlug } from '../utils/helpers';
 import { asyncHandler } from '../utils/ayncHandler';
@@ -1214,6 +1215,16 @@ export const verifyVendor = asyncHandler(
     // Send notification
     if (status === 'verified') {
       await notificationService.vendorVerified(vendor.user.toString());
+
+      // Send vendor welcome emails now that the store is approved
+      const vendorUser = await User.findById(vendor.user).select('email firstName');
+      if (vendorUser) {
+        queueEmailsInBackground([
+          () => sendVendorWelcomeEmail(vendorUser.email, vendorUser.firstName),
+          () => sendFounderWelcomeEmail(vendorUser.email, vendorUser.firstName),
+          () => sendProductPostingGuideEmail(vendorUser.email),
+        ], 10000);
+      }
     } else {
       await notificationService.vendorRejected(vendor.user.toString(), rejectionReason);
     }

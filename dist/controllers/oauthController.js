@@ -42,13 +42,11 @@ const User_1 = __importDefault(require("../models/User"));
 const Additional_1 = require("../models/Additional");
 const jwt_1 = require("../utils/jwt");
 const helpers_1 = require("../utils/helpers");
-const email_1 = require("../utils/email");
 const error_1 = require("../middleware/error");
 const google_auth_library_1 = require("google-auth-library");
 const axios_1 = __importDefault(require("axios"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const crypto_1 = require("crypto");
-const email_queue_1 = require("../utils/email-queue");
 const googleClient = new google_auth_library_1.OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // Cache Apple's public keys — they rotate infrequently, so 1-hour TTL is fine
 let appleKeysCache = null;
@@ -128,14 +126,7 @@ class OAuthController {
                     user.affiliateCode = (0, helpers_1.generateAffiliateCode)(email);
                     await user.save();
                 }
-                // Send welcome emails in background
-                if (email_verified) {
-                    (0, email_queue_1.queueEmailsInBackground)([
-                        () => (0, email_1.sendVendorWelcomeEmail)(user.email, user.firstName),
-                        () => (0, email_1.sendFounderWelcomeEmail)(user.email, user.firstName),
-                        () => (0, email_1.sendProductPostingGuideEmail)(user.email),
-                    ], 10000);
-                }
+                // Vendor welcome emails are sent after admin approval, not at OAuth registration
             }
             // Generate tokens
             const tokens = (0, jwt_1.generateTokens)(user._id, user.email, user.role);
@@ -219,14 +210,7 @@ class OAuthController {
                     user.affiliateCode = (0, helpers_1.generateAffiliateCode)(email);
                     await user.save();
                 }
-                // Send welcome emails in background
-                if (email_verified) {
-                    (0, email_queue_1.queueEmailsInBackground)([
-                        () => (0, email_1.sendVendorWelcomeEmail)(user.email, user.firstName),
-                        () => (0, email_1.sendFounderWelcomeEmail)(user.email, user.firstName),
-                        () => (0, email_1.sendProductPostingGuideEmail)(user.email),
-                    ], 10000);
-                }
+                // Vendor welcome emails are sent after admin approval, not at OAuth registration
             }
             // Generate tokens
             const tokens = (0, jwt_1.generateTokens)(user._id, user.email, user.role);

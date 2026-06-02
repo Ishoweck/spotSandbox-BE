@@ -6,9 +6,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rewardController = exports.RewardController = void 0;
 const mongoose_1 = require("mongoose");
+const types_1 = require("../types");
 const User_1 = __importDefault(require("../models/User"));
 const Order_1 = __importDefault(require("../models/Order"));
 const PointsTransaction_1 = __importDefault(require("../models/PointsTransaction"));
+const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const Additional_1 = require("../models/Additional");
 const Review_1 = __importDefault(require("../models/Review"));
 const Product_1 = __importDefault(require("../models/Product"));
@@ -332,6 +334,12 @@ class RewardController {
         const user = await User_1.default.findById(userId);
         if (!user)
             return;
+        // Skip badge checks for vendors whose store hasn't been approved yet
+        if (user.role === types_1.UserRole.VENDOR) {
+            const vendorProfile = await VendorProfile_1.default.findOne({ user: userId }).select('verificationStatus');
+            if (!vendorProfile || vendorProfile.verificationStatus !== types_1.VendorVerificationStatus.VERIFIED)
+                return;
+        }
         // Reload badges fresh so we don't use a stale snapshot from caller
         const badges = user.badges || [];
         // ── Order counts ────────────────────────────────────────────

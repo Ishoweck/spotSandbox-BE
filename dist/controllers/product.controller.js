@@ -42,6 +42,7 @@ const Product_1 = __importDefault(require("../models/Product"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Category_1 = __importDefault(require("../models/Category"));
 const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
+const User_1 = __importDefault(require("../models/User"));
 const groq_sdk_1 = __importDefault(require("groq-sdk"));
 const error_1 = require("../middleware/error");
 const helpers_1 = require("../utils/helpers");
@@ -137,6 +138,15 @@ class ProductController {
                 };
                 delete productData.digitalExternalLink;
                 console.log('✅ External digital link set');
+            }
+            // Resolve pickupAddress _id → full address snapshot from vendor's saved addresses
+            if (productData.pickupAddress && typeof productData.pickupAddress === 'string') {
+                const addressId = productData.pickupAddress;
+                const vendor = await User_1.default.findById(req.user?.id).select('addresses');
+                const matched = vendor?.addresses?.find((a) => a._id.toString() === addressId);
+                productData.pickupAddress = matched
+                    ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
+                    : undefined;
             }
             // Drafts keep their status; all other new products go to PENDING_APPROVAL
             productData.status = isDraft ? types_1.ProductStatus.DRAFT : types_1.ProductStatus.PENDING_APPROVAL;
@@ -860,6 +870,15 @@ class ProductController {
                 }
                 return img;
             }));
+        }
+        // Resolve pickupAddress _id → full address snapshot
+        if (req.body.pickupAddress && typeof req.body.pickupAddress === 'string') {
+            const addressId = req.body.pickupAddress;
+            const vendor = await User_1.default.findById(req.user?.id).select('addresses');
+            const matched = vendor?.addresses?.find((a) => a._id.toString() === addressId);
+            req.body.pickupAddress = matched
+                ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
+                : undefined;
         }
         Object.assign(product, req.body);
         await product.save();

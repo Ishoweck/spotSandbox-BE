@@ -9,6 +9,20 @@ export interface VendorGroup {
         state: string;
         country: string;
     };
+    pickupAddress?: {
+        street: string;
+        city: string;
+        state: string;
+        country: string;
+        fullName?: string;
+        phone?: string;
+        shipBubble?: {
+            addressCode?: number;
+            formattedAddress?: string;
+            latitude?: number;
+            longitude?: number;
+        };
+    };
     items: {
         productId: string;
         productName: string;

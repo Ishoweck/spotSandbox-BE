@@ -32,6 +32,20 @@ export interface IProduct extends Document {
     width: number;
     height: number;
   };
+  pickupAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    country: string;
+    fullName?: string;
+    phone?: string;
+    shipBubble?: {
+      addressCode?: number;
+      formattedAddress?: string;
+      latitude?: number;
+      longitude?: number;
+    };
+  };
   digitalFile?: {
     url: string;
     fileName: string;
@@ -186,6 +200,20 @@ const productSchema = new Schema<IProduct>({
     length: Number,
     width: Number,
     height: Number,
+  },
+  pickupAddress: {
+    street: String,
+    city: String,
+    state: String,
+    country: { type: String, default: 'Nigeria' },
+    fullName: String,
+    phone: String,
+    shipBubble: {
+      addressCode: Number,
+      formattedAddress: String,
+      latitude: Number,
+      longitude: Number,
+    },
   },
   digitalFile: {
     url: String,

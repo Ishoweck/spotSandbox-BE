@@ -54,6 +54,7 @@ const PointsTransaction_1 = __importDefault(require("../models/PointsTransaction
 const Additional_1 = require("../models/Additional");
 const notification_service_1 = require("../services/notification.service");
 const email_1 = require("../utils/email");
+const email_queue_1 = require("../utils/email-queue");
 const firebase_1 = require("../config/firebase");
 const helpers_1 = require("../utils/helpers");
 const ayncHandler_1 = require("../utils/ayncHandler");
@@ -1019,6 +1020,15 @@ exports.verifyVendor = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     // Send notification
     if (status === 'verified') {
         await notification_service_1.notificationService.vendorVerified(vendor.user.toString());
+        // Send vendor welcome emails now that the store is approved
+        const vendorUser = await User_1.default.findById(vendor.user).select('email firstName');
+        if (vendorUser) {
+            (0, email_queue_1.queueEmailsInBackground)([
+                () => (0, email_1.sendVendorWelcomeEmail)(vendorUser.email, vendorUser.firstName),
+                () => (0, email_1.sendFounderWelcomeEmail)(vendorUser.email, vendorUser.firstName),
+                () => (0, email_1.sendProductPostingGuideEmail)(vendorUser.email),
+            ], 10000);
+        }
     }
     else {
         await notification_service_1.notificationService.vendorRejected(vendor.user.toString(), rejectionReason);

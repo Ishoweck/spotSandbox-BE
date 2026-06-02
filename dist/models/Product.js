@@ -150,6 +150,20 @@ const productSchema = new mongoose_1.Schema({
         width: Number,
         height: Number,
     },
+    pickupAddress: {
+        street: String,
+        city: String,
+        state: String,
+        country: { type: String, default: 'Nigeria' },
+        fullName: String,
+        phone: String,
+        shipBubble: {
+            addressCode: Number,
+            formattedAddress: String,
+            latitude: Number,
+            longitude: Number,
+        },
+    },
     digitalFile: {
         url: String,
         fileName: String,
