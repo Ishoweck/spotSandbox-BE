@@ -9,6 +9,10 @@ var UserRole;
     UserRole["ADMIN"] = "admin";
     UserRole["SUPER_ADMIN"] = "super_admin";
     UserRole["FINANCIAL_ADMIN"] = "financial_admin";
+    UserRole["SUPPORT_ADMIN"] = "support_admin";
+    UserRole["CONTENT_ADMIN"] = "content_admin";
+    UserRole["KYC_ADMIN"] = "kyc_admin";
+    UserRole["MARKETING_ADMIN"] = "marketing_admin";
     UserRole["AFFILIATE"] = "affiliate";
 })(UserRole || (exports.UserRole = UserRole = {}));
 // User Status

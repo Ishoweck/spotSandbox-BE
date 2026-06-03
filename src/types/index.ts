@@ -8,6 +8,10 @@ export enum UserRole {
   ADMIN = 'admin',
   SUPER_ADMIN = 'super_admin',
   FINANCIAL_ADMIN = 'financial_admin',
+  SUPPORT_ADMIN = 'support_admin',
+  CONTENT_ADMIN = 'content_admin',
+  KYC_ADMIN = 'kyc_admin',
+  MARKETING_ADMIN = 'marketing_admin',
   AFFILIATE = 'affiliate'
 }
 

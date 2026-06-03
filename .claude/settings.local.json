@@ -68,7 +68,9 @@
       "PowerShell(Get-NetTCPConnection *)",
       "Bash(xargs grep -l \"addNotificationResponseReceivedListener\\\\|Notifications.addNotificationResponseReceivedListener\")",
       "Bash(grep -rn 'User.*findByIdAndUpdate.*points\\\\|User.*findOneAndUpdate.*points\\\\|$inc.*points' 'C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src')",
-      "Bash(dir /s /b \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\\\\screens\")"
+      "Bash(dir /s /b \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\\\\screens\")",
+      "Bash(mongosh --version)",
+      "Bash(node scripts/migrate-vendors.js)"
     ]
   }
 }

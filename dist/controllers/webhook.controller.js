@@ -42,6 +42,7 @@ const Order_1 = __importDefault(require("../models/Order"));
 const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
 const error_1 = require("../middleware/error");
+const shipbubble_service_1 = require("../services/shipbubble.service");
 class WebhookController {
     /**
      * Handle ShipBubble webhook for order status updates
@@ -334,6 +335,129 @@ class WebhookController {
             data: {
                 orderNumber: order.orderNumber,
                 webhookHistory,
+            },
+        });
+    }
+    /**
+     * Admin: manually sync an order's shipment status from ShipBubble.
+     * Use this when a webhook was missed (e.g. DB outage, URL change).
+     */
+    async syncOrderShipment(req, res) {
+        const { orderId } = req.params;
+        logger_1.logger.info('🔄 ============================================');
+        logger_1.logger.info('🔄 ADMIN MANUAL SHIPMENT SYNC');
+        logger_1.logger.info('🔄 ============================================');
+        logger_1.logger.info('👤 Admin:', req.user?.email);
+        logger_1.logger.info('📦 Order ID:', orderId);
+        const order = await Order_1.default.findById(orderId).populate('user', 'firstName lastName email');
+        if (!order)
+            throw new error_1.AppError('Order not found', 404);
+        const vendorShipments = order.vendorShipments;
+        // Collect every shipment that has a tracking number
+        const shipmentTargets = (vendorShipments ?? [])
+            .filter((s) => s.trackingNumber)
+            .map((s) => ({ shipment: s, trackingNumber: s.trackingNumber }));
+        // Fallback to order-level tracking number
+        if (shipmentTargets.length === 0 && order.trackingNumber) {
+            shipmentTargets.push({ shipment: null, trackingNumber: order.trackingNumber });
+        }
+        if (shipmentTargets.length === 0) {
+            throw new error_1.AppError('No tracking number found for this order', 400);
+        }
+        const shipmentStatusMap = {
+            pending: 'pending',
+            confirmed: 'created',
+            picked_up: 'shipped',
+            in_transit: 'in_transit',
+            delivered: 'delivered',
+            completed: 'delivered',
+            cancelled: 'cancelled',
+        };
+        const syncResults = [];
+        let anyStatusChanged = false;
+        const oldStatus = order.status;
+        for (const { shipment, trackingNumber } of shipmentTargets) {
+            logger_1.logger.info('📍 Fetching live status for tracking:', trackingNumber);
+            let trackData;
+            try {
+                trackData = await shipbubble_service_1.shipBubbleService.trackShipment(trackingNumber);
+            }
+            catch (err) {
+                logger_1.logger.error('❌ trackShipment failed for', trackingNumber, err.message);
+                throw new error_1.AppError(`Failed to fetch status from ShipBubble for ${trackingNumber}: ${err.message}`, 502);
+            }
+            // ShipBubble returns { status: "success", data: { status: "completed", ... } }
+            const rawStatus = (trackData?.data?.status ?? trackData?.status ?? '').toLowerCase();
+            if (!rawStatus) {
+                throw new error_1.AppError(`ShipBubble returned no status for tracking number ${trackingNumber}`, 502);
+            }
+            logger_1.logger.info('📊 Live status:', { trackingNumber, rawStatus });
+            const mappedShipmentStatus = shipmentStatusMap[rawStatus] || 'created';
+            if (shipment) {
+                shipment.status = mappedShipmentStatus;
+                if (trackData?.data?.tracking_url)
+                    shipment.trackingUrl = trackData.data.tracking_url;
+                if (trackData?.data?.package_status?.length > 0)
+                    shipment.packageStatus = trackData.data.package_status;
+                if (trackData?.data?.events?.length > 0)
+                    shipment.events = trackData.data.events;
+            }
+            syncResults.push({ trackingNumber, rawStatus, mapped: mappedShipmentStatus });
+        }
+        // Derive overall order status
+        const updatedShipments = vendorShipments ?? [];
+        const newOrderStatus = updatedShipments.length > 1
+            ? this.deriveMultiVendorOrderStatus(updatedShipments)
+            : this.mapShipBubbleStatus(syncResults[0].rawStatus);
+        if (newOrderStatus && order.status !== newOrderStatus) {
+            order.status = newOrderStatus;
+            if (newOrderStatus === types_1.OrderStatus.DELIVERED && !order.deliveredAt) {
+                order.deliveredAt = new Date();
+            }
+            anyStatusChanged = true;
+        }
+        await order.save();
+        logger_1.logger.info('✅ Sync complete:', {
+            orderNumber: order.orderNumber,
+            from: oldStatus,
+            to: order.status,
+            changed: anyStatusChanged,
+            shipments: syncResults,
+        });
+        if (anyStatusChanged) {
+            try {
+                const customerId = order.user._id
+                    ? order.user._id.toString()
+                    : order.user.toString();
+                await notification_service_1.notificationService.deliveryStatusUpdate(order._id.toString(), order.orderNumber, syncResults[0].rawStatus, customerId);
+                await notification_service_1.notificationService.orderStatusUpdated(order._id.toString(), order.orderNumber, order.status, customerId);
+                const vendorIds = updatedShipments
+                    .map((s) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()))
+                    .filter(Boolean);
+                (0, notification_service_1.emitOrderStatusUpdate)({
+                    orderId: order._id.toString(),
+                    orderNumber: order.orderNumber,
+                    status: order.status,
+                    customerId,
+                    vendorIds,
+                });
+            }
+            catch (err) {
+                logger_1.logger.error('❌ Notification error during sync:', err);
+            }
+        }
+        logger_1.logger.info('🔄 ============================================\n');
+        res.json({
+            success: true,
+            message: anyStatusChanged
+                ? `Order status updated from ${oldStatus} → ${order.status}`
+                : 'Order already up to date — no status change needed',
+            data: {
+                orderNumber: order.orderNumber,
+                previousStatus: oldStatus,
+                currentStatus: order.status,
+                changed: anyStatusChanged,
+                shipments: syncResults,
             },
         });
     }

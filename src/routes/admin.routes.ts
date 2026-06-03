@@ -127,6 +127,7 @@ import {
 import { auditMiddleware } from '../middleware/audit';
 import { asyncHandler } from '../middleware/error';
 import { aiChatController } from '../controllers/ai-chat.controller';
+import { webhookController } from '../controllers/webhook.controller';
 
 const router = Router();
 
@@ -136,176 +137,185 @@ router.use(authenticate);
 // Audit all admin actions (POST, PUT, PATCH, DELETE)
 router.use(auditMiddleware);
 
-// Helper: all admin roles
-const allAdmins = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN];
+// ── Role groups ──────────────────────────────────────────────────────────────
+const SA  = UserRole.SUPER_ADMIN;
+const A   = UserRole.ADMIN;
+const FA  = UserRole.FINANCIAL_ADMIN;
+const SPA = UserRole.SUPPORT_ADMIN;
+const CA  = UserRole.CONTENT_ADMIN;
+const KA  = UserRole.KYC_ADMIN;
+const MA  = UserRole.MARKETING_ADMIN;
 
-// Helper: general admins (not financial-only)
-const generalAdmins = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
-
-// Helper: financial admins
-const financialAdmins = [UserRole.FINANCIAL_ADMIN, UserRole.SUPER_ADMIN];
+const allAdmins     = [SA, A, FA, SPA, CA, KA, MA];
+const generalAdmins = [SA, A];
+const financialAdmins = [SA, FA];
+const supportAdmins   = [SA, A, SPA];
+const contentAdmins   = [SA, A, CA];
+const kycAdmins       = [SA, A, KA];
+const marketingAdmins = [SA, A, MA];
 
 // ================================================================
 // DASHBOARD & ANALYTICS
 // ================================================================
 router.get('/dashboard', authorize(...allAdmins), getDashboard);
-router.get('/analytics/revenue', authorize(...financialAdmins, UserRole.ADMIN), getRevenueAnalytics);
-router.get('/analytics/users', authorize(...allAdmins), getUserAnalytics);
-router.get('/analytics/orders', authorize(...allAdmins), getOrderAnalytics);
+router.get('/analytics/revenue', authorize(SA, A, FA), getRevenueAnalytics);
+router.get('/analytics/users', authorize(SA, A, SPA), getUserAnalytics);
+router.get('/analytics/orders', authorize(SA, A, FA, SPA), getOrderAnalytics);
 
 // ================================================================
 // ADMIN MANAGEMENT (SUPER_ADMIN ONLY)
 // ================================================================
-router.post('/admins/create', authorize(UserRole.SUPER_ADMIN), createAdmin);
-router.get('/admins', authorize(UserRole.SUPER_ADMIN), getAllAdmins);
-router.put('/admins/:id/role', authorize(UserRole.SUPER_ADMIN), updateAdminRole);
-router.delete('/admins/:id', authorize(UserRole.SUPER_ADMIN), removeAdmin);
+router.post('/admins/create', authorize(SA), createAdmin);
+router.get('/admins', authorize(SA), getAllAdmins);
+router.put('/admins/:id/role', authorize(SA), updateAdminRole);
+router.delete('/admins/:id', authorize(SA), removeAdmin);
 
 // ================================================================
-// USER MANAGEMENT
+// USER MANAGEMENT — general + support
 // ================================================================
-router.get('/users', authorize(...generalAdmins), getAllUsers);
-router.get('/users/:id', authorize(...generalAdmins), getUserDetails);
-router.put('/users/:id/status', authorize(...generalAdmins), updateUserStatus);
-router.put('/users/:id/role', authorize(UserRole.SUPER_ADMIN), updateUserRole);
-router.delete('/users/:id', authorize(UserRole.SUPER_ADMIN), deleteUser);
+router.get('/users', authorize(SA, A, SPA), getAllUsers);
+router.get('/users/:id', authorize(SA, A, SPA), getUserDetails);
+router.put('/users/:id/status', authorize(SA, A, SPA), updateUserStatus);
+router.put('/users/:id/role', authorize(SA), updateUserRole);
+router.delete('/users/:id', authorize(SA), deleteUser);
 
 // ================================================================
-// VENDOR MANAGEMENT
+// VENDOR MANAGEMENT — general + kyc
 // ================================================================
-router.get('/vendors', authorize(...generalAdmins), getAllVendors);
-router.get('/vendors/:id', authorize(...generalAdmins), getVendorDetails);
-router.put('/vendors/:id/verify', authorize(...generalAdmins), verifyVendor);
-router.put('/vendors/:id/status', authorize(...generalAdmins), toggleVendorStatus);
-router.put('/vendors/:id/premium', authorize(...generalAdmins), toggleVendorPremium);
-router.put('/vendors/:id/commission', authorize(...allAdmins), updateVendorCommission);
-router.post('/vendors/:id/wallet/resolve', authorize(UserRole.SUPER_ADMIN), resolveVendorWallet);
-router.post('/vendors/fix-commission-rates', authorize(UserRole.SUPER_ADMIN), fixLegacyCommissionRates);
+router.get('/vendors', authorize(SA, A, KA), getAllVendors);
+router.get('/vendors/:id', authorize(SA, A, KA), getVendorDetails);
+router.put('/vendors/:id/verify', authorize(SA, A, KA), verifyVendor);
+router.put('/vendors/:id/status', authorize(SA, A, KA), toggleVendorStatus);
+router.put('/vendors/:id/premium', authorize(SA, A), toggleVendorPremium);
+router.put('/vendors/:id/commission', authorize(SA, A, FA), updateVendorCommission);
+router.post('/vendors/:id/wallet/resolve', authorize(SA), resolveVendorWallet);
+router.post('/vendors/fix-commission-rates', authorize(SA), fixLegacyCommissionRates);
 
 // ================================================================
-// PRODUCT MANAGEMENT
+// PRODUCT MANAGEMENT — general + content
 // ================================================================
-router.get('/products', authorize(...generalAdmins), getAllProducts);
-router.get('/products/:id', authorize(...generalAdmins), getProductDetails);
-router.put('/products/:id/status', authorize(...generalAdmins), updateProductStatus);
-router.put('/products/:id/featured', authorize(...generalAdmins), toggleProductFeatured);
-router.delete('/products/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteProduct);
+router.get('/products', authorize(SA, A, CA), getAllProducts);
+router.get('/products/:id', authorize(SA, A, CA), getProductDetails);
+router.put('/products/:id/status', authorize(SA, A, CA), updateProductStatus);
+router.put('/products/:id/featured', authorize(SA, A, CA), toggleProductFeatured);
+router.delete('/products/:id', authorize(SA, A), deleteProduct);
 
 // ================================================================
-// ORDER MANAGEMENT
+// ORDER MANAGEMENT — general + support + financial
 // ================================================================
-router.get('/orders', authorize(...allAdmins), getAllOrders);
-router.get('/orders/:id', authorize(...allAdmins), getOrderDetails);
-router.put('/orders/:id/status', authorize(...generalAdmins), updateOrderStatus);
-router.post('/orders/:id/refund', authorize(...financialAdmins, UserRole.ADMIN), processRefund);
-router.put('/orders/:id/note', authorize(...generalAdmins), addAdminNote);
+router.get('/orders', authorize(SA, A, FA, SPA), getAllOrders);
+router.get('/orders/:id', authorize(SA, A, FA, SPA), getOrderDetails);
+router.put('/orders/:id/status', authorize(SA, A, SPA), updateOrderStatus);
+router.post('/orders/:id/refund', authorize(SA, A, FA), processRefund);
+router.put('/orders/:id/note', authorize(SA, A, SPA), addAdminNote);
+router.post('/orders/:id/sync-shipment', authorize(SA, A, SPA), asyncHandler(webhookController.syncOrderShipment.bind(webhookController)));
 
 // ================================================================
-// FINANCIAL MANAGEMENT
+// FINANCIAL MANAGEMENT — financial + general
 // ================================================================
-router.get('/finance/overview', authorize(...financialAdmins, UserRole.ADMIN), getFinancialOverview);
-router.get('/finance/transactions', authorize(...financialAdmins, UserRole.ADMIN), getAllTransactions);
-router.get('/finance/transactions/:transactionId', authorize(...financialAdmins, UserRole.ADMIN), getTransactionById);
-router.get('/finance/withdrawals', authorize(...financialAdmins, UserRole.ADMIN), getPendingWithdrawals);
-router.post('/finance/withdrawals/:walletId/:transactionId/process', authorize(...financialAdmins), processWithdrawal);
+router.get('/finance/overview', authorize(SA, A, FA), getFinancialOverview);
+router.get('/finance/transactions', authorize(SA, A, FA), getAllTransactions);
+router.get('/finance/transactions/:transactionId', authorize(SA, A, FA), getTransactionById);
+router.get('/finance/withdrawals', authorize(SA, A, FA), getPendingWithdrawals);
+router.post('/finance/withdrawals/:walletId/:transactionId/process', authorize(SA, FA), processWithdrawal);
 
 // ================================================================
-// REVIEW MANAGEMENT
+// REVIEW MANAGEMENT — general + content
 // ================================================================
-router.get('/reviews', authorize(...generalAdmins), getAllReviews);
-router.get('/reviews/:id', authorize(...generalAdmins), getReviewById);
-router.put('/reviews/:id/status', authorize(...generalAdmins), updateReviewStatus);
-router.delete('/reviews/:id', authorize(...generalAdmins), deleteReview);
+router.get('/reviews', authorize(...contentAdmins), getAllReviews);
+router.get('/reviews/:id', authorize(...contentAdmins), getReviewById);
+router.put('/reviews/:id/status', authorize(...contentAdmins), updateReviewStatus);
+router.delete('/reviews/:id', authorize(SA, A), deleteReview);
 
 // ================================================================
-// DISPUTE MANAGEMENT
+// DISPUTE MANAGEMENT — general + support
 // ================================================================
-router.get('/disputes', authorize(...generalAdmins), getAllDisputes);
-router.get('/disputes/:id', authorize(...generalAdmins), getDisputeDetails);
-router.put('/disputes/:id/review', authorize(...generalAdmins), markDisputeUnderReview);
-router.put('/disputes/:id/resolve', authorize(...generalAdmins), resolveDispute);
-router.put('/disputes/:id/close', authorize(...generalAdmins), closeDispute);
-router.post('/disputes/:id/message', authorize(...generalAdmins), addDisputeMessage);
+router.get('/disputes', authorize(...supportAdmins), getAllDisputes);
+router.get('/disputes/:id', authorize(...supportAdmins), getDisputeDetails);
+router.put('/disputes/:id/review', authorize(...supportAdmins), markDisputeUnderReview);
+router.put('/disputes/:id/resolve', authorize(...supportAdmins), resolveDispute);
+router.put('/disputes/:id/close', authorize(...supportAdmins), closeDispute);
+router.post('/disputes/:id/message', authorize(...supportAdmins), addDisputeMessage);
 
 // ================================================================
-// COUPON MANAGEMENT
+// COUPON MANAGEMENT — general + marketing
 // ================================================================
-router.get('/coupons', authorize(...allAdmins), getAllCoupons);
-router.post('/coupons', authorize(...generalAdmins), createCoupon);
-router.put('/coupons/:id', authorize(...generalAdmins), updateCoupon);
-router.put('/coupons/:id/toggle', authorize(...generalAdmins), toggleCouponActive);
-router.get('/coupons/:id/usage', authorize(...allAdmins), getCouponUsage);
-router.delete('/coupons/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteCoupon);
+router.get('/coupons', authorize(...marketingAdmins), getAllCoupons);
+router.post('/coupons', authorize(...marketingAdmins), createCoupon);
+router.put('/coupons/:id', authorize(...marketingAdmins), updateCoupon);
+router.put('/coupons/:id/toggle', authorize(...marketingAdmins), toggleCouponActive);
+router.get('/coupons/:id/usage', authorize(...marketingAdmins), getCouponUsage);
+router.delete('/coupons/:id', authorize(SA, A), deleteCoupon);
 
 // ================================================================
-// CATEGORY MANAGEMENT
+// CATEGORY MANAGEMENT — general + content
 // ================================================================
-router.get('/categories', authorize(...allAdmins), getAllCategories);
-router.post('/categories', authorize(...generalAdmins), createCategory);
-router.put('/categories/:id', authorize(...generalAdmins), updateCategory);
-router.put('/categories/:id/toggle', authorize(...generalAdmins), toggleCategoryStatus);
-router.delete('/categories/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteCategory);
+router.get('/categories', authorize(...contentAdmins), getAllCategories);
+router.post('/categories', authorize(...contentAdmins), createCategory);
+router.put('/categories/:id', authorize(...contentAdmins), updateCategory);
+router.put('/categories/:id/toggle', authorize(...contentAdmins), toggleCategoryStatus);
+router.delete('/categories/:id', authorize(SA, A), deleteCategory);
 
 // ================================================================
-// NOTIFICATION MANAGEMENT
+// NOTIFICATION MANAGEMENT — general + marketing
 // ================================================================
-router.post('/notifications/broadcast', authorize(...generalAdmins), broadcastNotification);
-router.get('/notifications', authorize(...allAdmins), getNotificationHistory);
+router.post('/notifications/broadcast', authorize(...marketingAdmins), broadcastNotification);
+router.get('/notifications', authorize(...marketingAdmins), getNotificationHistory);
 
 // ================================================================
-// ACCOUNT DELETION MANAGEMENT
+// ACCOUNT DELETION MANAGEMENT — general + support
 // ================================================================
-router.get('/account-deletions', authorize(...generalAdmins), getAccountDeletionRequests);
-router.post('/account-deletions', authorize(...generalAdmins), adminCreateDeletionRequest);
-router.post('/account-deletions/:id/approve', authorize(...generalAdmins), approveAccountDeletion);
-router.post('/account-deletions/:id/reject', authorize(...generalAdmins), rejectAccountDeletion);
+router.get('/account-deletions', authorize(...supportAdmins), getAccountDeletionRequests);
+router.post('/account-deletions', authorize(...supportAdmins), adminCreateDeletionRequest);
+router.post('/account-deletions/:id/approve', authorize(SA, A), approveAccountDeletion);
+router.post('/account-deletions/:id/reject', authorize(SA, A), rejectAccountDeletion);
 
 // ================================================================
-// AFFILIATE MANAGEMENT
+// AFFILIATE MANAGEMENT — general + financial
 // ================================================================
-router.get('/affiliates', authorize(...generalAdmins), getAllAffiliates);
-router.get('/affiliates/:userId/links', authorize(...generalAdmins), getAffiliateLinks);
-router.put('/affiliates/:userId/status', authorize(...generalAdmins), toggleAffiliateStatus);
+router.get('/affiliates', authorize(SA, A, FA), getAllAffiliates);
+router.get('/affiliates/:userId/links', authorize(SA, A, FA), getAffiliateLinks);
+router.put('/affiliates/:userId/status', authorize(SA, A), toggleAffiliateStatus);
 
 // ================================================================
-// CHALLENGE MANAGEMENT
+// CHALLENGE MANAGEMENT — general + marketing
 // ================================================================
-router.get('/challenges', authorize(...generalAdmins), getAllChallenges);
-router.post('/challenges', authorize(...generalAdmins), createChallenge);
-router.put('/challenges/:id', authorize(...generalAdmins), updateChallenge);
-router.delete('/challenges/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteChallenge);
-router.get('/challenges/:id/leaderboard', authorize(...allAdmins), getChallengeLeaderboard);
+router.get('/challenges', authorize(...marketingAdmins), getAllChallenges);
+router.post('/challenges', authorize(...marketingAdmins), createChallenge);
+router.put('/challenges/:id', authorize(...marketingAdmins), updateChallenge);
+router.delete('/challenges/:id', authorize(SA, A), deleteChallenge);
+router.get('/challenges/:id/leaderboard', authorize(...marketingAdmins), getChallengeLeaderboard);
 
 // ================================================================
-// REPORTS
+// REPORTS — general + financial
 // ================================================================
-router.get('/reports/sales', authorize(...allAdmins), getSalesReport);
-router.get('/reports/vendors', authorize(...allAdmins), getVendorReport);
-router.get('/reports/products', authorize(...allAdmins), getProductReport);
+router.get('/reports/sales', authorize(SA, A, FA), getSalesReport);
+router.get('/reports/vendors', authorize(SA, A, FA), getVendorReport);
+router.get('/reports/products', authorize(SA, A, FA, CA), getProductReport);
 
 // ================================================================
 // MISC
 // ================================================================
-router.get('/activity-log', authorize(...allAdmins), getActivityLog);
+router.get('/activity-log', authorize(SA, A), getActivityLog);
 router.get('/search', authorize(...allAdmins), globalSearch);
 
 // ================================================================
-// REWARDS & POINTS MANAGEMENT
+// REWARDS & POINTS MANAGEMENT — general + marketing
 // ================================================================
-router.get('/rewards/overview', authorize(...allAdmins), getRewardsOverview);
-router.get('/rewards/users', authorize(...generalAdmins), getRewardsUsers);
-router.post('/rewards/users/:userId/adjust', authorize(...generalAdmins), adjustUserPoints);
-router.get('/rewards/transactions', authorize(...allAdmins), getPointsTransactions);
+router.get('/rewards/overview', authorize(...marketingAdmins), getRewardsOverview);
+router.get('/rewards/users', authorize(...marketingAdmins), getRewardsUsers);
+router.post('/rewards/users/:userId/adjust', authorize(SA, A), adjustUserPoints);
+router.get('/rewards/transactions', authorize(...marketingAdmins), getPointsTransactions);
 
 // ================================================================
-// APP VERSION MANAGEMENT
+// APP VERSION MANAGEMENT — super + general
 // ================================================================
-router.get('/app-version', authorize(...allAdmins), getAppVersionConfig);
-router.put('/app-version', authorize(...generalAdmins), updateAppVersionConfig);
+router.get('/app-version', authorize(SA, A), getAppVersionConfig);
+router.put('/app-version', authorize(SA), updateAppVersionConfig);
 
 // ================================================================
-// AI SUPPORT SUGGESTIONS
+// AI SUPPORT SUGGESTIONS — support + general
 // ================================================================
-router.post('/ai/suggest', authorize(...allAdmins), asyncHandler(aiChatController.adminSuggest.bind(aiChatController)));
+router.post('/ai/suggest', authorize(...supportAdmins), asyncHandler(aiChatController.adminSuggest.bind(aiChatController)));
 
 export default router;

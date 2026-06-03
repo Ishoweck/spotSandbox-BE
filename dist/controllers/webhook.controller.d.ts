@@ -19,6 +19,11 @@ export declare class WebhookController {
      * Get webhook history for an order
      */
     getWebhookHistory(req: Request, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Admin: manually sync an order's shipment status from ShipBubble.
+     * Use this when a webhook was missed (e.g. DB outage, URL change).
+     */
+    syncOrderShipment(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
 }
 export declare const webhookController: WebhookController;
 //# sourceMappingURL=webhook.controller.d.ts.map
