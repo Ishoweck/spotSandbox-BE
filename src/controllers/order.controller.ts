@@ -1330,13 +1330,12 @@
         }
       }
 
-      // Recalculate subtotal from live product prices — stale cart.subtotal not trusted
-      let subtotal = 0;
-      for (const cartItem of cart.items) {
-        const liveProduct = await Product.findById(cartItem.product).select('price');
-        subtotal += (liveProduct?.price || (cartItem as any).price || 0) * cartItem.quantity;
-      }
-      if (subtotal === 0) subtotal = cart.subtotal;
+      // Use the cart's stored subtotal — this is what the user saw at checkout.
+      // Re-fetching live prices causes the total to jump if a vendor changed their price
+      // between cart addition and payment, which is confusing and wrong from the user's perspective.
+      const subtotal = cart.subtotal > 0
+        ? cart.subtotal
+        : cart.items.reduce((sum: number, item: any) => sum + (item.price || 0) * item.quantity, 0);
       const discount = cart.discount;
       const tax = 0;
       const baseTotal = subtotal - discount + totalShippingCost + tax;
@@ -1420,9 +1419,17 @@
       } else if (paymentMethod === (PaymentMethod as any).FLUTTERWAVE) {
         logger.info('💳 Initializing Flutterwave...');
         try {
+          // Gross up the amount so that after Flutterwave deducts their 1.4% fee
+          // (capped at ₦2,000) the merchant receives exactly cardChargeAmount.
+          // Formula: gross = ceil((amount) / (1 - 0.014)), fee capped at ₦2,000.
+          const flutterwaveFee = cardChargeAmount > 0
+            ? Math.min(Math.ceil(cardChargeAmount / 0.986) - cardChargeAmount, 2000)
+            : 0;
+          const flutterwaveGrossAmount = cardChargeAmount + flutterwaveFee;
+
           const flutterwaveResponse = await flutterwaveService.initializePayment({
             tx_ref: paymentReference,
-            amount: cardChargeAmount,
+            amount: flutterwaveGrossAmount,
             currency: 'NGN',
             redirect_url: `${process.env.FRONTEND_URL}/orders/${paymentReference}/payment-callback`,
             customer: {

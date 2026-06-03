@@ -334,11 +334,13 @@ class RewardController {
         const user = await User_1.default.findById(userId);
         if (!user)
             return;
-        // Skip badge checks for vendors whose store hasn't been approved yet
+        // Vendors get their own badge set — route them away from customer checks
         if (user.role === types_1.UserRole.VENDOR) {
-            const vendorProfile = await VendorProfile_1.default.findOne({ user: userId }).select('verificationStatus');
+            const vendorProfile = await VendorProfile_1.default.findOne({ user: userId }).select('verificationStatus averageRating totalReviews');
             if (!vendorProfile || vendorProfile.verificationStatus !== types_1.VendorVerificationStatus.VERIFIED)
                 return;
+            await this.checkVendorBadges(userId, user, vendorProfile);
+            return;
         }
         // Reload badges fresh so we don't use a stale snapshot from caller
         const badges = user.badges || [];
@@ -434,6 +436,86 @@ class RewardController {
             earlyAdopterCutoff.setMonth(earlyAdopterCutoff.getMonth() + 6);
             if (user.createdAt <= earlyAdopterCutoff) {
                 await this.awardBadge(userId, 'early-adopter');
+            }
+        }
+    }
+    async checkVendorBadges(userId, user, vendorProfile) {
+        const badges = user.badges || [];
+        const vid = new mongoose_1.Types.ObjectId(userId);
+        // ── Sales count ──────────────────────────────────────────────
+        const salesCount = await Order_1.default.countDocuments({
+            'vendorShipments.vendor': vid,
+            paymentStatus: 'completed',
+        });
+        if (salesCount >= 1 && !badges.includes('vendor-first-sale'))
+            await this.awardBadge(userId, 'vendor-first-sale');
+        if (salesCount >= 10 && !badges.includes('vendor-ten-sales'))
+            await this.awardBadge(userId, 'vendor-ten-sales');
+        if (salesCount >= 50 && !badges.includes('vendor-fifty-sales'))
+            await this.awardBadge(userId, 'vendor-fifty-sales');
+        if (salesCount >= 100 && !badges.includes('vendor-century-seller'))
+            await this.awardBadge(userId, 'vendor-century-seller');
+        // ── Revenue ──────────────────────────────────────────────────
+        const revenueAgg = await Order_1.default.aggregate([
+            { $match: { paymentStatus: 'completed' } },
+            { $unwind: '$items' },
+            { $match: { 'items.vendor': vid } },
+            { $group: { _id: null, total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } },
+        ]);
+        const revenue = revenueAgg[0]?.total || 0;
+        if (revenue >= 50000 && !badges.includes('vendor-revenue-50k'))
+            await this.awardBadge(userId, 'vendor-revenue-50k');
+        if (revenue >= 500000 && !badges.includes('vendor-revenue-500k'))
+            await this.awardBadge(userId, 'vendor-revenue-500k');
+        if (revenue >= 1000000 && !badges.includes('vendor-millionaire'))
+            await this.awardBadge(userId, 'vendor-millionaire');
+        // ── Product listings ─────────────────────────────────────────
+        const productCount = await Product_1.default.countDocuments({
+            vendor: vid,
+            status: { $in: ['active', 'pending_approval'] },
+        });
+        if (productCount >= 1 && !badges.includes('vendor-first-listing'))
+            await this.awardBadge(userId, 'vendor-first-listing');
+        if (productCount >= 10 && !badges.includes('vendor-ten-products'))
+            await this.awardBadge(userId, 'vendor-ten-products');
+        if (productCount >= 50 && !badges.includes('vendor-prolific'))
+            await this.awardBadge(userId, 'vendor-prolific');
+        // ── Reviews received ─────────────────────────────────────────
+        if (!badges.includes('vendor-five-star') || !badges.includes('vendor-highly-rated')) {
+            const vendorProductIds = await Product_1.default.distinct('_id', { vendor: vid });
+            if (!badges.includes('vendor-five-star')) {
+                const fiveStarExists = await Review_1.default.exists({
+                    product: { $in: vendorProductIds },
+                    rating: 5,
+                });
+                if (fiveStarExists)
+                    await this.awardBadge(userId, 'vendor-five-star');
+            }
+            if (!badges.includes('vendor-highly-rated') &&
+                (vendorProfile.averageRating || 0) >= 4.5 &&
+                (vendorProfile.totalReviews || 0) >= 10) {
+                await this.awardBadge(userId, 'vendor-highly-rated');
+            }
+        }
+        // ── Login streak (shared logic) ───────────────────────────────
+        const streak = user.loginStreak?.currentStreak || 0;
+        if (streak >= 3 && !badges.includes('streak-3'))
+            await this.awardBadge(userId, 'streak-3');
+        if (streak >= 7 && !badges.includes('streak-7'))
+            await this.awardBadge(userId, 'streak-7');
+        if (streak >= 30 && !badges.includes('streak-30'))
+            await this.awardBadge(userId, 'streak-30');
+        // ── Verified store ────────────────────────────────────────────
+        if (!badges.includes('vendor-verified-store')) {
+            await this.awardBadge(userId, 'vendor-verified-store');
+        }
+        // ── Early vendor (joined within first 6 months of platform) ──
+        if (!badges.includes('vendor-early')) {
+            const PLATFORM_LAUNCH_DATE = new Date('2026-06-09');
+            const earlyVendorCutoff = new Date(PLATFORM_LAUNCH_DATE);
+            earlyVendorCutoff.setMonth(earlyVendorCutoff.getMonth() + 6);
+            if (user.createdAt <= earlyVendorCutoff) {
+                await this.awardBadge(userId, 'vendor-early');
             }
         }
     }

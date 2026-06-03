@@ -966,12 +966,16 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       throw new AppError('Quantity cannot be negative', 400);
     }
     const effectivePrice = req.body.price ?? product.price;
-    const effectiveCompare = req.body.compareAtPrice ?? product.compareAtPrice;
-    if (
-      effectiveCompare !== undefined &&
-      effectiveCompare <= effectivePrice
-    ) {
-      throw new AppError('Compare-at price must be greater than the selling price', 400);
+
+    if (req.body.compareAtPrice !== undefined) {
+      // Vendor is explicitly setting a new compare-at price — validate it
+      if (req.body.compareAtPrice <= effectivePrice) {
+        throw new AppError('Compare-at price must be greater than the selling price', 400);
+      }
+    } else if (req.body.price !== undefined && product.compareAtPrice && product.compareAtPrice <= req.body.price) {
+      // Vendor is only updating price and the new price meets or exceeds the existing
+      // compare-at price — auto-clear compareAtPrice so the product no longer shows as on sale
+      req.body.compareAtPrice = null;
     }
 
     // Upload any new base64 images to Cloudinary before saving

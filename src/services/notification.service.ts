@@ -462,12 +462,13 @@ class NotificationService {
 
   async badgeEarned(userId: string, badge: string): Promise<void> {
     const badgeNames: Record<string, string> = {
+      // Customer badges
       'first-purchase': 'First Purchase',
       'loyal-customer': 'Loyal Customer',
       'vip-customer': 'VIP Customer',
-      'high-spender': 'High Spender',
       'century-shopper': 'Century Shopper',
       'big-spender': 'Big Spender',
+      'high-spender': 'High Spender',
       'whale': 'Whale',
       'flash-buyer': 'Flash Buyer',
       'first-review': 'First Review',
@@ -482,6 +483,21 @@ class NotificationService {
       'explorer': 'Explorer',
       'verified-identity': 'Verified Identity',
       'early-adopter': 'Early Adopter',
+      // Vendor badges
+      'vendor-first-sale': 'First Sale',
+      'vendor-ten-sales': '10 Sales',
+      'vendor-fifty-sales': '50 Sales',
+      'vendor-century-seller': 'Century Seller',
+      'vendor-revenue-50k': '₦50k Revenue',
+      'vendor-revenue-500k': '₦500k Revenue',
+      'vendor-millionaire': 'Millionaire',
+      'vendor-first-listing': 'First Listing',
+      'vendor-ten-products': '10 Products',
+      'vendor-prolific': 'Prolific Seller',
+      'vendor-five-star': 'Five Star',
+      'vendor-highly-rated': 'Highly Rated',
+      'vendor-verified-store': 'Verified Store',
+      'vendor-early': 'Early Vendor',
     };
 
     await this.send({

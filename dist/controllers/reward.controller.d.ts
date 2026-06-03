@@ -34,6 +34,7 @@ export declare class RewardController {
      * Check and award automatic badges
      */
     checkBadges(userId: string): Promise<void>;
+    private checkVendorBadges;
     /**
      * Expire points older than 60 days (lazy — call before any balance read/write)
      */

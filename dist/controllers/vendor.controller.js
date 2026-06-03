@@ -42,6 +42,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.setVendorReferrer = exports.vendorController = exports.VendorController = void 0;
+const mongoose_1 = require("mongoose");
 const axios_1 = __importDefault(require("axios"));
 const types_1 = require("../types");
 const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
@@ -527,10 +528,9 @@ class VendorController {
      */
     async getVendorDashboard(req, res) {
         const vendorProfile = await VendorProfile_1.default.findOne({ user: req.user?.id });
-        if (!vendorProfile) {
+        if (!vendorProfile)
             throw new error_1.AppError('Vendor profile not found', 404);
-        }
-        // Date ranges
+        const vendorId = new mongoose_1.Types.ObjectId(req.user?.id);
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const yesterday = new Date(today);
@@ -541,217 +541,145 @@ class VendorController {
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const lastMonth = new Date(today);
         lastMonth.setMonth(lastMonth.getMonth() - 1);
-        // Products statistics
-        const totalProducts = await Product_1.default.countDocuments({ vendor: req.user?.id });
-        const activeProducts = await Product_1.default.countDocuments({
-            vendor: req.user?.id,
-            status: 'active',
-        });
-        const allProducts = await Product_1.default.find({ vendor: req.user?.id });
-        const totalViews = allProducts.reduce((sum, p) => sum + (p.views || 0), 0);
-        // Orders statistics
-        const totalOrders = await Order_1.default.countDocuments({
-            'items.vendor': req.user?.id,
-        });
-        const ordersThisMonth = await Order_1.default.countDocuments({
-            'items.vendor': req.user?.id,
-            createdAt: { $gte: thirtyDaysAgo },
-        });
-        const ordersLastMonth = await Order_1.default.countDocuments({
-            'items.vendor': req.user?.id,
-            createdAt: { $gte: lastMonth, $lt: thirtyDaysAgo },
-        });
-        const ordersThisWeek = await Order_1.default.countDocuments({
-            'items.vendor': req.user?.id,
-            createdAt: { $gte: sevenDaysAgo },
-        });
-        const ordersToday = await Order_1.default.countDocuments({
-            'items.vendor': req.user?.id,
-            createdAt: { $gte: today },
-        });
-        const ordersYesterday = await Order_1.default.countDocuments({
-            'items.vendor': req.user?.id,
-            createdAt: { $gte: yesterday, $lt: today },
-        });
-        // Sales/Revenue statistics
-        const allOrders = await Order_1.default.find({
-            'items.vendor': req.user?.id,
-            paymentStatus: 'completed',
-        });
-        let totalRevenue = 0;
-        let revenueThisMonth = 0;
-        let revenueLastMonth = 0;
-        let revenueThisWeek = 0;
-        let revenueToday = 0;
-        let revenueYesterday = 0;
-        allOrders.forEach((order) => {
-            const vendorItems = order.items.filter((item) => item.vendor.toString() === req.user?.id);
-            const orderRevenue = vendorItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-            totalRevenue += orderRevenue;
-            const orderDate = order.createdAt;
-            if (orderDate >= thirtyDaysAgo) {
-                revenueThisMonth += orderRevenue;
-            }
-            if (orderDate >= lastMonth && orderDate < thirtyDaysAgo) {
-                revenueLastMonth += orderRevenue;
-            }
-            if (orderDate >= sevenDaysAgo) {
-                revenueThisWeek += orderRevenue;
-            }
-            if (orderDate >= today) {
-                revenueToday += orderRevenue;
-            }
-            if (orderDate >= yesterday && orderDate < today) {
-                revenueYesterday += orderRevenue;
-            }
-        });
+        // Run all 9 independent queries in parallel — down from 23+ sequential round trips
+        const [productStats, orderCounts, revenueStats, chartRaw, topProducts, recentOrders, lowStockProducts, outOfStockProducts, userDoc,] = await Promise.all([
+            // 1. Product totals + views in one aggregation
+            Product_1.default.aggregate([
+                { $match: { vendor: vendorId } },
+                { $group: {
+                        _id: null,
+                        total: { $sum: 1 },
+                        active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
+                        views: { $sum: { $ifNull: ['$views', 0] } },
+                    } },
+            ]),
+            // 2. All order counts in one $facet — replaces 6 countDocuments calls
+            Order_1.default.aggregate([
+                { $match: { 'items.vendor': vendorId } },
+                { $facet: {
+                        total: [{ $count: 'n' }],
+                        thisMonth: [{ $match: { createdAt: { $gte: thirtyDaysAgo } } }, { $count: 'n' }],
+                        lastMonth: [{ $match: { createdAt: { $gte: lastMonth, $lt: thirtyDaysAgo } } }, { $count: 'n' }],
+                        thisWeek: [{ $match: { createdAt: { $gte: sevenDaysAgo } } }, { $count: 'n' }],
+                        today: [{ $match: { createdAt: { $gte: today } } }, { $count: 'n' }],
+                        yesterday: [{ $match: { createdAt: { $gte: yesterday, $lt: today } } }, { $count: 'n' }],
+                    } },
+            ]),
+            // 3. Revenue across all periods in one aggregation — replaces fetching all orders into memory
+            Order_1.default.aggregate([
+                { $match: { 'items.vendor': vendorId, paymentStatus: 'completed' } },
+                { $unwind: '$items' },
+                { $match: { 'items.vendor': vendorId } },
+                { $group: {
+                        _id: null,
+                        total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+                        thisMonth: { $sum: { $cond: [{ $gte: ['$createdAt', thirtyDaysAgo] }, { $multiply: ['$items.price', '$items.quantity'] }, 0] } },
+                        lastMonth: { $sum: { $cond: [{ $and: [{ $gte: ['$createdAt', lastMonth] }, { $lt: ['$createdAt', thirtyDaysAgo] }] }, { $multiply: ['$items.price', '$items.quantity'] }, 0] } },
+                        thisWeek: { $sum: { $cond: [{ $gte: ['$createdAt', sevenDaysAgo] }, { $multiply: ['$items.price', '$items.quantity'] }, 0] } },
+                        today: { $sum: { $cond: [{ $gte: ['$createdAt', today] }, { $multiply: ['$items.price', '$items.quantity'] }, 0] } },
+                        yesterday: { $sum: { $cond: [{ $and: [{ $gte: ['$createdAt', yesterday] }, { $lt: ['$createdAt', today] }] }, { $multiply: ['$items.price', '$items.quantity'] }, 0] } },
+                    } },
+            ]),
+            // 4. 7-day sales chart in one aggregation — replaces 7 separate Order.find() calls
+            Order_1.default.aggregate([
+                { $match: { 'items.vendor': vendorId, paymentStatus: 'completed', createdAt: { $gte: sevenDaysAgo } } },
+                { $unwind: '$items' },
+                { $match: { 'items.vendor': vendorId } },
+                { $group: {
+                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                        sales: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+                        orders: { $addToSet: '$_id' },
+                    } },
+                { $project: { _id: 1, sales: 1, orders: { $size: '$orders' } } },
+                { $sort: { _id: 1 } },
+            ]),
+            // 5. Top 5 products by sales
+            Product_1.default.find({ vendor: vendorId })
+                .sort({ totalSales: -1 })
+                .limit(5)
+                .select('name slug totalSales price images averageRating')
+                .lean(),
+            // 6. Recent 10 orders
+            Order_1.default.find({ 'items.vendor': vendorId })
+                .sort({ createdAt: -1 })
+                .limit(10)
+                .populate('user', 'firstName lastName email')
+                .select('orderNumber status total createdAt items')
+                .lean(),
+            // 7. Low stock products
+            Product_1.default.find({ vendor: vendorId, quantity: { $lte: 10, $gt: 0 }, status: 'active' })
+                .select('name slug quantity lowStockThreshold images')
+                .lean(),
+            // 8. Out of stock products
+            Product_1.default.find({ vendor: vendorId, quantity: 0 })
+                .select('name slug images')
+                .lean(),
+            // 9. User points for rewards tier
+            User_1.default.findById(req.user?.id).select('points badges').lean(),
+        ]);
+        // ── Process results ─────────────────────────────────────────────────────
+        const ps = productStats[0] || { total: 0, active: 0, views: 0 };
+        const oc = orderCounts[0] || {};
+        const rv = revenueStats[0] || { total: 0, thisMonth: 0, lastMonth: 0, thisWeek: 0, today: 0, yesterday: 0 };
+        const totalOrders = oc.total?.[0]?.n || 0;
+        const ordersThisMonth = oc.thisMonth?.[0]?.n || 0;
+        const ordersLastMonth = oc.lastMonth?.[0]?.n || 0;
+        const ordersThisWeek = oc.thisWeek?.[0]?.n || 0;
+        const ordersToday = oc.today?.[0]?.n || 0;
+        const totalRevenue = rv.total || 0;
+        const revenueThisMonth = rv.thisMonth || 0;
+        const revenueLastMonth = rv.lastMonth || 0;
+        const revenueThisWeek = rv.thisWeek || 0;
+        const revenueToday = rv.today || 0;
+        const revenueYesterday = rv.yesterday || 0;
         const platformFee = (vendorProfile.commissionRate / 100) * totalRevenue;
         const netRevenue = totalRevenue - platformFee;
-        // Percentage changes
-        const calculatePercentageChange = (current, previous) => {
-            if (previous === 0)
-                return current > 0 ? 100 : 0;
-            return ((current - previous) / previous) * 100;
-        };
-        const todaySalesChange = calculatePercentageChange(revenueToday, revenueYesterday);
-        const ordersChange = calculatePercentageChange(ordersThisMonth, ordersLastMonth);
-        const revenueChange = calculatePercentageChange(revenueThisMonth, revenueLastMonth);
-        // Sales by date (for chart - last 7 days)
-        const salesByDate = [];
-        for (let i = 6; i >= 0; i--) {
+        const pct = (cur, prev) => prev === 0 ? (cur > 0 ? 100 : 0) : ((cur - prev) / prev) * 100;
+        const todaySalesChange = pct(revenueToday, revenueYesterday);
+        const ordersChange = pct(ordersThisMonth, ordersLastMonth);
+        const revenueChange = pct(revenueThisMonth, revenueLastMonth);
+        // Build 7-day chart, filling missing days with zeros
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const chartMap = new Map(chartRaw.map(d => [d._id, d]));
+        const salesByDate = Array.from({ length: 7 }, (_, i) => {
             const date = new Date(today);
-            date.setDate(date.getDate() - i);
-            const nextDate = new Date(date);
-            nextDate.setDate(nextDate.getDate() + 1);
-            const dayOrders = await Order_1.default.find({
-                'items.vendor': req.user?.id,
-                paymentStatus: 'completed',
-                createdAt: { $gte: date, $lt: nextDate },
-            });
-            const daySales = dayOrders.reduce((sum, order) => {
-                const vendorItems = order.items.filter((item) => item.vendor.toString() === req.user?.id);
-                return sum + vendorItems.reduce((s, item) => s + item.price * item.quantity, 0);
-            }, 0);
-            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-            salesByDate.push({
-                date: date.toISOString().split('T')[0],
-                day: dayNames[date.getDay()],
-                sales: daySales,
-                orders: dayOrders.length,
-            });
-        }
-        // Top products
-        const topProducts = await Product_1.default.find({ vendor: req.user?.id })
-            .sort({ totalSales: -1 })
-            .limit(5)
-            .select('name slug totalSales price images averageRating');
-        // Recent orders
-        const recentOrders = await Order_1.default.find({
-            'items.vendor': req.user?.id,
-        })
-            .sort({ createdAt: -1 })
-            .limit(10)
-            .populate('user', 'firstName lastName email')
-            .select('orderNumber status total createdAt items');
-        const filteredRecentOrders = recentOrders.map((order) => {
-            const orderObj = order.toObject();
-            return {
-                ...orderObj,
-                items: orderObj.items.filter((item) => item.vendor.toString() === req.user?.id),
-            };
+            date.setDate(date.getDate() - (6 - i));
+            const key = date.toISOString().split('T')[0];
+            const entry = chartMap.get(key);
+            return { date: key, day: dayNames[date.getDay()], sales: entry?.sales || 0, orders: entry?.orders || 0 };
         });
-        // Inventory alerts
-        const lowStockProducts = await Product_1.default.find({
-            vendor: req.user?.id,
-            quantity: { $lte: 10, $gt: 0 },
-            status: 'active',
-        }).select('name slug quantity lowStockThreshold images');
-        const outOfStockProducts = await Product_1.default.find({
-            vendor: req.user?.id,
-            quantity: 0,
-        }).select('name slug images');
-        // Verification progress (matches Store Setup screen: storefront, verification, bank account)
-        let verificationProgress = 0;
-        const totalSteps = 3;
+        // Verification progress
         let completedSteps = 0;
-        // 1. Storefront: theme, banner, or custom message
-        const hasStorefront = !!(vendorProfile.storefront?.theme ||
-            vendorProfile.storefront?.bannerImages?.length ||
-            vendorProfile.storefront?.customMessage ||
-            vendorProfile.businessBanner);
-        if (hasStorefront)
+        if (vendorProfile.storefront?.theme || vendorProfile.storefront?.bannerImages?.length || vendorProfile.storefront?.customMessage || vendorProfile.businessBanner)
             completedSteps++;
-        // 2. Verification: KYC documents uploaded or verified status
-        const hasVerification = vendorProfile.verificationStatus === 'verified' ||
-            (vendorProfile.kycDocuments?.length > 0);
-        if (hasVerification)
+        if (vendorProfile.verificationStatus === 'verified' || vendorProfile.kycDocuments?.length > 0)
             completedSteps++;
-        // 3. Bank account: payout details set up
-        const hasBankAccount = !!(vendorProfile.payoutDetails?.accountNumber);
-        if (hasBankAccount)
+        if (vendorProfile.payoutDetails?.accountNumber)
             completedSteps++;
-        verificationProgress = Math.round((completedSteps / totalSteps) * 100);
-        // ⭐ REWARDS TIER - Using User.points
+        const verificationProgress = Math.round((completedSteps / 3) * 100);
+        // Rewards tier
         let rewardsTier = null;
-        try {
-            const user = await User_1.default.findById(req.user?.id);
-            if (user && user.points !== undefined) {
-                // Calculate tier based on points
-                let tier = 'Bronze';
-                if (user.points >= 10000) {
-                    tier = 'Diamond';
-                }
-                else if (user.points >= 5000) {
-                    tier = 'Platinum';
-                }
-                else if (user.points >= 2000) {
-                    tier = 'Gold';
-                }
-                else if (user.points >= 500) {
-                    tier = 'Silver';
-                }
-                // Calculate points to next tier
-                const tierThresholds = {
-                    Bronze: { min: 0, next: 500 },
-                    Silver: { min: 500, next: 2000 },
-                    Gold: { min: 2000, next: 5000 },
-                    Platinum: { min: 5000, next: 10000 },
-                    Diamond: { min: 10000, next: null },
-                };
-                const currentTier = tierThresholds[tier];
-                const pointsToNext = currentTier.next ? currentTier.next - user.points : 0;
-                rewardsTier = {
-                    tier,
-                    points: user.points,
-                    pointsToNextTier: pointsToNext,
-                    badges: user.badges || [],
-                };
-            }
+        if (userDoc && userDoc.points !== undefined) {
+            const points = userDoc.points;
+            const tier = points >= 10000 ? 'Diamond' : points >= 5000 ? 'Platinum' : points >= 2000 ? 'Gold' : points >= 500 ? 'Silver' : 'Bronze';
+            const nextThreshold = { Bronze: 500, Silver: 2000, Gold: 5000, Platinum: 10000, Diamond: null };
+            rewardsTier = { tier, points, pointsToNextTier: nextThreshold[tier] ? nextThreshold[tier] - points : 0, badges: userDoc.badges || [] };
         }
-        catch (error) {
-            logger_1.logger.warn('Error fetching user points:', error);
-        }
-        // Response
+        // Filter recent orders to only this vendor's items
+        const filteredRecentOrders = recentOrders.map(order => ({
+            ...order,
+            items: order.items.filter((item) => item.vendor.toString() === req.user?.id),
+        }));
         res.json({
             success: true,
             data: {
                 overview: {
-                    todaySales: revenueToday,
-                    todaySalesChange,
-                    todayOrders: ordersToday,
-                    totalProducts,
-                    activeProducts,
-                    totalOrders,
-                    ordersThisMonth,
-                    ordersThisWeek,
-                    ordersChange,
-                    totalViews,
-                    totalRevenue,
-                    revenueThisMonth,
-                    revenueThisWeek,
-                    revenueChange,
-                    netRevenue,
-                    platformFee,
+                    todaySales: revenueToday, todaySalesChange, todayOrders: ordersToday,
+                    totalProducts: ps.total, activeProducts: ps.active,
+                    totalOrders, ordersThisMonth, ordersThisWeek, ordersChange,
+                    totalViews: ps.views,
+                    totalRevenue, revenueThisMonth, revenueThisWeek, revenueChange,
+                    netRevenue, platformFee,
                     commissionRate: vendorProfile.commissionRate,
                     averageRating: vendorProfile.averageRating,
                     totalReviews: vendorProfile.totalReviews,
@@ -759,48 +687,30 @@ class VendorController {
                 },
                 salesChart: {
                     daily: salesByDate,
-                    totalWeeklySales: salesByDate.reduce((sum, day) => sum + day.sales, 0),
-                    totalWeeklyOrders: salesByDate.reduce((sum, day) => sum + day.orders, 0),
-                    highestDay: salesByDate.reduce((max, day) => day.sales > max.sales ? day : max, salesByDate[0]),
+                    totalWeeklySales: salesByDate.reduce((s, d) => s + d.sales, 0),
+                    totalWeeklyOrders: salesByDate.reduce((s, d) => s + d.orders, 0),
+                    highestDay: salesByDate.reduce((max, d) => d.sales > max.sales ? d : max, salesByDate[0]),
                 },
-                topProducts: topProducts.map(product => ({
-                    id: product._id,
-                    name: product.name,
-                    slug: product.slug,
-                    image: product.images[0],
-                    totalSales: product.totalSales,
-                    price: product.price,
-                    rating: product.averageRating,
+                topProducts: topProducts.map(p => ({
+                    id: p._id, name: p.name, slug: p.slug, image: p.images[0],
+                    totalSales: p.totalSales, price: p.price, rating: p.averageRating,
                 })),
                 recentOrders: filteredRecentOrders.map(order => {
-                    const user = order.user; // Populated user object
+                    const u = order.user;
                     return {
-                        id: order._id,
-                        orderNumber: order.orderNumber,
-                        status: order.status,
-                        total: order.total,
-                        createdAt: order.createdAt,
-                        customer: user ? {
-                            name: `${user.firstName} ${user.lastName}`,
-                            email: user.email,
-                        } : null,
+                        id: order._id, orderNumber: order.orderNumber, status: order.status,
+                        total: order.total, createdAt: order.createdAt,
+                        customer: u ? { name: `${u.firstName} ${u.lastName}`, email: u.email } : null,
                         itemsCount: order.items.length,
                     };
                 }),
                 inventory: {
                     lowStockProducts: lowStockProducts.map(p => ({
-                        id: p._id,
-                        name: p.name,
-                        slug: p.slug,
-                        image: p.images[0],
-                        quantity: p.quantity,
-                        threshold: p.lowStockThreshold,
+                        id: p._id, name: p.name, slug: p.slug, image: p.images[0],
+                        quantity: p.quantity, threshold: p.lowStockThreshold,
                     })),
                     outOfStockProducts: outOfStockProducts.map(p => ({
-                        id: p._id,
-                        name: p.name,
-                        slug: p.slug,
-                        image: p.images[0],
+                        id: p._id, name: p.name, slug: p.slug, image: p.images[0],
                     })),
                     lowStockCount: lowStockProducts.length,
                     outOfStockCount: outOfStockProducts.length,
@@ -808,8 +718,7 @@ class VendorController {
                 profile: {
                     verificationStatus: vendorProfile.verificationStatus,
                     rejectionReason: vendorProfile.rejectionReason || null,
-                    verificationProgress,
-                    isActive: vendorProfile.isActive,
+                    verificationProgress, isActive: vendorProfile.isActive,
                     hasPayoutDetails: !!vendorProfile.payoutDetails,
                     businessName: vendorProfile.businessName,
                     businessLogo: vendorProfile.businessLogo,

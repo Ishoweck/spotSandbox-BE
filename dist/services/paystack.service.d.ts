@@ -4,6 +4,7 @@ interface InitializePaymentData {
     reference: string;
     callback_url?: string;
     metadata?: any;
+    bearer?: 'account' | 'subaccount';
 }
 interface VerifyPaymentResponse {
     status: boolean;

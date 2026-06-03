@@ -43,6 +43,19 @@ class CartController {
         });
         if (validItems.length !== cart.items.length) {
             cart.items = validItems;
+        }
+        // Sync stored item prices to current live product prices so the cart total
+        // always reflects what the vendor is actually charging. Users see the updated
+        // price here — on the cart screen — rather than getting a surprise at payment.
+        const priceChanges = [];
+        for (const item of cart.items) {
+            const livePrice = item.product?.price;
+            if (livePrice !== undefined && livePrice !== item.price) {
+                priceChanges.push({ name: item.product.name, oldPrice: item.price, newPrice: livePrice });
+                item.price = livePrice;
+            }
+        }
+        if (validItems.length !== cart.items.length || priceChanges.length > 0) {
             await cart.save();
         }
         res.json({
@@ -52,6 +65,10 @@ class CartController {
                 ...(removedNames.length > 0 && {
                     removedItems: removedNames,
                     removedItemsMessage: `${removedNames.length} item${removedNames.length > 1 ? 's were' : ' was'} removed from your cart because ${removedNames.length > 1 ? 'they are' : 'it is'} no longer available.`,
+                }),
+                ...(priceChanges.length > 0 && {
+                    priceUpdates: priceChanges,
+                    priceUpdatesMessage: `${priceChanges.length} item price${priceChanges.length > 1 ? 's have' : ' has'} been updated by the vendor. Please review your cart total.`,
                 }),
             },
         });
