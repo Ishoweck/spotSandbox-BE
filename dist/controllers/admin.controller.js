@@ -409,7 +409,10 @@ exports.createAdmin = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
 exports.getAllAdmins = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const admins = await User_1.default.find({
         role: {
-            $in: [types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN, types_1.UserRole.FINANCIAL_ADMIN],
+            $in: [
+                types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN, types_1.UserRole.FINANCIAL_ADMIN,
+                types_1.UserRole.SUPPORT_ADMIN, types_1.UserRole.CONTENT_ADMIN, types_1.UserRole.KYC_ADMIN, types_1.UserRole.MARKETING_ADMIN,
+            ],
         },
     })
         .select('-password -otp -resetPasswordToken -resetPasswordExpires -fcmTokens')

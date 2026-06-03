@@ -459,7 +459,10 @@ export const getAllAdmins = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const admins = await User.find({
       role: {
-        $in: [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN],
+        $in: [
+          UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN,
+          UserRole.SUPPORT_ADMIN, UserRole.CONTENT_ADMIN, UserRole.KYC_ADMIN, UserRole.MARKETING_ADMIN,
+        ],
       },
     })
       .select('-password -otp -resetPasswordToken -resetPasswordExpires -fcmTokens')
