@@ -453,7 +453,7 @@ exports.updateAdminRole = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         res.status(404).json({ success: false, message: 'Admin not found' });
         return;
     }
-    const currentAdminRoles = [types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN, types_1.UserRole.FINANCIAL_ADMIN];
+    const currentAdminRoles = [types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN, types_1.UserRole.FINANCIAL_ADMIN, types_1.UserRole.SUPPORT_ADMIN, types_1.UserRole.CONTENT_ADMIN, types_1.UserRole.KYC_ADMIN, types_1.UserRole.MARKETING_ADMIN];
     if (!currentAdminRoles.includes(admin.role)) {
         res.status(400).json({
             success: false,
@@ -493,7 +493,7 @@ exports.removeAdmin = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
     }
-    const adminRoles = [types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN, types_1.UserRole.FINANCIAL_ADMIN];
+    const adminRoles = [types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN, types_1.UserRole.FINANCIAL_ADMIN, types_1.UserRole.SUPPORT_ADMIN, types_1.UserRole.CONTENT_ADMIN, types_1.UserRole.KYC_ADMIN, types_1.UserRole.MARKETING_ADMIN];
     if (!adminRoles.includes(admin.role)) {
         res.status(400).json({
             success: false,

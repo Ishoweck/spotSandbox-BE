@@ -31,7 +31,7 @@ const marketingAdmins = [SA, A, MA];
 // ================================================================
 // DASHBOARD & ANALYTICS
 // ================================================================
-router.get('/dashboard', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getDashboard);
+router.get('/dashboard', (0, auth_1.authorize)(SA, A), admin_controller_1.getDashboard);
 router.get('/analytics/revenue', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.getRevenueAnalytics);
 router.get('/analytics/users', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.getUserAnalytics);
 router.get('/analytics/orders', (0, auth_1.authorize)(SA, A, FA, SPA), admin_controller_1.getOrderAnalytics);

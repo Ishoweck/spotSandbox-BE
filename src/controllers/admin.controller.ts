@@ -511,7 +511,7 @@ export const updateAdminRole = asyncHandler(
       return;
     }
 
-    const currentAdminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN];
+    const currentAdminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN, UserRole.SUPPORT_ADMIN, UserRole.CONTENT_ADMIN, UserRole.KYC_ADMIN, UserRole.MARKETING_ADMIN];
     if (!currentAdminRoles.includes(admin.role)) {
       res.status(400).json({
         success: false,
@@ -559,7 +559,7 @@ export const removeAdmin = asyncHandler(
       return;
     }
 
-    const adminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN];
+    const adminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN, UserRole.SUPPORT_ADMIN, UserRole.CONTENT_ADMIN, UserRole.KYC_ADMIN, UserRole.MARKETING_ADMIN];
     if (!adminRoles.includes(admin.role)) {
       res.status(400).json({
         success: false,
