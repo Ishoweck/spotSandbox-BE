@@ -404,7 +404,10 @@ export const createAdmin = asyncHandler(
       return;
     }
 
-    const validAdminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN];
+    const validAdminRoles = [
+      UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN,
+      UserRole.SUPPORT_ADMIN, UserRole.CONTENT_ADMIN, UserRole.KYC_ADMIN, UserRole.MARKETING_ADMIN,
+    ];
     if (role && !validAdminRoles.includes(role)) {
       res.status(400).json({
         success: false,
@@ -479,7 +482,10 @@ export const updateAdminRole = asyncHandler(
     const { id } = req.params;
     const { role } = req.body;
 
-    const validAdminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN];
+    const validAdminRoles = [
+      UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.FINANCIAL_ADMIN,
+      UserRole.SUPPORT_ADMIN, UserRole.CONTENT_ADMIN, UserRole.KYC_ADMIN, UserRole.MARKETING_ADMIN,
+    ];
     if (!validAdminRoles.includes(role)) {
       res.status(400).json({
         success: false,
