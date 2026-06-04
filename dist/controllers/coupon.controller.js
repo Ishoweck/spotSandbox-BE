@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.couponController = exports.CouponController = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const Additional_1 = require("../models/Additional");
 const User_1 = __importDefault(require("../models/User"));
 const error_1 = require("../middleware/error");
@@ -231,9 +232,17 @@ class CouponController {
     async getMyCoupons(req, res) {
         const userId = req.user.id;
         const now = new Date();
+        const userObjectId = new mongoose_1.default.Types.ObjectId(userId);
+        // Debug: find all coupons that mention this user regardless of other filters
+        const allAssigned = await Additional_1.Coupon.find({ assignedTo: userObjectId }).lean();
+        console.log('[getMyCoupons] userId:', userId);
+        console.log('[getMyCoupons] coupons assigned to user (no date/active filter):', allAssigned.length);
+        allAssigned.forEach((c) => {
+            console.log('  coupon:', c.code, '| isActive:', c.isActive, '| validFrom:', c.validFrom, '| validUntil:', c.validUntil, '| now:', now);
+        });
         const coupons = await Additional_1.Coupon.find({
-            assignedTo: userId,
-            usedBy: { $ne: userId },
+            assignedTo: userObjectId,
+            usedBy: { $nin: [userObjectId] },
             isActive: true,
             validFrom: { $lte: now },
             validUntil: { $gte: now },
@@ -241,6 +250,7 @@ class CouponController {
             .select('code description discountType discountValue minPurchase maxDiscount validUntil')
             .sort({ validUntil: 1 })
             .lean();
+        console.log('[getMyCoupons] final filtered count:', coupons.length);
         res.json({
             success: true,
             data: {
