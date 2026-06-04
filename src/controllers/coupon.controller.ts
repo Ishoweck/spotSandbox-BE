@@ -274,14 +274,6 @@ export class CouponController {
     const now = new Date();
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    // Debug: find all coupons that mention this user regardless of other filters
-    const allAssigned = await Coupon.find({ assignedTo: userObjectId }).lean();
-    console.log('[getMyCoupons] userId:', userId);
-    console.log('[getMyCoupons] coupons assigned to user (no date/active filter):', allAssigned.length);
-    allAssigned.forEach((c: any) => {
-      console.log('  coupon:', c.code, '| isActive:', c.isActive, '| validFrom:', c.validFrom, '| validUntil:', c.validUntil, '| now:', now);
-    });
-
     const coupons = await Coupon.find({
       assignedTo: userObjectId,
       usedBy: { $nin: [userObjectId] },
@@ -292,8 +284,6 @@ export class CouponController {
       .select('code description discountType discountValue minPurchase maxDiscount validUntil')
       .sort({ validUntil: 1 })
       .lean();
-
-    console.log('[getMyCoupons] final filtered count:', coupons.length);
 
     res.json({
       success: true,
