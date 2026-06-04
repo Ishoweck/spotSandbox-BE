@@ -463,8 +463,12 @@
         const senderFullAddress = `${pickupSrc.street}, ${pickupSrc.city}, ${pickupSrc.state}, ${pickupSrc.country || 'Nigeria'}`;
         const receiverFullAddress = `${destination.street}, ${destination.city}, ${destination.state}, Nigeria`;
 
+        const ownerFullName = vendor?.firstName && vendor?.lastName
+          ? `${vendor.firstName} ${vendor.lastName}`
+          : vendor?.firstName || vendor?.lastName || vendorGroup.vendorName;
+
         const senderAddress = {
-          name: hasProductPickup && productPickup!.fullName ? productPickup!.fullName : vendorGroup.vendorName,
+          name: (hasProductPickup && productPickup!.fullName) || ownerFullName,
           phone: (hasProductPickup && productPickup!.phone) || vendorProfile?.businessPhone || vendor?.phone || '+2348000000000',
           email: vendorProfile?.businessEmail || vendor?.email || 'sender@vendorspot.com',
           address: senderFullAddress,
