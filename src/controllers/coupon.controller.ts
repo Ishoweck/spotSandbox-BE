@@ -1,6 +1,8 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest, ApiResponse } from '../types';
 import { Coupon } from '../models/Additional';
+import User from '../models/User';
 import { AppError } from '../middleware/error';
 import { getPaginationMeta } from '../utils/helpers';
 
@@ -31,6 +33,23 @@ export class CouponController {
       throw new AppError('Coupon code already exists', 400);
     }
 
+    // Resolve email strings → ObjectIds so getMyCoupons can query by user ID
+    let assignedToIds: mongoose.Types.ObjectId[] | undefined;
+    if (assignedTo?.length) {
+      const emails: string[] = (Array.isArray(assignedTo) ? assignedTo : [assignedTo])
+        .map((e: string) => e.toLowerCase().trim())
+        .filter(Boolean);
+      if (emails.length) {
+        const users = await User.find({ email: { $in: emails } }).select('_id email').lean();
+        const foundEmails = users.map((u) => u.email);
+        const missing = emails.filter((e) => !foundEmails.includes(e));
+        if (missing.length) {
+          throw new AppError(`No account found for: ${missing.join(', ')}`, 400);
+        }
+        assignedToIds = users.map((u) => u._id as mongoose.Types.ObjectId);
+      }
+    }
+
     const coupon = await Coupon.create({
       code: code.toUpperCase(),
       description,
@@ -44,7 +63,7 @@ export class CouponController {
       applicableProducts,
       applicableCategories,
       excludedProducts,
-      assignedTo: assignedTo?.length ? assignedTo : undefined,
+      assignedTo: assignedToIds,
     });
 
     res.status(201).json({
@@ -194,18 +213,9 @@ export class CouponController {
     }
 
     const allowedUpdates = [
-      'description',
-      'discountType',
-      'discountValue',
-      'minPurchase',
-      'maxDiscount',
-      'usageLimit',
-      'validFrom',
-      'validUntil',
-      'isActive',
-      'applicableProducts',
-      'applicableCategories',
-      'excludedProducts',
+      'description', 'discountType', 'discountValue', 'minPurchase', 'maxDiscount',
+      'usageLimit', 'validFrom', 'validUntil', 'isActive',
+      'applicableProducts', 'applicableCategories', 'excludedProducts',
     ];
 
     Object.keys(req.body).forEach((key) => {
@@ -213,6 +223,21 @@ export class CouponController {
         (coupon as any)[key] = req.body[key];
       }
     });
+
+    // Resolve assignedTo emails → ObjectIds if provided
+    if (req.body.assignedTo !== undefined) {
+      const raw: string[] = Array.isArray(req.body.assignedTo) ? req.body.assignedTo : [req.body.assignedTo];
+      const emails = raw.map((e: string) => e.toLowerCase().trim()).filter(Boolean);
+      if (emails.length) {
+        const users = await User.find({ email: { $in: emails } }).select('_id email').lean();
+        const foundEmails = users.map((u) => u.email);
+        const missing = emails.filter((e) => !foundEmails.includes(e));
+        if (missing.length) throw new AppError(`No account found for: ${missing.join(', ')}`, 400);
+        coupon.assignedTo = users.map((u) => u._id as mongoose.Types.ObjectId);
+      } else {
+        coupon.assignedTo = [];
+      }
+    }
 
     await coupon.save();
 

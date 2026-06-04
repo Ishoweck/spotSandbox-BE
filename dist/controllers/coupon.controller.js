@@ -1,7 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.couponController = exports.CouponController = void 0;
 const Additional_1 = require("../models/Additional");
+const User_1 = __importDefault(require("../models/User"));
 const error_1 = require("../middleware/error");
 const helpers_1 = require("../utils/helpers");
 class CouponController {
@@ -14,6 +18,22 @@ class CouponController {
         const existing = await Additional_1.Coupon.findOne({ code: code.toUpperCase() });
         if (existing) {
             throw new error_1.AppError('Coupon code already exists', 400);
+        }
+        // Resolve email strings → ObjectIds so getMyCoupons can query by user ID
+        let assignedToIds;
+        if (assignedTo?.length) {
+            const emails = (Array.isArray(assignedTo) ? assignedTo : [assignedTo])
+                .map((e) => e.toLowerCase().trim())
+                .filter(Boolean);
+            if (emails.length) {
+                const users = await User_1.default.find({ email: { $in: emails } }).select('_id email').lean();
+                const foundEmails = users.map((u) => u.email);
+                const missing = emails.filter((e) => !foundEmails.includes(e));
+                if (missing.length) {
+                    throw new error_1.AppError(`No account found for: ${missing.join(', ')}`, 400);
+                }
+                assignedToIds = users.map((u) => u._id);
+            }
         }
         const coupon = await Additional_1.Coupon.create({
             code: code.toUpperCase(),
@@ -28,7 +48,7 @@ class CouponController {
             applicableProducts,
             applicableCategories,
             excludedProducts,
-            assignedTo: assignedTo?.length ? assignedTo : undefined,
+            assignedTo: assignedToIds,
         });
         res.status(201).json({
             success: true,
@@ -158,24 +178,31 @@ class CouponController {
             throw new error_1.AppError('Coupon not found', 404);
         }
         const allowedUpdates = [
-            'description',
-            'discountType',
-            'discountValue',
-            'minPurchase',
-            'maxDiscount',
-            'usageLimit',
-            'validFrom',
-            'validUntil',
-            'isActive',
-            'applicableProducts',
-            'applicableCategories',
-            'excludedProducts',
+            'description', 'discountType', 'discountValue', 'minPurchase', 'maxDiscount',
+            'usageLimit', 'validFrom', 'validUntil', 'isActive',
+            'applicableProducts', 'applicableCategories', 'excludedProducts',
         ];
         Object.keys(req.body).forEach((key) => {
             if (allowedUpdates.includes(key)) {
                 coupon[key] = req.body[key];
             }
         });
+        // Resolve assignedTo emails → ObjectIds if provided
+        if (req.body.assignedTo !== undefined) {
+            const raw = Array.isArray(req.body.assignedTo) ? req.body.assignedTo : [req.body.assignedTo];
+            const emails = raw.map((e) => e.toLowerCase().trim()).filter(Boolean);
+            if (emails.length) {
+                const users = await User_1.default.find({ email: { $in: emails } }).select('_id email').lean();
+                const foundEmails = users.map((u) => u.email);
+                const missing = emails.filter((e) => !foundEmails.includes(e));
+                if (missing.length)
+                    throw new error_1.AppError(`No account found for: ${missing.join(', ')}`, 400);
+                coupon.assignedTo = users.map((u) => u._id);
+            }
+            else {
+                coupon.assignedTo = [];
+            }
+        }
         await coupon.save();
         res.json({
             success: true,

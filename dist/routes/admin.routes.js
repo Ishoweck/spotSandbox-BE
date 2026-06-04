@@ -31,7 +31,7 @@ const marketingAdmins = [SA, A, MA];
 // ================================================================
 // DASHBOARD & ANALYTICS
 // ================================================================
-router.get('/dashboard', (0, auth_1.authorize)(SA), admin_controller_1.getDashboard);
+router.get('/dashboard', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getDashboard);
 router.get('/analytics/revenue', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.getRevenueAnalytics);
 router.get('/analytics/users', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.getUserAnalytics);
 router.get('/analytics/orders', (0, auth_1.authorize)(SA, A, FA, SPA), admin_controller_1.getOrderAnalytics);
@@ -157,7 +157,7 @@ router.get('/reports/products', (0, auth_1.authorize)(SA, A, FA, CA), admin_cont
 // ================================================================
 // MISC
 // ================================================================
-router.get('/activity-log', (0, auth_1.authorize)(SA), admin_controller_1.getActivityLog);
+router.get('/activity-log', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getActivityLog);
 router.get('/search', (0, auth_1.authorize)(...allAdmins), admin_controller_1.globalSearch);
 // ================================================================
 // REWARDS & POINTS MANAGEMENT — general + marketing

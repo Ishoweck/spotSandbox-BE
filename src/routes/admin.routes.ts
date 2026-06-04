@@ -160,7 +160,7 @@ const marketingAdmins = [SA, A, MA];
 // ================================================================
 // DASHBOARD & ANALYTICS
 // ================================================================
-router.get('/dashboard', authorize(SA), getDashboard);
+router.get('/dashboard', authorize(...allAdmins), getDashboard);
 router.get('/analytics/revenue', authorize(SA, A, FA), getRevenueAnalytics);
 router.get('/analytics/users', authorize(SA, A, SPA), getUserAnalytics);
 router.get('/analytics/orders', authorize(SA, A, FA, SPA), getOrderAnalytics);
@@ -302,7 +302,7 @@ router.get('/reports/products', authorize(SA, A, FA, CA), getProductReport);
 // ================================================================
 // MISC
 // ================================================================
-router.get('/activity-log', authorize(SA), getActivityLog);
+router.get('/activity-log', authorize(...allAdmins), getActivityLog);
 router.get('/search', authorize(...allAdmins), globalSearch);
 
 // ================================================================
