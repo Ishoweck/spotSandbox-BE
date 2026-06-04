@@ -227,7 +227,7 @@
      * Get delivery rates
      */
     async getDeliveryRates(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-      const { city, state, street, fullName, phone } = req.query;
+      const { city, state, street, fullName, phone, receiverAddressCode } = req.query;
 
       if (!city || !state) {
         throw new AppError('City and state are required', 400);
@@ -308,12 +308,14 @@
         }
 
         // Create destination address object
+        const parsedReceiverCode = receiverAddressCode ? parseInt(receiverAddressCode as string, 10) : undefined;
         const destinationAddress = {
           street: (street as string) || `${city} Area`,
           city: city as string,
           state: state as string,
           fullName: (fullName as string) || 'Customer',
           phone: (phone as string) || '+2348000000000',
+          addressCode: parsedReceiverCode,
         };
 
         // Calculate shipping rates
@@ -321,7 +323,7 @@
         const vendorRates = await Promise.all(
           vendorGroups.map(async (group) => {
             const result = await this.getVendorDeliveryRates(
-              group, 
+              group,
               destinationAddress
             );
             if (result.success) {
@@ -402,6 +404,7 @@
         state: string;
         fullName: string;
         phone: string;
+        addressCode?: number;
       }
     ): Promise<VendorDeliveryRate> {
       const result: VendorDeliveryRate = {
@@ -467,6 +470,11 @@
           ? `${vendor.firstName} ${vendor.lastName}`
           : vendor?.firstName || vendor?.lastName || vendorGroup.vendorName;
 
+        // Use stored Shipbubble address codes to skip redundant validation calls
+        const senderStoredCode: number | undefined = hasProductPickup
+          ? (productPickup as any).shipBubble?.addressCode
+          : (vendorProfile?.businessAddress as any)?.shipBubble?.addressCode;
+
         const senderAddress = {
           name: (hasProductPickup && productPickup!.fullName) || ownerFullName,
           phone: (hasProductPickup && productPickup!.phone) || vendorProfile?.businessPhone || vendor?.phone || '+2348000000000',
@@ -513,8 +521,10 @@
           senderAddress,
           receiverAddress,
           packageItems,
-          undefined, // use default dimensions
-          categoryId  // ✅ Pass correct category instead of always Electronics
+          undefined,
+          categoryId,
+          senderStoredCode,        // skip sender validation if stored
+          destination.addressCode, // skip receiver validation if stored
         );
 
         if (ratesResponse.status === 'success' && ratesResponse.data?.couriers) {

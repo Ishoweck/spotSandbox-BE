@@ -174,60 +174,49 @@ export class ShipBubbleService {
     receiverAddress: ShipBubbleAddress,
     packageItems: PackageItem[],
     packageDimension?: { length: number; width: number; height: number },
-    categoryId?: number // Allow custom category
+    categoryId?: number,
+    senderAddressCode?: number,   // skip validation if already stored
+    receiverAddressCode?: number, // skip validation if already stored
   ) {
     try {
       logger.info('📦 ============================================');
       logger.info('📦 FETCHING SHIPBUBBLE DELIVERY RATES');
       logger.info('📦 ============================================');
 
-      logger.info('🔍 ================ SENDER ADDRESS ================');
-      logger.info('📤 Sender Details:', {
-        name: senderAddress.name,
-        email: senderAddress.email,
-        phone: senderAddress.phone,
-        address: senderAddress.address,
-        latitude: senderAddress.latitude,
-        longitude: senderAddress.longitude,
-      });
-
-      logger.info('🔍 ================ RECEIVER ADDRESS ================');
-      logger.info('📥 Receiver Details:', {
-        name: receiverAddress.name,
-        email: receiverAddress.email,
-        phone: receiverAddress.phone,
-        address: receiverAddress.address,
-        latitude: receiverAddress.latitude,
-        longitude: receiverAddress.longitude,
-      });
-
-      logger.info('🔍 ================================================');
-
-      // Step 1: Validate sender and receiver addresses
-      logger.info('🔄 Starting address validation...');
-      
+      // Step 1: Resolve sender and receiver address codes
+      // Use stored codes when available to avoid redundant Shipbubble API calls
       let senderValidated: ValidatedAddress;
       let receiverValidated: ValidatedAddress;
 
-      try {
-        logger.info('📍 Validating SENDER address...');
-        senderValidated = await this.validateAddress(senderAddress);
-        logger.info('✅ Sender validated:', senderValidated);
-      } catch (error: any) {
-        logger.error('❌ SENDER validation failed:', error.message);
-        throw error;
+      if (senderAddressCode) {
+        logger.info('✅ Using stored sender address code:', senderAddressCode);
+        senderValidated = { address_code: senderAddressCode, formatted_address: senderAddress.address, city: '', state: '', country: 'Nigeria' };
+      } else {
+        try {
+          logger.info('📍 Validating SENDER address (no stored code)...');
+          senderValidated = await this.validateAddress(senderAddress);
+          logger.info('✅ Sender validated:', senderValidated.address_code);
+        } catch (error: any) {
+          logger.error('❌ SENDER validation failed:', error.message);
+          throw error;
+        }
       }
 
-      try {
-        logger.info('📍 Validating RECEIVER address...');
-        receiverValidated = await this.validateAddress(receiverAddress);
-        logger.info('✅ Receiver validated:', receiverValidated);
-      } catch (error: any) {
-        logger.error('❌ RECEIVER validation failed:', error.message);
-        throw error;
+      if (receiverAddressCode) {
+        logger.info('✅ Using stored receiver address code:', receiverAddressCode);
+        receiverValidated = { address_code: receiverAddressCode, formatted_address: receiverAddress.address, city: '', state: '', country: 'Nigeria' };
+      } else {
+        try {
+          logger.info('📍 Validating RECEIVER address (no stored code)...');
+          receiverValidated = await this.validateAddress(receiverAddress);
+          logger.info('✅ Receiver validated:', receiverValidated.address_code);
+        } catch (error: any) {
+          logger.error('❌ RECEIVER validation failed:', error.message);
+          throw error;
+        }
       }
 
-      logger.info('✅ Both addresses validated:', {
+      logger.info('✅ Both addresses resolved:', {
         senderCode: senderValidated.address_code,
         receiverCode: receiverValidated.address_code,
       });

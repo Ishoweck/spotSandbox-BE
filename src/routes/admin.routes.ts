@@ -142,6 +142,12 @@ const router = Router();
 // All admin routes require authentication
 router.use(authenticate);
 
+// Never cache admin API responses — always return fresh data
+router.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Audit all admin actions (POST, PUT, PATCH, DELETE)
 router.use(auditMiddleware);
 

@@ -231,7 +231,7 @@ class OrderController {
      * Get delivery rates
      */
     async getDeliveryRates(req, res) {
-        const { city, state, street, fullName, phone } = req.query;
+        const { city, state, street, fullName, phone, receiverAddressCode } = req.query;
         if (!city || !state) {
             throw new error_1.AppError('City and state are required', 400);
         }
@@ -300,12 +300,14 @@ class OrderController {
                 });
             }
             // Create destination address object
+            const parsedReceiverCode = receiverAddressCode ? parseInt(receiverAddressCode, 10) : undefined;
             const destinationAddress = {
                 street: street || `${city} Area`,
                 city: city,
                 state: state,
                 fullName: fullName || 'Customer',
                 phone: phone || '+2348000000000',
+                addressCode: parsedReceiverCode,
             };
             // Calculate shipping rates
             let shipBubbleSuccess = false;
@@ -426,6 +428,10 @@ class OrderController {
             const ownerFullName = vendor?.firstName && vendor?.lastName
                 ? `${vendor.firstName} ${vendor.lastName}`
                 : vendor?.firstName || vendor?.lastName || vendorGroup.vendorName;
+            // Use stored Shipbubble address codes to skip redundant validation calls
+            const senderStoredCode = hasProductPickup
+                ? productPickup.shipBubble?.addressCode
+                : vendorProfile?.businessAddress?.shipBubble?.addressCode;
             const senderAddress = {
                 name: (hasProductPickup && productPickup.fullName) || ownerFullName,
                 phone: (hasProductPickup && productPickup.phone) || vendorProfile?.businessPhone || vendor?.phone || '+2348000000000',
@@ -462,9 +468,8 @@ class OrderController {
                 categoryId,
                 packageItems,
             });
-            const ratesResponse = await shipbubble_service_1.shipBubbleService.getDeliveryRates(senderAddress, receiverAddress, packageItems, undefined, // use default dimensions
-            categoryId // ✅ Pass correct category instead of always Electronics
-            );
+            const ratesResponse = await shipbubble_service_1.shipBubbleService.getDeliveryRates(senderAddress, receiverAddress, packageItems, undefined, categoryId, senderStoredCode, // skip sender validation if stored
+            destination.addressCode);
             if (ratesResponse.status === 'success' && ratesResponse.data?.couriers) {
                 logger_1.logger.info(`✅ Got ${ratesResponse.data.couriers.length} courier options from ShipBubble`);
                 ratesResponse.data.couriers.forEach((courier, index) => {

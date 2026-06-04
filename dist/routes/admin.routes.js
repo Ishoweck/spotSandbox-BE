@@ -11,6 +11,11 @@ const webhook_controller_1 = require("../controllers/webhook.controller");
 const router = (0, express_1.Router)();
 // All admin routes require authentication
 router.use(auth_1.authenticate);
+// Never cache admin API responses — always return fresh data
+router.use((_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+});
 // Audit all admin actions (POST, PUT, PATCH, DELETE)
 router.use(audit_1.auditMiddleware);
 // ── Role groups ──────────────────────────────────────────────────────────────

@@ -44,7 +44,8 @@ export declare class ShipBubbleService {
         length: number;
         width: number;
         height: number;
-    }, categoryId?: number): Promise<any>;
+    }, categoryId?: number, senderAddressCode?: number, // skip validation if already stored
+    receiverAddressCode?: number): Promise<any>;
     /**
      * Get package categories
      */

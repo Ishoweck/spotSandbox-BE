@@ -110,54 +110,47 @@ class ShipBubbleService {
      * Get delivery rates using ShipBubble's fetch_rates endpoint
      * ✅ FIXED: Removed hardcoded service_type to get ALL courier types
      */
-    async getDeliveryRates(senderAddress, receiverAddress, packageItems, packageDimension, categoryId // Allow custom category
-    ) {
+    async getDeliveryRates(senderAddress, receiverAddress, packageItems, packageDimension, categoryId, senderAddressCode, // skip validation if already stored
+    receiverAddressCode) {
         try {
             logger_1.logger.info('📦 ============================================');
             logger_1.logger.info('📦 FETCHING SHIPBUBBLE DELIVERY RATES');
             logger_1.logger.info('📦 ============================================');
-            logger_1.logger.info('🔍 ================ SENDER ADDRESS ================');
-            logger_1.logger.info('📤 Sender Details:', {
-                name: senderAddress.name,
-                email: senderAddress.email,
-                phone: senderAddress.phone,
-                address: senderAddress.address,
-                latitude: senderAddress.latitude,
-                longitude: senderAddress.longitude,
-            });
-            logger_1.logger.info('🔍 ================ RECEIVER ADDRESS ================');
-            logger_1.logger.info('📥 Receiver Details:', {
-                name: receiverAddress.name,
-                email: receiverAddress.email,
-                phone: receiverAddress.phone,
-                address: receiverAddress.address,
-                latitude: receiverAddress.latitude,
-                longitude: receiverAddress.longitude,
-            });
-            logger_1.logger.info('🔍 ================================================');
-            // Step 1: Validate sender and receiver addresses
-            logger_1.logger.info('🔄 Starting address validation...');
+            // Step 1: Resolve sender and receiver address codes
+            // Use stored codes when available to avoid redundant Shipbubble API calls
             let senderValidated;
             let receiverValidated;
-            try {
-                logger_1.logger.info('📍 Validating SENDER address...');
-                senderValidated = await this.validateAddress(senderAddress);
-                logger_1.logger.info('✅ Sender validated:', senderValidated);
+            if (senderAddressCode) {
+                logger_1.logger.info('✅ Using stored sender address code:', senderAddressCode);
+                senderValidated = { address_code: senderAddressCode, formatted_address: senderAddress.address, city: '', state: '', country: 'Nigeria' };
             }
-            catch (error) {
-                logger_1.logger.error('❌ SENDER validation failed:', error.message);
-                throw error;
+            else {
+                try {
+                    logger_1.logger.info('📍 Validating SENDER address (no stored code)...');
+                    senderValidated = await this.validateAddress(senderAddress);
+                    logger_1.logger.info('✅ Sender validated:', senderValidated.address_code);
+                }
+                catch (error) {
+                    logger_1.logger.error('❌ SENDER validation failed:', error.message);
+                    throw error;
+                }
             }
-            try {
-                logger_1.logger.info('📍 Validating RECEIVER address...');
-                receiverValidated = await this.validateAddress(receiverAddress);
-                logger_1.logger.info('✅ Receiver validated:', receiverValidated);
+            if (receiverAddressCode) {
+                logger_1.logger.info('✅ Using stored receiver address code:', receiverAddressCode);
+                receiverValidated = { address_code: receiverAddressCode, formatted_address: receiverAddress.address, city: '', state: '', country: 'Nigeria' };
             }
-            catch (error) {
-                logger_1.logger.error('❌ RECEIVER validation failed:', error.message);
-                throw error;
+            else {
+                try {
+                    logger_1.logger.info('📍 Validating RECEIVER address (no stored code)...');
+                    receiverValidated = await this.validateAddress(receiverAddress);
+                    logger_1.logger.info('✅ Receiver validated:', receiverValidated.address_code);
+                }
+                catch (error) {
+                    logger_1.logger.error('❌ RECEIVER validation failed:', error.message);
+                    throw error;
+                }
             }
-            logger_1.logger.info('✅ Both addresses validated:', {
+            logger_1.logger.info('✅ Both addresses resolved:', {
                 senderCode: senderValidated.address_code,
                 receiverCode: receiverValidated.address_code,
             });

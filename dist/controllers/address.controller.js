@@ -221,6 +221,7 @@ class AddressController {
             if (postalCode !== undefined)
                 address.postalCode = postalCode;
         }
+        user.markModified('addresses');
         await user.save();
         res.json({
             success: true,
