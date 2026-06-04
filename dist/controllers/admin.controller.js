@@ -1200,17 +1200,20 @@ exports.updateVendorAddress = (0, ayncHandler_1.asyncHandler)(async (req, res) =
  */
 exports.validateVendorAddress = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const { id } = req.params;
-    const vendor = await VendorProfile_1.default.findById(id).populate('user', 'email');
+    const vendor = await VendorProfile_1.default.findById(id).populate('user', 'firstName lastName email');
     if (!vendor) {
         res.status(404).json({ success: false, message: 'Vendor not found' });
         return;
     }
     const { street, city, state, country } = vendor.businessAddress;
     const ownerUser = vendor.user;
+    const ownerFullName = ownerUser?.firstName && ownerUser?.lastName
+        ? `${ownerUser.firstName} ${ownerUser.lastName}`
+        : ownerUser?.firstName || ownerUser?.lastName || vendor.businessName;
     const fullAddress = `${street}, ${city}, ${state}, ${country || 'Nigeria'}`;
     try {
         const result = await shipbubble_service_1.shipBubbleService.validateAddress({
-            name: vendor.businessName,
+            name: ownerFullName,
             email: ownerUser?.email || vendor.businessEmail,
             phone: vendor.businessPhone,
             address: fullAddress,

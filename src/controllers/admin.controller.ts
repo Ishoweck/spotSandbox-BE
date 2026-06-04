@@ -1434,7 +1434,7 @@ export const validateVendorAddress = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const { id } = req.params;
 
-    const vendor = await VendorProfile.findById(id).populate('user', 'email');
+    const vendor = await VendorProfile.findById(id).populate('user', 'firstName lastName email');
     if (!vendor) {
       res.status(404).json({ success: false, message: 'Vendor not found' });
       return;
@@ -1442,11 +1442,14 @@ export const validateVendorAddress = asyncHandler(
 
     const { street, city, state, country } = vendor.businessAddress;
     const ownerUser = vendor.user as any;
+    const ownerFullName = ownerUser?.firstName && ownerUser?.lastName
+      ? `${ownerUser.firstName} ${ownerUser.lastName}`
+      : ownerUser?.firstName || ownerUser?.lastName || vendor.businessName;
     const fullAddress = `${street}, ${city}, ${state}, ${country || 'Nigeria'}`;
 
     try {
       const result = await shipBubbleService.validateAddress({
-        name: vendor.businessName,
+        name: ownerFullName,
         email: ownerUser?.email || vendor.businessEmail,
         phone: vendor.businessPhone,
         address: fullAddress,
