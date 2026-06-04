@@ -156,6 +156,10 @@ router.get('/reports/sales', (0, auth_1.authorize)(SA, A, FA), admin_controller_
 router.get('/reports/vendors', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.getVendorReport);
 router.get('/reports/products', (0, auth_1.authorize)(SA, A, FA, CA), admin_controller_1.getProductReport);
 // ================================================================
+// ADDRESS MANAGEMENT
+// ================================================================
+router.get('/addresses', (0, auth_1.authorize)(...kycAdmins), admin_controller_1.getAllAddresses);
+// ================================================================
 // MISC
 // ================================================================
 router.get('/activity-log', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getActivityLog);

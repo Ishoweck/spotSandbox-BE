@@ -111,6 +111,9 @@ import {
   getVendorReport,
   getProductReport,
 
+  // Address Management
+  getAllAddresses,
+
   // Misc
   getActivityLog,
   globalSearch,
@@ -300,6 +303,11 @@ router.get('/challenges/:id/leaderboard', authorize(...marketingAdmins), getChal
 router.get('/reports/sales', authorize(SA, A, FA), getSalesReport);
 router.get('/reports/vendors', authorize(SA, A, FA), getVendorReport);
 router.get('/reports/products', authorize(SA, A, FA, CA), getProductReport);
+
+// ================================================================
+// ADDRESS MANAGEMENT
+// ================================================================
+router.get('/addresses', authorize(...kycAdmins), getAllAddresses);
 
 // ================================================================
 // MISC

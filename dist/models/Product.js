@@ -162,6 +162,7 @@ const productSchema = new mongoose_1.Schema({
             formattedAddress: String,
             latitude: Number,
             longitude: Number,
+            validatedAt: Date,
         },
     },
     digitalFile: {

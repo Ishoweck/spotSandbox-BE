@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.validateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = void 0;
+exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.getAllAddresses = exports.validateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -1514,6 +1514,7 @@ exports.validateProductPickupAddress = (0, ayncHandler_1.asyncHandler)(async (re
             formattedAddress: result.formatted_address,
             latitude: result.latitude,
             longitude: result.longitude,
+            validatedAt: new Date(),
         };
         await product.save();
         res.json({
@@ -1529,6 +1530,92 @@ exports.validateProductPickupAddress = (0, ayncHandler_1.asyncHandler)(async (re
             message: 'Address validation failed. Please check the pickup address details.',
         });
     }
+});
+// ================================================================
+// ADDRESS MANAGEMENT
+// ================================================================
+/**
+ * GET /admin/addresses
+ * Unified view of all vendor business addresses and product pickup addresses.
+ * Uses $unionWith to merge both collections into a single paginated list.
+ */
+exports.getAllAddresses = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    const { type, validated, search } = req.query;
+    const postMatch = {};
+    if (type === 'vendor_business' || type === 'product_pickup')
+        postMatch.type = type;
+    if (validated === 'true')
+        postMatch.isValidated = true;
+    if (validated === 'false')
+        postMatch.isValidated = false;
+    if (search) {
+        const re = new RegExp(escapeRegex(search), 'i');
+        postMatch.$or = [{ ownerName: re }, { city: re }, { state: re }, { street: re }];
+    }
+    const basePipeline = [
+        // Vendor business addresses
+        {
+            $project: {
+                type: { $literal: 'vendor_business' },
+                ownerName: '$businessName',
+                street: '$businessAddress.street',
+                city: '$businessAddress.city',
+                state: '$businessAddress.state',
+                country: '$businessAddress.country',
+                fullName: { $literal: null },
+                phone: { $literal: null },
+                isValidated: { $cond: [{ $gt: ['$businessAddress.shipBubble.addressCode', null] }, true, false] },
+                addressCode: '$businessAddress.shipBubble.addressCode',
+                formattedAddress: '$businessAddress.shipBubble.formattedAddress',
+                validatedAt: '$businessAddress.shipBubble.validatedAt',
+            },
+        },
+        // Product pickup addresses
+        {
+            $unionWith: {
+                coll: 'products',
+                pipeline: [
+                    { $match: { productType: 'physical', 'pickupAddress.street': { $exists: true, $ne: '' } } },
+                    {
+                        $project: {
+                            type: { $literal: 'product_pickup' },
+                            ownerName: '$name',
+                            street: '$pickupAddress.street',
+                            city: '$pickupAddress.city',
+                            state: '$pickupAddress.state',
+                            country: '$pickupAddress.country',
+                            fullName: '$pickupAddress.fullName',
+                            phone: '$pickupAddress.phone',
+                            isValidated: { $cond: [{ $gt: ['$pickupAddress.shipBubble.addressCode', null] }, true, false] },
+                            addressCode: '$pickupAddress.shipBubble.addressCode',
+                            formattedAddress: '$pickupAddress.shipBubble.formattedAddress',
+                            validatedAt: '$pickupAddress.shipBubble.validatedAt',
+                        },
+                    },
+                ],
+            },
+        },
+    ];
+    if (Object.keys(postMatch).length > 0)
+        basePipeline.push({ $match: postMatch });
+    const [countResult, addresses] = await Promise.all([
+        VendorProfile_1.default.aggregate([...basePipeline, { $count: 'total' }]),
+        VendorProfile_1.default.aggregate([
+            ...basePipeline,
+            { $sort: { isValidated: 1, _id: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+        ]),
+    ]);
+    const total = countResult[0]?.total ?? 0;
+    res.json({
+        success: true,
+        data: { addresses },
+        meta: (0, helpers_1.getPaginationMeta)(total, page, limit),
+    });
 });
 // ================================================================
 // ORDER MANAGEMENT

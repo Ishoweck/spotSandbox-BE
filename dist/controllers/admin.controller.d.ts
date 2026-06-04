@@ -145,6 +145,12 @@ export declare const deleteProduct: (req: import("express").Request, res: Respon
  */
 export declare const validateProductPickupAddress: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * GET /admin/addresses
+ * Unified view of all vendor business addresses and product pickup addresses.
+ * Uses $unionWith to merge both collections into a single paginated list.
+ */
+export declare const getAllAddresses: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * GET /admin/orders
  * List all orders with filtering
  */

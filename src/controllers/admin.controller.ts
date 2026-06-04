@@ -1824,6 +1824,7 @@ export const validateProductPickupAddress = asyncHandler(
         formattedAddress: result.formatted_address,
         latitude: result.latitude,
         longitude: result.longitude,
+        validatedAt: new Date(),
       };
 
       await product.save();
@@ -1840,6 +1841,98 @@ export const validateProductPickupAddress = asyncHandler(
         message: 'Address validation failed. Please check the pickup address details.',
       });
     }
+  }
+);
+
+// ================================================================
+// ADDRESS MANAGEMENT
+// ================================================================
+
+/**
+ * GET /admin/addresses
+ * Unified view of all vendor business addresses and product pickup addresses.
+ * Uses $unionWith to merge both collections into a single paginated list.
+ */
+export const getAllAddresses = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const page  = parseInt(req.query.page  as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const skip  = (page - 1) * limit;
+    const { type, validated, search } = req.query;
+
+    const postMatch: any = {};
+    if (type === 'vendor_business' || type === 'product_pickup') postMatch.type = type;
+    if (validated === 'true')  postMatch.isValidated = true;
+    if (validated === 'false') postMatch.isValidated = false;
+    if (search) {
+      const re = new RegExp(escapeRegex(search), 'i');
+      postMatch.$or = [{ ownerName: re }, { city: re }, { state: re }, { street: re }];
+    }
+
+    const basePipeline: any[] = [
+      // Vendor business addresses
+      {
+        $project: {
+          type:             { $literal: 'vendor_business' },
+          ownerName:        '$businessName',
+          street:           '$businessAddress.street',
+          city:             '$businessAddress.city',
+          state:            '$businessAddress.state',
+          country:          '$businessAddress.country',
+          fullName:         { $literal: null },
+          phone:            { $literal: null },
+          isValidated:      { $cond: [{ $gt: ['$businessAddress.shipBubble.addressCode', null] }, true, false] },
+          addressCode:      '$businessAddress.shipBubble.addressCode',
+          formattedAddress: '$businessAddress.shipBubble.formattedAddress',
+          validatedAt:      '$businessAddress.shipBubble.validatedAt',
+        },
+      },
+      // Product pickup addresses
+      {
+        $unionWith: {
+          coll: 'products',
+          pipeline: [
+            { $match: { productType: 'physical', 'pickupAddress.street': { $exists: true, $ne: '' } } },
+            {
+              $project: {
+                type:             { $literal: 'product_pickup' },
+                ownerName:        '$name',
+                street:           '$pickupAddress.street',
+                city:             '$pickupAddress.city',
+                state:            '$pickupAddress.state',
+                country:          '$pickupAddress.country',
+                fullName:         '$pickupAddress.fullName',
+                phone:            '$pickupAddress.phone',
+                isValidated:      { $cond: [{ $gt: ['$pickupAddress.shipBubble.addressCode', null] }, true, false] },
+                addressCode:      '$pickupAddress.shipBubble.addressCode',
+                formattedAddress: '$pickupAddress.shipBubble.formattedAddress',
+                validatedAt:      '$pickupAddress.shipBubble.validatedAt',
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    if (Object.keys(postMatch).length > 0) basePipeline.push({ $match: postMatch });
+
+    const [countResult, addresses] = await Promise.all([
+      VendorProfile.aggregate([...basePipeline, { $count: 'total' }]),
+      VendorProfile.aggregate([
+        ...basePipeline,
+        { $sort: { isValidated: 1, _id: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+      ]),
+    ]);
+
+    const total = countResult[0]?.total ?? 0;
+
+    res.json({
+      success: true,
+      data: { addresses },
+      meta: getPaginationMeta(total, page, limit),
+    });
   }
 );
 

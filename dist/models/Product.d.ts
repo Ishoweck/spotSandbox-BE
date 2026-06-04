@@ -43,6 +43,7 @@ export interface IProduct extends Document {
             formattedAddress?: string;
             latitude?: number;
             longitude?: number;
+            validatedAt?: Date;
         };
     };
     digitalFile?: {

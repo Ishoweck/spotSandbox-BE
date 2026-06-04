@@ -44,6 +44,7 @@ export interface IProduct extends Document {
       formattedAddress?: string;
       latitude?: number;
       longitude?: number;
+      validatedAt?: Date;
     };
   };
   digitalFile?: {
@@ -213,6 +214,7 @@ const productSchema = new Schema<IProduct>({
       formattedAddress: String,
       latitude: Number,
       longitude: Number,
+      validatedAt: Date,
     },
   },
   digitalFile: {
