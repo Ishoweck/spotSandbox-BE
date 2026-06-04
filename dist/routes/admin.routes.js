@@ -31,7 +31,7 @@ const marketingAdmins = [SA, A, MA];
 // ================================================================
 // DASHBOARD & ANALYTICS
 // ================================================================
-router.get('/dashboard', (0, auth_1.authorize)(SA, A), admin_controller_1.getDashboard);
+router.get('/dashboard', (0, auth_1.authorize)(SA), admin_controller_1.getDashboard);
 router.get('/analytics/revenue', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.getRevenueAnalytics);
 router.get('/analytics/users', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.getUserAnalytics);
 router.get('/analytics/orders', (0, auth_1.authorize)(SA, A, FA, SPA), admin_controller_1.getOrderAnalytics);
@@ -59,6 +59,9 @@ router.put('/vendors/:id/verify', (0, auth_1.authorize)(SA, A, KA), admin_contro
 router.put('/vendors/:id/status', (0, auth_1.authorize)(SA, A, KA), admin_controller_1.toggleVendorStatus);
 router.put('/vendors/:id/premium', (0, auth_1.authorize)(SA, A), admin_controller_1.toggleVendorPremium);
 router.put('/vendors/:id/commission', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.updateVendorCommission);
+router.put('/vendors/:id/address', (0, auth_1.authorize)(SA, A, KA), admin_controller_1.updateVendorAddress);
+router.post('/vendors/:id/address/validate', (0, auth_1.authorize)(SA, A, KA), admin_controller_1.validateVendorAddress);
+router.put('/vendors/:id/kyc/:docIndex', (0, auth_1.authorize)(SA, A, KA), admin_controller_1.updateVendorKycDocument);
 router.post('/vendors/:id/wallet/resolve', (0, auth_1.authorize)(SA), admin_controller_1.resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', (0, auth_1.authorize)(SA), admin_controller_1.fixLegacyCommissionRates);
 // ================================================================
@@ -125,12 +128,12 @@ router.delete('/categories/:id', (0, auth_1.authorize)(SA, A), admin_controller_
 router.post('/notifications/broadcast', (0, auth_1.authorize)(...marketingAdmins), admin_controller_1.broadcastNotification);
 router.get('/notifications', (0, auth_1.authorize)(...marketingAdmins), admin_controller_1.getNotificationHistory);
 // ================================================================
-// ACCOUNT DELETION MANAGEMENT — general + support
+// ACCOUNT DELETION MANAGEMENT — super admin only
 // ================================================================
-router.get('/account-deletions', (0, auth_1.authorize)(...supportAdmins), admin_controller_1.getAccountDeletionRequests);
-router.post('/account-deletions', (0, auth_1.authorize)(...supportAdmins), admin_controller_1.adminCreateDeletionRequest);
-router.post('/account-deletions/:id/approve', (0, auth_1.authorize)(SA, A), admin_controller_1.approveAccountDeletion);
-router.post('/account-deletions/:id/reject', (0, auth_1.authorize)(SA, A), admin_controller_1.rejectAccountDeletion);
+router.get('/account-deletions', (0, auth_1.authorize)(SA), admin_controller_1.getAccountDeletionRequests);
+router.post('/account-deletions', (0, auth_1.authorize)(SA), admin_controller_1.adminCreateDeletionRequest);
+router.post('/account-deletions/:id/approve', (0, auth_1.authorize)(SA), admin_controller_1.approveAccountDeletion);
+router.post('/account-deletions/:id/reject', (0, auth_1.authorize)(SA), admin_controller_1.rejectAccountDeletion);
 // ================================================================
 // AFFILIATE MANAGEMENT — general + financial
 // ================================================================
@@ -154,7 +157,7 @@ router.get('/reports/products', (0, auth_1.authorize)(SA, A, FA, CA), admin_cont
 // ================================================================
 // MISC
 // ================================================================
-router.get('/activity-log', (0, auth_1.authorize)(SA, A), admin_controller_1.getActivityLog);
+router.get('/activity-log', (0, auth_1.authorize)(SA), admin_controller_1.getActivityLog);
 router.get('/search', (0, auth_1.authorize)(...allAdmins), admin_controller_1.globalSearch);
 // ================================================================
 // REWARDS & POINTS MANAGEMENT — general + marketing
@@ -166,7 +169,7 @@ router.get('/rewards/transactions', (0, auth_1.authorize)(...marketingAdmins), a
 // ================================================================
 // APP VERSION MANAGEMENT — super + general
 // ================================================================
-router.get('/app-version', (0, auth_1.authorize)(SA, A), admin_controller_1.getAppVersionConfig);
+router.get('/app-version', (0, auth_1.authorize)(SA), admin_controller_1.getAppVersionConfig);
 router.put('/app-version', (0, auth_1.authorize)(SA), admin_controller_1.updateAppVersionConfig);
 // ================================================================
 // AI SUPPORT SUGGESTIONS — support + general

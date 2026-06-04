@@ -33,6 +33,7 @@ import {
   ChatMessage,
 } from '../models/Additional';
 import { notificationService } from '../services/notification.service';
+import { shipBubbleService } from '../services/shipbubble.service';
 import { sendEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
 import { queueEmailsInBackground } from '../utils/email-queue';
 import { sendPushNotification } from '../config/firebase';
@@ -996,10 +997,17 @@ export const getVendorDetails = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const { id } = req.params;
 
-    const vendor = await VendorProfile.findById(id).populate(
+    // Support both VendorProfile _id and User _id (e.g. when navigating from a product)
+    let vendor = await VendorProfile.findById(id).populate(
       'user',
       'firstName lastName email phone status avatar createdAt'
     );
+    if (!vendor && mongoose.isValidObjectId(id)) {
+      vendor = await VendorProfile.findOne({ user: id }).populate(
+        'user',
+        'firstName lastName email phone status avatar createdAt'
+      );
+    }
 
     if (!vendor) {
       res.status(404).json({ success: false, message: 'Vendor not found' });
@@ -1382,6 +1390,135 @@ export const updateVendorCommission = asyncHandler(
       success: true,
       message: `Commission rate updated to ${commissionRate}%`,
       data: { commissionRate: vendor.commissionRate },
+    });
+  }
+);
+
+/**
+ * PUT /admin/vendors/:id/address
+ * Update vendor business address (clears any prior ShipBubble validation)
+ */
+export const updateVendorAddress = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { street, city, state, country } = req.body;
+
+    const vendor = await VendorProfile.findById(id);
+    if (!vendor) {
+      res.status(404).json({ success: false, message: 'Vendor not found' });
+      return;
+    }
+
+    if (street) vendor.businessAddress.street = street;
+    if (city) vendor.businessAddress.city = city;
+    if (state) vendor.businessAddress.state = state;
+    if (country) vendor.businessAddress.country = country;
+
+    (vendor.businessAddress as any).shipBubble = undefined;
+
+    await vendor.save();
+
+    res.json({
+      success: true,
+      message: 'Vendor address updated',
+      data: { businessAddress: vendor.businessAddress },
+    });
+  }
+);
+
+/**
+ * POST /admin/vendors/:id/address/validate
+ * Validate vendor business address against ShipBubble and persist the result
+ */
+export const validateVendorAddress = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const vendor = await VendorProfile.findById(id).populate('user', 'email');
+    if (!vendor) {
+      res.status(404).json({ success: false, message: 'Vendor not found' });
+      return;
+    }
+
+    const { street, city, state, country } = vendor.businessAddress;
+    const ownerUser = vendor.user as any;
+    const fullAddress = `${street}, ${city}, ${state}, ${country || 'Nigeria'}`;
+
+    try {
+      const result = await shipBubbleService.validateAddress({
+        name: vendor.businessName,
+        email: ownerUser?.email || vendor.businessEmail,
+        phone: vendor.businessPhone,
+        address: fullAddress,
+      });
+
+      (vendor.businessAddress as any).shipBubble = {
+        addressCode: result.address_code,
+        formattedAddress: result.formatted_address,
+        latitude: result.latitude,
+        longitude: result.longitude,
+        validatedAt: new Date(),
+      };
+
+      await vendor.save();
+
+      res.json({
+        success: true,
+        message: 'Address validated successfully',
+        data: { businessAddress: vendor.businessAddress },
+      });
+    } catch {
+      res.status(422).json({
+        success: false,
+        code: 'SHIPBUBBLE_VALIDATION_FAILED',
+        message: 'Address validation failed. Please check the address details and try again.',
+      });
+    }
+  }
+);
+
+/**
+ * PUT /admin/vendors/:id/kyc/:docIndex
+ * Approve or reject a single KYC document
+ */
+export const updateVendorKycDocument = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id, docIndex } = req.params;
+    const { status, rejectionReason } = req.body;
+    const idx = Number(docIndex);
+
+    if (!['verified', 'rejected', 'pending'].includes(status)) {
+      res.status(400).json({ success: false, message: 'Status must be verified, rejected, or pending' });
+      return;
+    }
+
+    if (status === 'rejected' && !rejectionReason) {
+      res.status(400).json({ success: false, message: 'Rejection reason is required' });
+      return;
+    }
+
+    const vendor = await VendorProfile.findById(id);
+    if (!vendor) {
+      res.status(404).json({ success: false, message: 'Vendor not found' });
+      return;
+    }
+
+    if (idx < 0 || idx >= vendor.kycDocuments.length) {
+      res.status(404).json({ success: false, message: 'KYC document not found' });
+      return;
+    }
+
+    const doc = vendor.kycDocuments[idx] as any;
+    doc.verificationStatus = status;
+    doc.verifiedAt = status === 'verified' ? new Date() : undefined;
+    doc.rejectionReason = status === 'rejected' ? rejectionReason : undefined;
+
+    await vendor.save();
+
+    res.json({
+      success: true,
+      message: `Document ${status === 'verified' ? 'approved' : status === 'rejected' ? 'rejected' : 'reset to pending'}`,
+      data: { kycDocuments: vendor.kycDocuments },
     });
   }
 );

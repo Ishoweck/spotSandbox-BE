@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = void 0;
+exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -53,6 +53,7 @@ const AccountDeletionRequest_1 = __importDefault(require("../models/AccountDelet
 const PointsTransaction_1 = __importDefault(require("../models/PointsTransaction"));
 const Additional_1 = require("../models/Additional");
 const notification_service_1 = require("../services/notification.service");
+const shipbubble_service_1 = require("../services/shipbubble.service");
 const email_1 = require("../utils/email");
 const email_queue_1 = require("../utils/email-queue");
 const firebase_1 = require("../config/firebase");
@@ -844,7 +845,11 @@ exports.fixLegacyCommissionRates = (0, ayncHandler_1.asyncHandler)(async (_req, 
  */
 exports.getVendorDetails = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const { id } = req.params;
-    const vendor = await VendorProfile_1.default.findById(id).populate('user', 'firstName lastName email phone status avatar createdAt');
+    // Support both VendorProfile _id and User _id (e.g. when navigating from a product)
+    let vendor = await VendorProfile_1.default.findById(id).populate('user', 'firstName lastName email phone status avatar createdAt');
+    if (!vendor && mongoose_1.default.isValidObjectId(id)) {
+        vendor = await VendorProfile_1.default.findOne({ user: id }).populate('user', 'firstName lastName email phone status avatar createdAt');
+    }
     if (!vendor) {
         res.status(404).json({ success: false, message: 'Vendor not found' });
         return;
@@ -1159,6 +1164,113 @@ exports.updateVendorCommission = (0, ayncHandler_1.asyncHandler)(async (req, res
         success: true,
         message: `Commission rate updated to ${commissionRate}%`,
         data: { commissionRate: vendor.commissionRate },
+    });
+});
+/**
+ * PUT /admin/vendors/:id/address
+ * Update vendor business address (clears any prior ShipBubble validation)
+ */
+exports.updateVendorAddress = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const { street, city, state, country } = req.body;
+    const vendor = await VendorProfile_1.default.findById(id);
+    if (!vendor) {
+        res.status(404).json({ success: false, message: 'Vendor not found' });
+        return;
+    }
+    if (street)
+        vendor.businessAddress.street = street;
+    if (city)
+        vendor.businessAddress.city = city;
+    if (state)
+        vendor.businessAddress.state = state;
+    if (country)
+        vendor.businessAddress.country = country;
+    vendor.businessAddress.shipBubble = undefined;
+    await vendor.save();
+    res.json({
+        success: true,
+        message: 'Vendor address updated',
+        data: { businessAddress: vendor.businessAddress },
+    });
+});
+/**
+ * POST /admin/vendors/:id/address/validate
+ * Validate vendor business address against ShipBubble and persist the result
+ */
+exports.validateVendorAddress = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const vendor = await VendorProfile_1.default.findById(id).populate('user', 'email');
+    if (!vendor) {
+        res.status(404).json({ success: false, message: 'Vendor not found' });
+        return;
+    }
+    const { street, city, state, country } = vendor.businessAddress;
+    const ownerUser = vendor.user;
+    const fullAddress = `${street}, ${city}, ${state}, ${country || 'Nigeria'}`;
+    try {
+        const result = await shipbubble_service_1.shipBubbleService.validateAddress({
+            name: vendor.businessName,
+            email: ownerUser?.email || vendor.businessEmail,
+            phone: vendor.businessPhone,
+            address: fullAddress,
+        });
+        vendor.businessAddress.shipBubble = {
+            addressCode: result.address_code,
+            formattedAddress: result.formatted_address,
+            latitude: result.latitude,
+            longitude: result.longitude,
+            validatedAt: new Date(),
+        };
+        await vendor.save();
+        res.json({
+            success: true,
+            message: 'Address validated successfully',
+            data: { businessAddress: vendor.businessAddress },
+        });
+    }
+    catch {
+        res.status(422).json({
+            success: false,
+            code: 'SHIPBUBBLE_VALIDATION_FAILED',
+            message: 'Address validation failed. Please check the address details and try again.',
+        });
+    }
+});
+/**
+ * PUT /admin/vendors/:id/kyc/:docIndex
+ * Approve or reject a single KYC document
+ */
+exports.updateVendorKycDocument = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id, docIndex } = req.params;
+    const { status, rejectionReason } = req.body;
+    const idx = Number(docIndex);
+    if (!['verified', 'rejected', 'pending'].includes(status)) {
+        res.status(400).json({ success: false, message: 'Status must be verified, rejected, or pending' });
+        return;
+    }
+    if (status === 'rejected' && !rejectionReason) {
+        res.status(400).json({ success: false, message: 'Rejection reason is required' });
+        return;
+    }
+    const vendor = await VendorProfile_1.default.findById(id);
+    if (!vendor) {
+        res.status(404).json({ success: false, message: 'Vendor not found' });
+        return;
+    }
+    if (idx < 0 || idx >= vendor.kycDocuments.length) {
+        res.status(404).json({ success: false, message: 'KYC document not found' });
+        return;
+    }
+    const doc = vendor.kycDocuments[idx];
+    doc.verificationStatus = status;
+    doc.verifiedAt = status === 'verified' ? new Date() : undefined;
+    doc.rejectionReason = status === 'rejected' ? rejectionReason : undefined;
+    await vendor.save();
+    res.json({
+        success: true,
+        message: `Document ${status === 'verified' ? 'approved' : status === 'rejected' ? 'rejected' : 'reset to pending'}`,
+        data: { kycDocuments: vendor.kycDocuments },
     });
 });
 // ================================================================

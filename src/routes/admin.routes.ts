@@ -30,6 +30,9 @@ import {
   updateVendorCommission,
   fixLegacyCommissionRates,
   resolveVendorWallet,
+  updateVendorAddress,
+  validateVendorAddress,
+  updateVendorKycDocument,
 
   // Product Management
   getAllProducts,
@@ -157,7 +160,7 @@ const marketingAdmins = [SA, A, MA];
 // ================================================================
 // DASHBOARD & ANALYTICS
 // ================================================================
-router.get('/dashboard', authorize(SA, A), getDashboard);
+router.get('/dashboard', authorize(SA), getDashboard);
 router.get('/analytics/revenue', authorize(SA, A, FA), getRevenueAnalytics);
 router.get('/analytics/users', authorize(SA, A, SPA), getUserAnalytics);
 router.get('/analytics/orders', authorize(SA, A, FA, SPA), getOrderAnalytics);
@@ -188,6 +191,9 @@ router.put('/vendors/:id/verify', authorize(SA, A, KA), verifyVendor);
 router.put('/vendors/:id/status', authorize(SA, A, KA), toggleVendorStatus);
 router.put('/vendors/:id/premium', authorize(SA, A), toggleVendorPremium);
 router.put('/vendors/:id/commission', authorize(SA, A, FA), updateVendorCommission);
+router.put('/vendors/:id/address', authorize(SA, A, KA), updateVendorAddress);
+router.post('/vendors/:id/address/validate', authorize(SA, A, KA), validateVendorAddress);
+router.put('/vendors/:id/kyc/:docIndex', authorize(SA, A, KA), updateVendorKycDocument);
 router.post('/vendors/:id/wallet/resolve', authorize(SA), resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', authorize(SA), fixLegacyCommissionRates);
 
@@ -263,12 +269,12 @@ router.post('/notifications/broadcast', authorize(...marketingAdmins), broadcast
 router.get('/notifications', authorize(...marketingAdmins), getNotificationHistory);
 
 // ================================================================
-// ACCOUNT DELETION MANAGEMENT — general + support
+// ACCOUNT DELETION MANAGEMENT — super admin only
 // ================================================================
-router.get('/account-deletions', authorize(...supportAdmins), getAccountDeletionRequests);
-router.post('/account-deletions', authorize(...supportAdmins), adminCreateDeletionRequest);
-router.post('/account-deletions/:id/approve', authorize(SA, A), approveAccountDeletion);
-router.post('/account-deletions/:id/reject', authorize(SA, A), rejectAccountDeletion);
+router.get('/account-deletions', authorize(SA), getAccountDeletionRequests);
+router.post('/account-deletions', authorize(SA), adminCreateDeletionRequest);
+router.post('/account-deletions/:id/approve', authorize(SA), approveAccountDeletion);
+router.post('/account-deletions/:id/reject', authorize(SA), rejectAccountDeletion);
 
 // ================================================================
 // AFFILIATE MANAGEMENT — general + financial
@@ -296,7 +302,7 @@ router.get('/reports/products', authorize(SA, A, FA, CA), getProductReport);
 // ================================================================
 // MISC
 // ================================================================
-router.get('/activity-log', authorize(SA, A), getActivityLog);
+router.get('/activity-log', authorize(SA), getActivityLog);
 router.get('/search', authorize(...allAdmins), globalSearch);
 
 // ================================================================
@@ -310,7 +316,7 @@ router.get('/rewards/transactions', authorize(...marketingAdmins), getPointsTran
 // ================================================================
 // APP VERSION MANAGEMENT — super + general
 // ================================================================
-router.get('/app-version', authorize(SA, A), getAppVersionConfig);
+router.get('/app-version', authorize(SA), getAppVersionConfig);
 router.put('/app-version', authorize(SA), updateAppVersionConfig);
 
 // ================================================================

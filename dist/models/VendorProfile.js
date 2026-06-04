@@ -58,6 +58,13 @@ const vendorProfileSchema = new mongoose_1.Schema({
         city: { type: String, required: true },
         state: { type: String, required: true },
         country: { type: String, required: true, default: 'Nigeria' },
+        shipBubble: {
+            addressCode: Number,
+            formattedAddress: String,
+            latitude: Number,
+            longitude: Number,
+            validatedAt: Date,
+        },
     },
     businessPhone: {
         type: String,

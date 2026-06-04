@@ -12,6 +12,13 @@ export interface IVendorProfile extends Document {
     city: string;
     state: string;
     country: string;
+    shipBubble?: {
+      addressCode: number;
+      formattedAddress: string;
+      latitude?: number;
+      longitude?: number;
+      validatedAt: Date;
+    };
   };
   businessPhone: string;
   businessEmail: string;
@@ -77,6 +84,13 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     city: { type: String, required: true },
     state: { type: String, required: true },
     country: { type: String, required: true, default: 'Nigeria' },
+    shipBubble: {
+      addressCode: Number,
+      formattedAddress: String,
+      latitude: Number,
+      longitude: Number,
+      validatedAt: Date,
+    },
   },
   businessPhone: {
     type: String,

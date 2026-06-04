@@ -100,6 +100,21 @@ export declare const toggleVendorPremium: (req: import("express").Request, res: 
  */
 export declare const updateVendorCommission: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * PUT /admin/vendors/:id/address
+ * Update vendor business address (clears any prior ShipBubble validation)
+ */
+export declare const updateVendorAddress: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
+ * POST /admin/vendors/:id/address/validate
+ * Validate vendor business address against ShipBubble and persist the result
+ */
+export declare const validateVendorAddress: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
+ * PUT /admin/vendors/:id/kyc/:docIndex
+ * Approve or reject a single KYC document
+ */
+export declare const updateVendorKycDocument: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * GET /admin/products
  * List all products with filtering
  */

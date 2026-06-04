@@ -11,6 +11,13 @@ export interface IVendorProfile extends Document {
         city: string;
         state: string;
         country: string;
+        shipBubble?: {
+            addressCode: number;
+            formattedAddress: string;
+            latitude?: number;
+            longitude?: number;
+            validatedAt: Date;
+        };
     };
     businessPhone: string;
     businessEmail: string;
