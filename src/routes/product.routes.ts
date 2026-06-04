@@ -57,6 +57,14 @@ router.get(
   asyncHandler(productController.getMyProducts.bind(productController))
 );
 
+// Fetch a single product owned by the authenticated vendor (works for drafts/inactive)
+router.get(
+  '/my-products/:id',
+  authenticate,
+  authorize(UserRole.VENDOR, UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  asyncHandler(productController.getMyProduct.bind(productController))
+);
+
 // ============================================================
 // Get single product - MUST BE AFTER /my-products
 // ============================================================

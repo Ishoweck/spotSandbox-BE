@@ -314,6 +314,26 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   }
 
 
+  // Get single product owned by the authenticated vendor (regardless of status — needed for draft editing)
+  async getMyProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { id } = req.params;
+    const vendorId = req.user?.id;
+
+    if (!vendorId) throw new AppError('User not authenticated', 401);
+
+    const product = await Product.findOne({ _id: id, vendor: vendorId })
+      .populate('vendor', 'firstName lastName email profileImage')
+      .populate('category', 'name');
+
+    if (!product) throw new AppError('Product not found', 404);
+
+    res.json({
+      success: true,
+      message: 'Product fetched successfully',
+      data: this.formatProduct(product),
+    });
+  }
+
   // NEW: Get My Products (for authenticated vendor)
   async getMyProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const page = parseInt(req.query.page as string) || 1;

@@ -1266,10 +1266,28 @@ exports.updateVendorKycDocument = (0, ayncHandler_1.asyncHandler)(async (req, re
         return;
     }
     const doc = vendor.kycDocuments[idx];
+    const docType = doc.type || `Document ${idx + 1}`;
     doc.verificationStatus = status;
     doc.verifiedAt = status === 'verified' ? new Date() : undefined;
     doc.rejectionReason = status === 'rejected' ? rejectionReason : undefined;
     await vendor.save();
+    // Notify vendor of individual doc decision
+    if (status === 'verified') {
+        await notification_service_1.notificationService.send({
+            userId: vendor.user.toString(),
+            type: types_1.NotificationType.ACCOUNT,
+            title: 'KYC Document Approved',
+            message: `Your ${docType} document has been approved.`,
+        });
+    }
+    else if (status === 'rejected') {
+        await notification_service_1.notificationService.send({
+            userId: vendor.user.toString(),
+            type: types_1.NotificationType.ACCOUNT,
+            title: 'KYC Document Rejected',
+            message: `Your ${docType} document was rejected. Reason: ${rejectionReason}. Please re-upload a valid document.`,
+        });
+    }
     res.json({
         success: true,
         message: `Document ${status === 'verified' ? 'approved' : status === 'rejected' ? 'rejected' : 'reset to pending'}`,

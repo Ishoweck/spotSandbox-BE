@@ -299,6 +299,23 @@ class ProductController {
         // No vendor info — treat as unavailable
         throw new error_1.AppError('Product not found', 404);
     }
+    // Get single product owned by the authenticated vendor (regardless of status — needed for draft editing)
+    async getMyProduct(req, res) {
+        const { id } = req.params;
+        const vendorId = req.user?.id;
+        if (!vendorId)
+            throw new error_1.AppError('User not authenticated', 401);
+        const product = await Product_1.default.findOne({ _id: id, vendor: vendorId })
+            .populate('vendor', 'firstName lastName email profileImage')
+            .populate('category', 'name');
+        if (!product)
+            throw new error_1.AppError('Product not found', 404);
+        res.json({
+            success: true,
+            message: 'Product fetched successfully',
+            data: this.formatProduct(product),
+        });
+    }
     // NEW: Get My Products (for authenticated vendor)
     async getMyProducts(req, res) {
         const page = parseInt(req.query.page) || 1;

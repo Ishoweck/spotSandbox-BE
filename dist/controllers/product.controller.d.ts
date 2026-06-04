@@ -5,6 +5,7 @@ export declare class ProductController {
     createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    getMyProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getMyProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getRecommendedProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getFeaturedProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;

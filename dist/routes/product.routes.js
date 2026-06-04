@@ -33,6 +33,8 @@ router.get('/vendor/:vendorId', (0, error_1.asyncHandler)(product_controller_1.p
 // ============================================================
 // ✅ CRITICAL: /my-products MUST come BEFORE /:id
 router.get('/my-products', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.getMyProducts.bind(product_controller_1.productController)));
+// Fetch a single product owned by the authenticated vendor (works for drafts/inactive)
+router.get('/my-products/:id', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(product_controller_1.productController.getMyProduct.bind(product_controller_1.productController)));
 // ============================================================
 // Get single product - MUST BE AFTER /my-products
 // ============================================================

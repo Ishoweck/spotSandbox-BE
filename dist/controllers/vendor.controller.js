@@ -648,14 +648,27 @@ class VendorController {
             const entry = chartMap.get(key);
             return { date: key, day: dayNames[date.getDay()], sales: entry?.sales || 0, orders: entry?.orders || 0 };
         });
-        // Verification progress
-        let completedSteps = 0;
-        if (vendorProfile.storefront?.theme || vendorProfile.storefront?.bannerImages?.length || vendorProfile.storefront?.customMessage || vendorProfile.businessBanner)
-            completedSteps++;
-        if (vendorProfile.verificationStatus === 'verified' || vendorProfile.kycDocuments?.length > 0)
-            completedSteps++;
-        if (vendorProfile.payoutDetails?.accountNumber)
-            completedSteps++;
+        // Setup progress — each step reflects what the vendor actually did, not admin decisions
+        const kycDocs = vendorProfile.kycDocuments || [];
+        const setupSteps = {
+            storefront: {
+                completed: !!(vendorProfile.storefront?.theme ||
+                    vendorProfile.storefront?.bannerImages?.length ||
+                    vendorProfile.storefront?.customMessage ||
+                    vendorProfile.businessBanner),
+            },
+            verification: {
+                // Completed = vendor uploaded at least one doc (admin approval is a separate status)
+                completed: kycDocs.length > 0,
+                status: vendorProfile.verificationStatus,
+                docsUploaded: kycDocs.length,
+                docsApproved: kycDocs.filter((d) => d.verificationStatus === 'verified' || d.status === 'approved').length,
+            },
+            bankAccount: {
+                completed: !!(vendorProfile.payoutDetails?.accountNumber),
+            },
+        };
+        const completedSteps = [setupSteps.storefront.completed, setupSteps.verification.completed, setupSteps.bankAccount.completed].filter(Boolean).length;
         const verificationProgress = Math.round((completedSteps / 3) * 100);
         // Rewards tier
         let rewardsTier = null;
@@ -718,7 +731,11 @@ class VendorController {
                 profile: {
                     verificationStatus: vendorProfile.verificationStatus,
                     rejectionReason: vendorProfile.rejectionReason || null,
-                    verificationProgress, isActive: vendorProfile.isActive,
+                    verificationProgress,
+                    setupSteps,
+                    setupCompleted: completedSteps,
+                    setupTotal: 3,
+                    isActive: vendorProfile.isActive,
                     hasPayoutDetails: !!vendorProfile.payoutDetails,
                     businessName: vendorProfile.businessName,
                     businessLogo: vendorProfile.businessLogo,
