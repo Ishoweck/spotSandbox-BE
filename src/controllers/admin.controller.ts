@@ -1779,6 +1779,46 @@ export const deleteProduct = asyncHandler(
 );
 
 /**
+ * PUT /admin/products/:id/pickup-address
+ * Update a product's pickup address fields (clears any prior ShipBubble validation)
+ */
+export const updateProductPickupAddress = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { street, city, state, country, fullName, phone } = req.body;
+
+    const product = await Product.findById(id);
+    if (!product) {
+      res.status(404).json({ success: false, message: 'Product not found' });
+      return;
+    }
+
+    if (product.productType !== 'physical') {
+      res.status(400).json({ success: false, message: 'Only physical products have a pickup address' });
+      return;
+    }
+
+    const pa = (product as any).pickupAddress ?? {};
+    if (street)              pa.street   = street;
+    if (city)                pa.city     = city;
+    if (state)               pa.state    = state;
+    if (country)             pa.country  = country;
+    if (fullName !== undefined) pa.fullName = fullName;
+    if (phone    !== undefined) pa.phone    = phone;
+    pa.shipBubble = undefined;
+
+    (product as any).pickupAddress = pa;
+    await product.save();
+
+    res.json({
+      success: true,
+      message: 'Pickup address updated',
+      data: { pickupAddress: (product as any).pickupAddress },
+    });
+  }
+);
+
+/**
  * POST /admin/products/:id/pickup-address/validate
  * Validate a physical product's pickup address against ShipBubble and persist the result
  */
