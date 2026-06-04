@@ -72,6 +72,7 @@ router.get('/products/:id', (0, auth_1.authorize)(SA, A, CA), admin_controller_1
 router.put('/products/:id/status', (0, auth_1.authorize)(SA, A, CA), admin_controller_1.updateProductStatus);
 router.put('/products/:id/featured', (0, auth_1.authorize)(SA, A, CA), admin_controller_1.toggleProductFeatured);
 router.delete('/products/:id', (0, auth_1.authorize)(SA, A), admin_controller_1.deleteProduct);
+router.post('/products/:id/pickup-address/validate', (0, auth_1.authorize)(SA, A, CA), admin_controller_1.validateProductPickupAddress);
 // ================================================================
 // ORDER MANAGEMENT — general + support + financial
 // ================================================================

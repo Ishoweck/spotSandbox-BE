@@ -1778,6 +1778,71 @@ export const deleteProduct = asyncHandler(
   }
 );
 
+/**
+ * POST /admin/products/:id/pickup-address/validate
+ * Validate a physical product's pickup address against ShipBubble and persist the result
+ */
+export const validateProductPickupAddress = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const product = await Product.findById(id).populate('vendor', 'firstName lastName email');
+    if (!product) {
+      res.status(404).json({ success: false, message: 'Product not found' });
+      return;
+    }
+
+    if (product.productType !== 'physical') {
+      res.status(400).json({ success: false, message: 'Only physical products have a pickup address' });
+      return;
+    }
+
+    const pa = (product as any).pickupAddress;
+    if (!pa?.street || !pa?.city || !pa?.state) {
+      res.status(400).json({ success: false, message: 'Product has no pickup address to validate' });
+      return;
+    }
+
+    const vendorUser = product.vendor as any;
+    const contactName = pa.fullName || vendorUser?.firstName
+      ? `${vendorUser?.firstName || ''} ${vendorUser?.lastName || ''}`.trim()
+      : 'Vendor';
+    const contactPhone = pa.phone || '';
+    const contactEmail = vendorUser?.email || '';
+    const fullAddress = `${pa.street}, ${pa.city}, ${pa.state}, ${pa.country || 'Nigeria'}`;
+
+    try {
+      const result = await shipBubbleService.validateAddress({
+        name: contactName,
+        email: contactEmail,
+        phone: contactPhone,
+        address: fullAddress,
+      });
+
+      (product as any).pickupAddress.shipBubble = {
+        addressCode: result.address_code,
+        formattedAddress: result.formatted_address,
+        latitude: result.latitude,
+        longitude: result.longitude,
+      };
+
+      await product.save();
+
+      res.json({
+        success: true,
+        message: 'Pickup address validated successfully',
+        data: { pickupAddress: (product as any).pickupAddress },
+      });
+    } catch {
+      res.status(422).json({
+        success: false,
+        code: 'SHIPBUBBLE_VALIDATION_FAILED',
+        message: 'Address validation failed. Please check the pickup address details.',
+      });
+    }
+  }
+);
+
 // ================================================================
 // ORDER MANAGEMENT
 // ================================================================

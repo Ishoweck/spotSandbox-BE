@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = void 0;
+exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.validateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -1474,6 +1474,61 @@ exports.deleteProduct = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         success: true,
         message: 'Product deleted successfully',
     });
+});
+/**
+ * POST /admin/products/:id/pickup-address/validate
+ * Validate a physical product's pickup address against ShipBubble and persist the result
+ */
+exports.validateProductPickupAddress = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const product = await Product_1.default.findById(id).populate('vendor', 'firstName lastName email');
+    if (!product) {
+        res.status(404).json({ success: false, message: 'Product not found' });
+        return;
+    }
+    if (product.productType !== 'physical') {
+        res.status(400).json({ success: false, message: 'Only physical products have a pickup address' });
+        return;
+    }
+    const pa = product.pickupAddress;
+    if (!pa?.street || !pa?.city || !pa?.state) {
+        res.status(400).json({ success: false, message: 'Product has no pickup address to validate' });
+        return;
+    }
+    const vendorUser = product.vendor;
+    const contactName = pa.fullName || vendorUser?.firstName
+        ? `${vendorUser?.firstName || ''} ${vendorUser?.lastName || ''}`.trim()
+        : 'Vendor';
+    const contactPhone = pa.phone || '';
+    const contactEmail = vendorUser?.email || '';
+    const fullAddress = `${pa.street}, ${pa.city}, ${pa.state}, ${pa.country || 'Nigeria'}`;
+    try {
+        const result = await shipbubble_service_1.shipBubbleService.validateAddress({
+            name: contactName,
+            email: contactEmail,
+            phone: contactPhone,
+            address: fullAddress,
+        });
+        product.pickupAddress.shipBubble = {
+            addressCode: result.address_code,
+            formattedAddress: result.formatted_address,
+            latitude: result.latitude,
+            longitude: result.longitude,
+        };
+        await product.save();
+        res.json({
+            success: true,
+            message: 'Pickup address validated successfully',
+            data: { pickupAddress: product.pickupAddress },
+        });
+    }
+    catch {
+        res.status(422).json({
+            success: false,
+            code: 'SHIPBUBBLE_VALIDATION_FAILED',
+            message: 'Address validation failed. Please check the pickup address details.',
+        });
+    }
 });
 // ================================================================
 // ORDER MANAGEMENT

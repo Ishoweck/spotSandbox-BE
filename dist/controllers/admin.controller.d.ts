@@ -140,6 +140,11 @@ export declare const toggleProductFeatured: (req: import("express").Request, res
  */
 export declare const deleteProduct: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * POST /admin/products/:id/pickup-address/validate
+ * Validate a physical product's pickup address against ShipBubble and persist the result
+ */
+export declare const validateProductPickupAddress: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * GET /admin/orders
  * List all orders with filtering
  */

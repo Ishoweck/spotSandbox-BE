@@ -40,6 +40,7 @@ import {
   updateProductStatus,
   toggleProductFeatured,
   deleteProduct,
+  validateProductPickupAddress,
 
   // Order Management
   getAllOrders,
@@ -205,6 +206,7 @@ router.get('/products/:id', authorize(SA, A, CA), getProductDetails);
 router.put('/products/:id/status', authorize(SA, A, CA), updateProductStatus);
 router.put('/products/:id/featured', authorize(SA, A, CA), toggleProductFeatured);
 router.delete('/products/:id', authorize(SA, A), deleteProduct);
+router.post('/products/:id/pickup-address/validate', authorize(SA, A, CA), validateProductPickupAddress);
 
 // ================================================================
 // ORDER MANAGEMENT — general + support + financial
