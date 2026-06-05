@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.cartController = exports.CartController = void 0;
 const Cart_1 = __importDefault(require("../models/Cart"));
 const Product_1 = __importDefault(require("../models/Product"));
+const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const Additional_1 = require("../models/Additional");
 const error_1 = require("../middleware/error");
 const helpers_1 = require("../utils/helpers");
@@ -16,7 +17,11 @@ class CartController {
     async getCart(req, res) {
         const cart = await Cart_1.default.findOne({ user: req.user?.id }).populate({
             path: 'items.product',
-            select: 'name slug price images status quantity vendor',
+            select: 'name slug price images status quantity vendor productType',
+            populate: {
+                path: 'vendor',
+                select: 'firstName lastName',
+            },
         });
         if (!cart) {
             res.json({
@@ -58,10 +63,31 @@ class CartController {
         if (validItems.length !== cart.items.length || priceChanges.length > 0) {
             await cart.save();
         }
+        // Enrich vendor objects with businessName / businessLogo from VendorProfile
+        const cartObj = cart.toObject();
+        const vendorIds = [...new Set(cartObj.items
+                .map((item) => item.product?.vendor?._id?.toString())
+                .filter(Boolean))];
+        if (vendorIds.length > 0) {
+            const profiles = await VendorProfile_1.default.find({ user: { $in: vendorIds } })
+                .select('user businessName businessLogo')
+                .lean();
+            const vpMap = new Map(profiles.map((vp) => [vp.user.toString(), vp]));
+            for (const item of cartObj.items) {
+                const v = item.product?.vendor;
+                if (v && v._id) {
+                    const vp = vpMap.get(v._id.toString());
+                    if (vp) {
+                        v.businessName = vp.businessName;
+                        v.businessLogo = vp.businessLogo;
+                    }
+                }
+            }
+        }
         res.json({
             success: true,
             data: {
-                cart,
+                cart: cartObj,
                 ...(removedNames.length > 0 && {
                     removedItems: removedNames,
                     removedItemsMessage: `${removedNames.length} item${removedNames.length > 1 ? 's were' : ' was'} removed from your cart because ${removedNames.length > 1 ? 'they are' : 'it is'} no longer available.`,

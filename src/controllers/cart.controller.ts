@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, ApiResponse } from '../types';
 import Cart from '../models/Cart';
 import Product from '../models/Product';
+import VendorProfile from '../models/VendorProfile';
 import { Coupon } from '../models/Additional';
 import { AppError } from '../middleware/error';
 import { calculateDiscount } from '../utils/helpers';
@@ -13,7 +14,11 @@ export class CartController {
   async getCart(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const cart = await Cart.findOne({ user: req.user?.id }).populate({
       path: 'items.product',
-      select: 'name slug price images status quantity vendor',
+      select: 'name slug price images status quantity vendor productType',
+      populate: {
+        path: 'vendor',
+        select: 'firstName lastName',
+      },
     });
 
     if (!cart) {
@@ -60,10 +65,34 @@ export class CartController {
       await cart.save();
     }
 
+    // Enrich vendor objects with businessName / businessLogo from VendorProfile
+    const cartObj = cart.toObject() as any;
+    const vendorIds = [...new Set(
+      cartObj.items
+        .map((item: any) => item.product?.vendor?._id?.toString())
+        .filter(Boolean) as string[]
+    )];
+    if (vendorIds.length > 0) {
+      const profiles = await VendorProfile.find({ user: { $in: vendorIds } })
+        .select('user businessName businessLogo')
+        .lean() as any[];
+      const vpMap = new Map(profiles.map((vp: any) => [vp.user.toString(), vp]));
+      for (const item of cartObj.items) {
+        const v = item.product?.vendor;
+        if (v && v._id) {
+          const vp = vpMap.get(v._id.toString());
+          if (vp) {
+            v.businessName = vp.businessName;
+            v.businessLogo = vp.businessLogo;
+          }
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: {
-        cart,
+        cart: cartObj,
         ...(removedNames.length > 0 && {
           removedItems: removedNames,
           removedItemsMessage: `${removedNames.length} item${removedNames.length > 1 ? 's were' : ' was'} removed from your cart because ${removedNames.length > 1 ? 'they are' : 'it is'} no longer available.`,
