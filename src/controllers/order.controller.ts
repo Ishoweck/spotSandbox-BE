@@ -969,9 +969,9 @@
         subtotal += (liveProduct?.price || (cartItem as any).price || 0) * cartItem.quantity;
       }
       if (subtotal === 0) subtotal = cart.subtotal; // fallback if product lookup fails
-      const discount = cart.discount;
+      const discount = Math.min(cart.discount, subtotal); // cap stale coupon discount to actual subtotal
       const tax = 0;
-      const baseTotal = subtotal - discount + totalShippingCost + tax;
+      const baseTotal = Math.max(0, subtotal - discount + totalShippingCost + tax);
       const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
       const total = Math.round(baseTotal + serviceCharge);
 
@@ -1351,9 +1351,9 @@
       const subtotal = cart.subtotal > 0
         ? cart.subtotal
         : cart.items.reduce((sum: number, item: any) => sum + (item.price || 0) * item.quantity, 0);
-      const discount = cart.discount;
+      const discount = Math.min(cart.discount, subtotal); // cap stale coupon discount to actual subtotal
       const tax = 0;
-      const baseTotal = subtotal - discount + totalShippingCost + tax;
+      const baseTotal = Math.max(0, subtotal - discount + totalShippingCost + tax);
       const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
       const total = Math.round(baseTotal + serviceCharge);
 
@@ -1755,9 +1755,10 @@
       }
 
       const subtotal = cartToUse ? cartToUse.subtotal : snapshot.subtotal;
-      const discount = cartToUse ? cartToUse.discount : snapshot.discount;
+      const rawDiscount = cartToUse ? cartToUse.discount : snapshot.discount;
+      const discount = Math.min(rawDiscount, subtotal); // cap stale coupon discount to actual subtotal
       const tax = 0;
-      const baseTotal = subtotal - discount + totalShippingCost + tax;
+      const baseTotal = Math.max(0, subtotal - discount + totalShippingCost + tax);
       const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
       const total = Math.round(baseTotal + serviceCharge);
 
@@ -3051,12 +3052,13 @@
 
       // Refund if payment completed
       if (order.paymentStatus === PaymentStatus.COMPLETED) {
+        const refundAmount = Math.max(0, order.total);
         const wallet = await Wallet.findOne({ user: req.user?.id });
-        if (wallet) {
-          wallet.balance += order.total;
+        if (wallet && refundAmount > 0) {
+          wallet.balance += refundAmount;
           wallet.transactions.push({
             type: TransactionType.CREDIT,
-            amount: order.total,
+            amount: refundAmount,
             purpose: WalletPurpose.REFUND,
             reference: `REF-${order.orderNumber}`,
             description: `Refund for cancelled order ${order.orderNumber}`,
@@ -3068,7 +3070,7 @@
         }
 
         order.paymentStatus = PaymentStatus.REFUNDED;
-        (order as any).refundAmount = order.total;
+        (order as any).refundAmount = refundAmount;
         (order as any).refundReason = cancelReason;
         await order.save();
 

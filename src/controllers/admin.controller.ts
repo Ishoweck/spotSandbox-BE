@@ -76,7 +76,7 @@ export const getDashboard = asyncHandler(
       Dispute.countDocuments({ status: { $in: ['open', 'vendor_responded', 'under_review'] } }),
       Order.find().sort({ createdAt: -1 }).limit(10).populate('user', 'firstName lastName email'),
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Wallet.aggregate([
@@ -108,7 +108,7 @@ export const getDashboard = asyncHandler(
     const [todayOrders, todayRevenue, todaySignups] = await Promise.all([
       Order.countDocuments({ createdAt: { $gte: today } }),
       Order.aggregate([
-        { $match: { createdAt: { $gte: today }, paymentStatus: PaymentStatus.COMPLETED } },
+        { $match: { createdAt: { $gte: today }, paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       User.countDocuments({ createdAt: { $gte: today } }),
@@ -175,7 +175,7 @@ export const getRevenueAnalytics = asyncHandler(
     const [dailyRevenue, revenueByPaymentMethod, topVendorsByRevenue, refundTotal] =
       await Promise.all([
         Order.aggregate([
-          { $match: { ...dateFilter, paymentStatus: PaymentStatus.COMPLETED } },
+          { $match: { ...dateFilter, paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
           {
             $group: {
               _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -186,7 +186,7 @@ export const getRevenueAnalytics = asyncHandler(
           { $sort: { _id: 1 } },
         ]),
         Order.aggregate([
-          { $match: { ...dateFilter, paymentStatus: PaymentStatus.COMPLETED } },
+          { $match: { ...dateFilter, paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
           {
             $group: {
               _id: '$paymentMethod',
@@ -275,7 +275,7 @@ export const getUserAnalytics = asyncHandler(
       User.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       User.aggregate([{ $group: { _id: '$role', count: { $sum: 1 } } }]),
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
         {
           $group: {
             _id: '$user',
@@ -338,7 +338,7 @@ export const getOrderAnalytics = asyncHandler(
     const [dailyOrders, ordersByStatus, ordersByPaymentMethod, averageOrderValue] =
       await Promise.all([
         Order.aggregate([
-          { $match: { createdAt: { $gte: from } } },
+          { $match: { createdAt: { $gte: from }, total: { $gte: 0 } } },
           {
             $group: {
               _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -1053,7 +1053,7 @@ export const getVendorDetails = asyncHandler(
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       Order.aggregate([
-        { $match: { 'items.vendor': vendorUserId } },
+        { $match: { 'items.vendor': vendorUserId, total: { $gte: 0 } } },
         {
           $group: {
             _id: null,
@@ -1101,6 +1101,7 @@ export const getVendorDetails = asyncHandler(
             'items.vendor': vendorUserId,
             paymentStatus: PaymentStatus.COMPLETED,
             createdAt: { $gte: sixMonthsAgo },
+            total: { $gte: 0 },
           },
         },
         {
@@ -2472,7 +2473,7 @@ export const getFinancialOverview = asyncHandler(
       lastMonthRevenue,
     ] = await Promise.all([
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Wallet.aggregate([
@@ -2494,7 +2495,7 @@ export const getFinancialOverview = asyncHandler(
         { $group: { _id: null, totalBalance: { $sum: '$balance' }, totalPending: { $sum: '$pendingBalance' }, totalEarned: { $sum: '$totalEarned' }, totalWithdrawn: { $sum: '$totalWithdrawn' } } },
       ]),
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
         { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
         { $sort: { '_id.year': -1, '_id.month': -1 } },
         { $limit: 12 },
@@ -2504,7 +2505,7 @@ export const getFinancialOverview = asyncHandler(
         { $group: { _id: null, total: { $sum: '$refundAmount' }, count: { $sum: 1 } } },
       ]),
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
         { $group: { _id: '$paymentMethod', total: { $sum: '$total' }, count: { $sum: 1 } } },
         { $sort: { total: -1 } },
       ]),
@@ -2524,11 +2525,11 @@ export const getFinancialOverview = asyncHandler(
         { $group: { _id: null, totalVCredits: { $sum: '$vCredits' } } },
       ]),
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfThisMonth } } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfThisMonth }, total: { $gte: 0 } } },
         { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
       ]),
       Order.aggregate([
-        { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth } } },
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth }, total: { $gte: 0 } } },
         { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
       ]),
     ]);
@@ -4766,10 +4767,12 @@ export const getSalesReport = asyncHandler(
     const completedFilter = {
       paymentStatus: PaymentStatus.COMPLETED,
       createdAt: { $gte: startDateVal, $lte: endDateVal },
+      total: { $gte: 0 },
     };
     const prevCompletedFilter = {
       paymentStatus: PaymentStatus.COMPLETED,
       createdAt: { $gte: prevStartDate, $lte: startDateVal },
+      total: { $gte: 0 },
     };
     const allOrdersFilter = { createdAt: { $gte: startDateVal, $lte: endDateVal } };
 
@@ -4976,6 +4979,7 @@ export const getVendorReport = asyncHandler(
     const completedFilter = {
       paymentStatus: PaymentStatus.COMPLETED,
       createdAt: { $gte: startDateVal, $lte: endDateVal },
+      total: { $gte: 0 },
     };
 
     const [topVendors, platformSummary, newVendors, verificationBreakdown] = await Promise.all([
@@ -5074,6 +5078,7 @@ export const getProductReport = asyncHandler(
     const completedFilter: any = {
       paymentStatus: PaymentStatus.COMPLETED,
       createdAt: { $gte: startDateVal, $lte: endDateVal },
+      total: { $gte: 0 },
     };
     const productFilter: any = {};
     if (category) productFilter.category = new mongoose.Types.ObjectId(category as string);

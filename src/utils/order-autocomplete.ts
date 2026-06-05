@@ -63,7 +63,7 @@ async function runAutoComplete(): Promise<void> {
 
           const commissionRatePct = await getCommissionRate(vendorId);
           const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
-          const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
+          const vendorAmount = Math.max(0, Math.round((subtotal - commission) * 100) / 100);
 
           await Wallet.findOneAndUpdate(
             { user: vendorId },
@@ -100,7 +100,7 @@ async function runAutoComplete(): Promise<void> {
         for (const [vendorId, subtotal] of vendorMap) {
           const commissionRatePct = await getCommissionRate(vendorId);
           const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
-          const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
+          const vendorAmount = Math.max(0, Math.round((subtotal - commission) * 100) / 100);
 
           await Wallet.findOneAndUpdate(
             { user: vendorId },

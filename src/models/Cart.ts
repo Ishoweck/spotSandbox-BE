@@ -60,7 +60,7 @@ cartSchema.virtual('subtotal').get(function() {
 
 // Calculate total
 cartSchema.virtual('total').get(function() {
-  return this.subtotal - this.discount;
+  return Math.max(0, this.subtotal - this.discount);
 });
 
 const Cart = mongoose.model<ICart>('Cart', cartSchema);

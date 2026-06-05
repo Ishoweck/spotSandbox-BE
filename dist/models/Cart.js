@@ -75,7 +75,7 @@ cartSchema.virtual('subtotal').get(function () {
 });
 // Calculate total
 cartSchema.virtual('total').get(function () {
-    return this.subtotal - this.discount;
+    return Math.max(0, this.subtotal - this.discount);
 });
 const Cart = mongoose_1.default.model('Cart', cartSchema);
 exports.default = Cart;

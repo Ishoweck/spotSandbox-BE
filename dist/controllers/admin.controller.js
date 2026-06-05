@@ -80,7 +80,7 @@ exports.getDashboard = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         Dispute_1.default.countDocuments({ status: { $in: ['open', 'vendor_responded', 'under_review'] } }),
         Order_1.default.find().sort({ createdAt: -1 }).limit(10).populate('user', 'firstName lastName email'),
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             { $group: { _id: null, total: { $sum: '$total' } } },
         ]),
         Wallet_1.default.aggregate([
@@ -108,7 +108,7 @@ exports.getDashboard = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const [todayOrders, todayRevenue, todaySignups] = await Promise.all([
         Order_1.default.countDocuments({ createdAt: { $gte: today } }),
         Order_1.default.aggregate([
-            { $match: { createdAt: { $gte: today }, paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { createdAt: { $gte: today }, paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             { $group: { _id: null, total: { $sum: '$total' } } },
         ]),
         User_1.default.countDocuments({ createdAt: { $gte: today } }),
@@ -162,7 +162,7 @@ exports.getRevenueAnalytics = (0, ayncHandler_1.asyncHandler)(async (req, res) =
     }
     const [dailyRevenue, revenueByPaymentMethod, topVendorsByRevenue, refundTotal] = await Promise.all([
         Order_1.default.aggregate([
-            { $match: { ...dateFilter, paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { ...dateFilter, paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             {
                 $group: {
                     _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -173,7 +173,7 @@ exports.getRevenueAnalytics = (0, ayncHandler_1.asyncHandler)(async (req, res) =
             { $sort: { _id: 1 } },
         ]),
         Order_1.default.aggregate([
-            { $match: { ...dateFilter, paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { ...dateFilter, paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             {
                 $group: {
                     _id: '$paymentMethod',
@@ -256,7 +256,7 @@ exports.getUserAnalytics = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         User_1.default.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
         User_1.default.aggregate([{ $group: { _id: '$role', count: { $sum: 1 } } }]),
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             {
                 $group: {
                     _id: '$user',
@@ -307,7 +307,7 @@ exports.getOrderAnalytics = (0, ayncHandler_1.asyncHandler)(async (req, res) => 
     const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const [dailyOrders, ordersByStatus, ordersByPaymentMethod, averageOrderValue] = await Promise.all([
         Order_1.default.aggregate([
-            { $match: { createdAt: { $gte: from } } },
+            { $match: { createdAt: { $gte: from }, total: { $gte: 0 } } },
             {
                 $group: {
                     _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -878,7 +878,7 @@ exports.getVendorDetails = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
             { $group: { _id: '$status', count: { $sum: 1 } } },
         ]),
         Order_1.default.aggregate([
-            { $match: { 'items.vendor': vendorUserId } },
+            { $match: { 'items.vendor': vendorUserId, total: { $gte: 0 } } },
             {
                 $group: {
                     _id: null,
@@ -926,6 +926,7 @@ exports.getVendorDetails = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
                     'items.vendor': vendorUserId,
                     paymentStatus: types_1.PaymentStatus.COMPLETED,
                     createdAt: { $gte: sixMonthsAgo },
+                    total: { $gte: 0 },
                 },
             },
             {
@@ -2054,7 +2055,7 @@ exports.getFinancialOverview = (0, ayncHandler_1.asyncHandler)(async (req, res) 
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
     const [totalRevenue, totalCommissions, totalWithdrawals, pendingWithdrawals, walletBalances, monthlyRevenue, refundStats, paymentMethodBreakdown, topVendorsByCommission, vCreditsCirculation, thisMonthRevenue, lastMonthRevenue,] = await Promise.all([
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             { $group: { _id: null, total: { $sum: '$total' } } },
         ]),
         Wallet_1.default.aggregate([
@@ -2076,7 +2077,7 @@ exports.getFinancialOverview = (0, ayncHandler_1.asyncHandler)(async (req, res) 
             { $group: { _id: null, totalBalance: { $sum: '$balance' }, totalPending: { $sum: '$pendingBalance' }, totalEarned: { $sum: '$totalEarned' }, totalWithdrawn: { $sum: '$totalWithdrawn' } } },
         ]),
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
             { $sort: { '_id.year': -1, '_id.month': -1 } },
             { $limit: 12 },
@@ -2086,7 +2087,7 @@ exports.getFinancialOverview = (0, ayncHandler_1.asyncHandler)(async (req, res) 
             { $group: { _id: null, total: { $sum: '$refundAmount' }, count: { $sum: 1 } } },
         ]),
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, total: { $gte: 0 } } },
             { $group: { _id: '$paymentMethod', total: { $sum: '$total' }, count: { $sum: 1 } } },
             { $sort: { total: -1 } },
         ]),
@@ -2106,11 +2107,11 @@ exports.getFinancialOverview = (0, ayncHandler_1.asyncHandler)(async (req, res) 
             { $group: { _id: null, totalVCredits: { $sum: '$vCredits' } } },
         ]),
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, createdAt: { $gte: startOfThisMonth } } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, createdAt: { $gte: startOfThisMonth }, total: { $gte: 0 } } },
             { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
         ]),
         Order_1.default.aggregate([
-            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth } } },
+            { $match: { paymentStatus: types_1.PaymentStatus.COMPLETED, createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth }, total: { $gte: 0 } } },
             { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
         ]),
     ]);
@@ -3963,10 +3964,12 @@ exports.getSalesReport = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const completedFilter = {
         paymentStatus: types_1.PaymentStatus.COMPLETED,
         createdAt: { $gte: startDateVal, $lte: endDateVal },
+        total: { $gte: 0 },
     };
     const prevCompletedFilter = {
         paymentStatus: types_1.PaymentStatus.COMPLETED,
         createdAt: { $gte: prevStartDate, $lte: startDateVal },
+        total: { $gte: 0 },
     };
     const allOrdersFilter = { createdAt: { $gte: startDateVal, $lte: endDateVal } };
     const [currentSummary, prevSummary, dailyRevenue, topProducts, salesByCategory, revenueByPaymentMethod, orderStatusBreakdown, refundStats, newCustomers,] = await Promise.all([
@@ -4152,6 +4155,7 @@ exports.getVendorReport = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const completedFilter = {
         paymentStatus: types_1.PaymentStatus.COMPLETED,
         createdAt: { $gte: startDateVal, $lte: endDateVal },
+        total: { $gte: 0 },
     };
     const [topVendors, platformSummary, newVendors, verificationBreakdown] = await Promise.all([
         Order_1.default.aggregate([
@@ -4242,6 +4246,7 @@ exports.getProductReport = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const completedFilter = {
         paymentStatus: types_1.PaymentStatus.COMPLETED,
         createdAt: { $gte: startDateVal, $lte: endDateVal },
+        total: { $gte: 0 },
     };
     const productFilter = {};
     if (category)

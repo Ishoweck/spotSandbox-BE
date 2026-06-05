@@ -59,7 +59,7 @@ async function runAutoComplete() {
                     const subtotal = vendorItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
                     const commissionRatePct = await getCommissionRate(vendorId);
                     const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
-                    const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
+                    const vendorAmount = Math.max(0, Math.round((subtotal - commission) * 100) / 100);
                     await Wallet_1.default.findOneAndUpdate({ user: vendorId }, {
                         $inc: { balance: vendorAmount, totalEarned: vendorAmount },
                         $push: {
@@ -91,7 +91,7 @@ async function runAutoComplete() {
                 for (const [vendorId, subtotal] of vendorMap) {
                     const commissionRatePct = await getCommissionRate(vendorId);
                     const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
-                    const vendorAmount = Math.round((subtotal - commission) * 100) / 100;
+                    const vendorAmount = Math.max(0, Math.round((subtotal - commission) * 100) / 100);
                     await Wallet_1.default.findOneAndUpdate({ user: vendorId }, {
                         $inc: { balance: vendorAmount, totalEarned: vendorAmount },
                         $push: {

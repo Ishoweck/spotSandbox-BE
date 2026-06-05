@@ -51,7 +51,7 @@ class ReviewController {
             else {
                 // Fallback: sum completed orders if wallet doesn't track totalSpent
                 const completedOrders = await Order_1.default.aggregate([
-                    { $match: { user: new mongoose_1.default.Types.ObjectId(req.user?.id), paymentStatus: 'completed' } },
+                    { $match: { user: new mongoose_1.default.Types.ObjectId(req.user?.id), paymentStatus: 'completed', total: { $gte: 0 } } },
                     { $group: { _id: null, totalSpent: { $sum: '$total' } } },
                 ]);
                 if (completedOrders.length > 0 && completedOrders[0].totalSpent >= VERIFIED_BUYER_THRESHOLD) {

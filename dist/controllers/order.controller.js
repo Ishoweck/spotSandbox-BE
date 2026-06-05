@@ -826,9 +826,9 @@ class OrderController {
         }
         if (subtotal === 0)
             subtotal = cart.subtotal; // fallback if product lookup fails
-        const discount = cart.discount;
+        const discount = Math.min(cart.discount, subtotal); // cap stale coupon discount to actual subtotal
         const tax = 0;
-        const baseTotal = subtotal - discount + totalShippingCost + tax;
+        const baseTotal = Math.max(0, subtotal - discount + totalShippingCost + tax);
         const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
         const total = Math.round(baseTotal + serviceCharge);
         // ── WALLET PRE-CHECK ──────────────────────────────────────────────────────
@@ -1133,9 +1133,9 @@ class OrderController {
         const subtotal = cart.subtotal > 0
             ? cart.subtotal
             : cart.items.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
-        const discount = cart.discount;
+        const discount = Math.min(cart.discount, subtotal); // cap stale coupon discount to actual subtotal
         const tax = 0;
-        const baseTotal = subtotal - discount + totalShippingCost + tax;
+        const baseTotal = Math.max(0, subtotal - discount + totalShippingCost + tax);
         const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
         const total = Math.round(baseTotal + serviceCharge);
         // Validate VCredits balance now but do NOT deduct yet — deduction happens in
@@ -1509,9 +1509,10 @@ class OrderController {
             }
         }
         const subtotal = cartToUse ? cartToUse.subtotal : snapshot.subtotal;
-        const discount = cartToUse ? cartToUse.discount : snapshot.discount;
+        const rawDiscount = cartToUse ? cartToUse.discount : snapshot.discount;
+        const discount = Math.min(rawDiscount, subtotal); // cap stale coupon discount to actual subtotal
         const tax = 0;
-        const baseTotal = subtotal - discount + totalShippingCost + tax;
+        const baseTotal = Math.max(0, subtotal - discount + totalShippingCost + tax);
         const serviceCharge = isDigitalOnly ? 0 : calculateServiceCharge(baseTotal);
         const total = Math.round(baseTotal + serviceCharge);
         const orderNumber = reference; // Use the payment reference as order number
@@ -2603,12 +2604,13 @@ class OrderController {
         }
         // Refund if payment completed
         if (order.paymentStatus === types_1.PaymentStatus.COMPLETED) {
+            const refundAmount = Math.max(0, order.total);
             const wallet = await Additional_1.Wallet.findOne({ user: req.user?.id });
-            if (wallet) {
-                wallet.balance += order.total;
+            if (wallet && refundAmount > 0) {
+                wallet.balance += refundAmount;
                 wallet.transactions.push({
                     type: types_1.TransactionType.CREDIT,
-                    amount: order.total,
+                    amount: refundAmount,
                     purpose: types_1.WalletPurpose.REFUND,
                     reference: `REF-${order.orderNumber}`,
                     description: `Refund for cancelled order ${order.orderNumber}`,
@@ -2619,7 +2621,7 @@ class OrderController {
                 await wallet.save();
             }
             order.paymentStatus = types_1.PaymentStatus.REFUNDED;
-            order.refundAmount = order.total;
+            order.refundAmount = refundAmount;
             order.refundReason = cancelReason;
             await order.save();
             // Notify customer about refund
