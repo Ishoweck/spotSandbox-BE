@@ -227,6 +227,7 @@
      * Get delivery rates
      */
     async getDeliveryRates(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+      res.set('Cache-Control', 'no-store');
       const { city, state, street, fullName, phone, receiverAddressCode } = req.query;
 
       if (!city || !state) {

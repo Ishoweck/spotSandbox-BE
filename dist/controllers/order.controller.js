@@ -231,6 +231,7 @@ class OrderController {
      * Get delivery rates
      */
     async getDeliveryRates(req, res) {
+        res.set('Cache-Control', 'no-store');
         const { city, state, street, fullName, phone, receiverAddressCode } = req.query;
         if (!city || !state) {
             throw new error_1.AppError('City and state are required', 400);

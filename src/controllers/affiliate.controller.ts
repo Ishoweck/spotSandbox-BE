@@ -77,6 +77,10 @@ export class AffiliateController {
       throw new AppError('This product does not support affiliate marketing', 400);
     }
 
+    if (product.vendor.toString() === req.user?.id) {
+      throw new AppError('You cannot create an affiliate link for your own products', 403);
+    }
+
     // Check if link already exists
     let affiliateLink = await AffiliateLink.findOne({
       user: req.user?.id,
