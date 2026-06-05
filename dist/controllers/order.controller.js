@@ -2413,9 +2413,22 @@ class OrderController {
         if (!isDigital) {
             throw new error_1.AppError('This product is not a digital product', 400);
         }
-        const downloadUrl = product.digitalFile?.url || product.downloadLink;
+        let downloadUrl = product.digitalFile?.url || product.downloadLink;
         if (!downloadUrl) {
             throw new error_1.AppError('Download URL not available', 404);
+        }
+        // Inject fl_attachment into Cloudinary raw URLs so the file downloads
+        // with the product name instead of a random public ID as the filename.
+        if (product.digitalFile?.url && downloadUrl.includes('cloudinary.com') && downloadUrl.includes('/raw/upload/')) {
+            const fileType = product.digitalFile?.fileType;
+            const ext = fileType && fileType !== 'link' ? `.${fileType}` : '';
+            const safeName = product.name
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '')
+                .slice(0, 80);
+            const attachmentName = `${safeName}${ext}`;
+            downloadUrl = downloadUrl.replace('/raw/upload/', `/raw/upload/fl_attachment:${attachmentName}/`);
         }
         logger_1.logger.info(`📥 User ${req.user?.id} downloading product ${product.name} from order ${order.orderNumber}`);
         res.json({
