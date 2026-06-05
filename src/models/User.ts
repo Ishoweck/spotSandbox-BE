@@ -138,6 +138,23 @@ const userSchema = new Schema<IUserDocument>(
       bankCode: String,
     },
 
+    outreach: {
+      status: {
+        type: String,
+        enum: ['not_contacted', 'contacted', 'follow_up', 'responded', 'converted', 'not_interested'],
+        default: 'not_contacted',
+      },
+      assignee: { type: Schema.Types.ObjectId, ref: 'User' },
+      assigneeName: String,
+      lastContactedAt: Date,
+      notes: [{
+        text: { type: String, required: true },
+        createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
+        createdByName: String,
+        createdAt: { type: Date, default: Date.now },
+      }],
+    },
+
     // Notification preferences
     notificationPreferences: {
       pushEnabled: { type: Boolean, default: true },

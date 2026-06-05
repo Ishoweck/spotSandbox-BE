@@ -323,6 +323,18 @@ export interface IUserDocument extends Document {
             enabled: boolean;
         }[];
     };
+    outreach?: {
+        status: 'not_contacted' | 'contacted' | 'follow_up' | 'responded' | 'converted' | 'not_interested';
+        assignee?: Types.ObjectId;
+        assigneeName?: string;
+        lastContactedAt?: Date;
+        notes: {
+            text: string;
+            createdBy?: Types.ObjectId;
+            createdByName?: string;
+            createdAt: Date;
+        }[];
+    };
     comparePassword(candidatePassword: string): Promise<boolean>;
 }
 //# sourceMappingURL=index.d.ts.map

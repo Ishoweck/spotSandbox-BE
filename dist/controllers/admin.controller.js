@@ -1342,7 +1342,7 @@ exports.getOutreachList = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     }
     const [allUsers, total] = await Promise.all([
         User_1.default.find(userFilter)
-            .select('firstName lastName email phone avatar role status createdAt')
+            .select('firstName lastName email phone avatar role status createdAt outreach')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -1365,7 +1365,8 @@ exports.getOutreachList = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
             ...u,
             userType: type,
             vendorProfile: profile || null,
-            outreach: profile?.outreach || null,
+            // outreach lives on User; fall back to VendorProfile for any pre-migration data
+            outreach: u.outreach || profile?.outreach || null,
         };
     });
     // Filter by outreach status (only meaningful for vendor_with_profile)
@@ -1402,32 +1403,39 @@ exports.getOutreachList = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
 exports.updateVendorOutreach = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const { id } = req.params;
     const { status, assigneeId, note } = req.body;
-    // Accept either VendorProfile _id or User _id
-    let vendor = await VendorProfile_1.default.findById(id).catch(() => null);
-    if (!vendor) {
-        vendor = await VendorProfile_1.default.findOne({ user: id });
+    // id is the User._id (outreach page always passes user._id)
+    // Backward compat: if id looks like a VendorProfile id, resolve the user from it
+    let targetUser = await User_1.default.findById(id).catch(() => null);
+    if (!targetUser) {
+        const vp = await VendorProfile_1.default.findById(id).catch(() => null);
+        if (vp)
+            targetUser = await User_1.default.findById(vp.user).catch(() => null);
     }
-    if (!vendor) {
-        res.status(404).json({ success: false, message: 'Vendor profile not found for this user' });
+    if (!targetUser) {
+        res.status(404).json({ success: false, message: 'User not found' });
         return;
     }
-    if (!vendor.outreach) {
-        vendor.outreach = { status: 'not_contacted', notes: [] };
+    if (targetUser.role !== 'vendor') {
+        res.status(400).json({ success: false, message: 'Outreach tracking is only for vendor accounts' });
+        return;
+    }
+    if (!targetUser.outreach) {
+        targetUser.outreach = { status: 'not_contacted', notes: [] };
     }
     if (status) {
-        vendor.outreach.status = status;
+        targetUser.outreach.status = status;
     }
     if (assigneeId !== undefined) {
         if (assigneeId) {
-            const assigneeUser = await User_1.default.findById(assigneeId).select('firstName lastName');
-            if (assigneeUser) {
-                vendor.outreach.assignee = assigneeId;
-                vendor.outreach.assigneeName = `${assigneeUser.firstName} ${assigneeUser.lastName}`.trim();
+            const assigneeDoc = await User_1.default.findById(assigneeId).select('firstName lastName');
+            if (assigneeDoc) {
+                targetUser.outreach.assignee = assigneeId;
+                targetUser.outreach.assigneeName = `${assigneeDoc.firstName} ${assigneeDoc.lastName}`.trim();
             }
         }
         else {
-            vendor.outreach.assignee = undefined;
-            vendor.outreach.assigneeName = undefined;
+            targetUser.outreach.assignee = undefined;
+            targetUser.outreach.assigneeName = undefined;
         }
     }
     if (note?.trim()) {
@@ -1435,23 +1443,23 @@ exports.updateVendorOutreach = (0, ayncHandler_1.asyncHandler)(async (req, res) 
         const adminName = adminUser
             ? `${adminUser.firstName || ''} ${adminUser.lastName || ''}`.trim() || adminUser.email
             : 'Admin';
-        if (!vendor.outreach.notes) {
-            vendor.outreach.notes = [];
+        if (!targetUser.outreach.notes) {
+            targetUser.outreach.notes = [];
         }
-        vendor.outreach.notes.push({
+        targetUser.outreach.notes.push({
             text: note.trim(),
             createdBy: adminUser?.id,
             createdByName: adminName,
             createdAt: new Date(),
         });
-        vendor.outreach.lastContactedAt = new Date();
+        targetUser.outreach.lastContactedAt = new Date();
     }
-    vendor.markModified('outreach');
-    await vendor.save();
+    targetUser.markModified('outreach');
+    await targetUser.save();
     res.json({
         success: true,
         message: 'Outreach updated',
-        data: { outreach: vendor.outreach },
+        data: { outreach: targetUser.outreach },
     });
 });
 // ================================================================
