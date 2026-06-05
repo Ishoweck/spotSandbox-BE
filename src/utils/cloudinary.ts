@@ -85,12 +85,39 @@ export const uploadDigitalFileToCloudinary = async (
       resource_type: 'raw',
     });
 
+    // Cloudinary often returns empty format for raw uploads — fall back to the
+    // MIME type in the base64 data URI header.
+    let fileType = result.format || '';
+    if (!fileType) {
+      const mimeMatch = base64Data.match(/data:([^;]+);/);
+      if (mimeMatch) {
+        const mime = mimeMatch[1];
+        const mimeToExt: Record<string, string> = {
+          'application/pdf': 'pdf',
+          'application/zip': 'zip',
+          'application/epub+zip': 'epub',
+          'video/mp4': 'mp4',
+          'audio/mpeg': 'mp3',
+          'audio/mp3': 'mp3',
+          'image/jpeg': 'jpg',
+          'image/png': 'png',
+          'application/msword': 'doc',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+          'application/vnd.ms-excel': 'xls',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+          'text/plain': 'txt',
+          'application/x-zip-compressed': 'zip',
+        };
+        fileType = mimeToExt[mime] || mime.split('/').pop() || '';
+      }
+    }
+
     return {
       url: result.secure_url,
       publicId: result.public_id,
       fileName: result.original_filename || 'digital-file',
       fileSize: result.bytes,
-      fileType: result.format,
+      fileType,
     };
   } catch (error) {
     console.error('Cloudinary digital file upload error:', error);

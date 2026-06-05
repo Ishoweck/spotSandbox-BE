@@ -2420,8 +2420,14 @@ class OrderController {
         // Inject fl_attachment into Cloudinary raw URLs so the file downloads
         // with the product name instead of a random public ID as the filename.
         if (product.digitalFile?.url && downloadUrl.includes('cloudinary.com') && downloadUrl.includes('/raw/upload/')) {
-            const fileType = product.digitalFile?.fileType;
-            const ext = fileType && fileType !== 'link' ? `.${fileType}` : '';
+            const storedType = product.digitalFile?.fileType;
+            let ext = storedType && storedType !== 'link' ? `.${storedType}` : '';
+            // Fallback: pull the extension from the URL itself (e.g. /upload/.../file.pdf)
+            if (!ext) {
+                const urlExtMatch = downloadUrl.match(/\.([a-zA-Z0-9]{2,5})(?:\/|$|\?)/);
+                if (urlExtMatch)
+                    ext = `.${urlExtMatch[1]}`;
+            }
             const safeName = product.name
                 .toLowerCase()
                 .replace(/[^a-z0-9]+/g, '_')
