@@ -181,6 +181,22 @@ const vendorProfileSchema = new mongoose_1.Schema({
             reason: String,
             at: { type: Date, default: Date.now },
         }],
+    outreach: {
+        status: {
+            type: String,
+            enum: ['not_contacted', 'contacted', 'follow_up', 'responded', 'converted', 'not_interested'],
+            default: 'not_contacted',
+        },
+        assignee: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+        assigneeName: String,
+        lastContactedAt: Date,
+        notes: [{
+                text: { type: String, required: true },
+                createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+                createdByName: String,
+                createdAt: { type: Date, default: Date.now },
+            }],
+    },
 }, {
     timestamps: true,
 });

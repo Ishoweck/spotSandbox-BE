@@ -57,6 +57,18 @@ export interface IVendorProfile extends Document {
         reason?: string;
         at: Date;
     }[];
+    outreach?: {
+        status: 'not_contacted' | 'contacted' | 'follow_up' | 'responded' | 'converted' | 'not_interested';
+        assignee?: Types.ObjectId;
+        assigneeName?: string;
+        lastContactedAt?: Date;
+        notes: {
+            text: string;
+            createdBy?: Types.ObjectId;
+            createdByName?: string;
+            createdAt: Date;
+        }[];
+    };
 }
 declare const VendorProfile: mongoose.Model<IVendorProfile, {}, {}, {}, mongoose.Document<unknown, {}, IVendorProfile, {}, {}> & IVendorProfile & Required<{
     _id: Types.ObjectId;

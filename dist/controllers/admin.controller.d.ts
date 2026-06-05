@@ -115,6 +115,16 @@ export declare const validateVendorAddress: (req: import("express").Request, res
  */
 export declare const updateVendorKycDocument: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * GET /admin/outreach
+ * List all vendors with their outreach status for the CRM view
+ */
+export declare const getOutreachList: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
+ * PUT /admin/vendors/:id/outreach
+ * Update outreach status, assignee, or add a note for a vendor
+ */
+export declare const updateVendorOutreach: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * GET /admin/products
  * List all products with filtering
  */

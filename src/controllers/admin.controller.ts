@@ -1545,6 +1545,134 @@ export const updateVendorKycDocument = asyncHandler(
 );
 
 // ================================================================
+// OUTREACH MANAGEMENT
+// ================================================================
+
+/**
+ * GET /admin/outreach
+ * List all vendors with their outreach status for the CRM view
+ */
+export const getOutreachList = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 30;
+    const skip = (page - 1) * limit;
+    const { status, assignee, search } = req.query;
+
+    const filter: any = {};
+    if (status && status !== 'all') {
+      filter['outreach.status'] = status;
+    }
+    if (assignee) {
+      filter['outreach.assignee'] = assignee;
+    }
+    if (search) {
+      const s = escapeRegex(search as string);
+      filter.$or = [
+        { businessName: { $regex: s, $options: 'i' } },
+        { businessEmail: { $regex: s, $options: 'i' } },
+        { businessPhone: { $regex: s, $options: 'i' } },
+      ];
+    }
+
+    const [vendors, total, statusAgg] = await Promise.all([
+      VendorProfile.find(filter)
+        .populate('user', 'firstName lastName email phone')
+        .select('businessName businessEmail businessPhone businessLogo verificationStatus isActive outreach createdAt')
+        .sort({ 'outreach.lastContactedAt': -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      VendorProfile.countDocuments(filter),
+      VendorProfile.aggregate([
+        {
+          $group: {
+            _id: { $ifNull: ['$outreach.status', 'not_contacted'] },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const counts = statusAgg.reduce(
+      (acc: Record<string, number>, item: any) => ({ ...acc, [item._id]: item.count }),
+      {}
+    );
+
+    res.json({
+      success: true,
+      data: { vendors, total, page, limit, counts },
+      meta: getPaginationMeta(total, page, limit),
+    });
+  }
+);
+
+/**
+ * PUT /admin/vendors/:id/outreach
+ * Update outreach status, assignee, or add a note for a vendor
+ */
+export const updateVendorOutreach = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { status, assigneeId, note } = req.body;
+
+    const vendor = await VendorProfile.findById(id);
+    if (!vendor) {
+      res.status(404).json({ success: false, message: 'Vendor not found' });
+      return;
+    }
+
+    if (!(vendor as any).outreach) {
+      (vendor as any).outreach = { status: 'not_contacted', notes: [] };
+    }
+
+    if (status) {
+      (vendor as any).outreach.status = status;
+    }
+
+    if (assigneeId !== undefined) {
+      if (assigneeId) {
+        const assigneeUser = await User.findById(assigneeId).select('firstName lastName');
+        if (assigneeUser) {
+          (vendor as any).outreach.assignee = assigneeId;
+          (vendor as any).outreach.assigneeName = `${assigneeUser.firstName} ${assigneeUser.lastName}`.trim();
+        }
+      } else {
+        (vendor as any).outreach.assignee = undefined;
+        (vendor as any).outreach.assigneeName = undefined;
+      }
+    }
+
+    if (note?.trim()) {
+      const adminUser = req.user as any;
+      const adminName = adminUser
+        ? `${adminUser.firstName || ''} ${adminUser.lastName || ''}`.trim() || adminUser.email
+        : 'Admin';
+
+      if (!(vendor as any).outreach.notes) {
+        (vendor as any).outreach.notes = [];
+      }
+      (vendor as any).outreach.notes.push({
+        text: note.trim(),
+        createdBy: adminUser?.id,
+        createdByName: adminName,
+        createdAt: new Date(),
+      });
+      (vendor as any).outreach.lastContactedAt = new Date();
+    }
+
+    vendor.markModified('outreach');
+    await vendor.save();
+
+    res.json({
+      success: true,
+      message: 'Outreach updated',
+      data: { outreach: (vendor as any).outreach },
+    });
+  }
+);
+
+// ================================================================
 // PRODUCT MANAGEMENT
 // ================================================================
 

@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.getAllAddresses = exports.validateProductPickupAddress = exports.updateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = void 0;
+exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.getAllAddresses = exports.validateProductPickupAddress = exports.updateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorOutreach = exports.getOutreachList = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -1292,6 +1292,113 @@ exports.updateVendorKycDocument = (0, ayncHandler_1.asyncHandler)(async (req, re
         success: true,
         message: `Document ${status === 'verified' ? 'approved' : status === 'rejected' ? 'rejected' : 'reset to pending'}`,
         data: { kycDocuments: vendor.kycDocuments },
+    });
+});
+// ================================================================
+// OUTREACH MANAGEMENT
+// ================================================================
+/**
+ * GET /admin/outreach
+ * List all vendors with their outreach status for the CRM view
+ */
+exports.getOutreachList = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 30;
+    const skip = (page - 1) * limit;
+    const { status, assignee, search } = req.query;
+    const filter = {};
+    if (status && status !== 'all') {
+        filter['outreach.status'] = status;
+    }
+    if (assignee) {
+        filter['outreach.assignee'] = assignee;
+    }
+    if (search) {
+        const s = escapeRegex(search);
+        filter.$or = [
+            { businessName: { $regex: s, $options: 'i' } },
+            { businessEmail: { $regex: s, $options: 'i' } },
+            { businessPhone: { $regex: s, $options: 'i' } },
+        ];
+    }
+    const [vendors, total, statusAgg] = await Promise.all([
+        VendorProfile_1.default.find(filter)
+            .populate('user', 'firstName lastName email phone')
+            .select('businessName businessEmail businessPhone businessLogo verificationStatus isActive outreach createdAt')
+            .sort({ 'outreach.lastContactedAt': -1, createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        VendorProfile_1.default.countDocuments(filter),
+        VendorProfile_1.default.aggregate([
+            {
+                $group: {
+                    _id: { $ifNull: ['$outreach.status', 'not_contacted'] },
+                    count: { $sum: 1 },
+                },
+            },
+        ]),
+    ]);
+    const counts = statusAgg.reduce((acc, item) => ({ ...acc, [item._id]: item.count }), {});
+    res.json({
+        success: true,
+        data: { vendors, total, page, limit, counts },
+        meta: (0, helpers_1.getPaginationMeta)(total, page, limit),
+    });
+});
+/**
+ * PUT /admin/vendors/:id/outreach
+ * Update outreach status, assignee, or add a note for a vendor
+ */
+exports.updateVendorOutreach = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const { status, assigneeId, note } = req.body;
+    const vendor = await VendorProfile_1.default.findById(id);
+    if (!vendor) {
+        res.status(404).json({ success: false, message: 'Vendor not found' });
+        return;
+    }
+    if (!vendor.outreach) {
+        vendor.outreach = { status: 'not_contacted', notes: [] };
+    }
+    if (status) {
+        vendor.outreach.status = status;
+    }
+    if (assigneeId !== undefined) {
+        if (assigneeId) {
+            const assigneeUser = await User_1.default.findById(assigneeId).select('firstName lastName');
+            if (assigneeUser) {
+                vendor.outreach.assignee = assigneeId;
+                vendor.outreach.assigneeName = `${assigneeUser.firstName} ${assigneeUser.lastName}`.trim();
+            }
+        }
+        else {
+            vendor.outreach.assignee = undefined;
+            vendor.outreach.assigneeName = undefined;
+        }
+    }
+    if (note?.trim()) {
+        const adminUser = req.user;
+        const adminName = adminUser
+            ? `${adminUser.firstName || ''} ${adminUser.lastName || ''}`.trim() || adminUser.email
+            : 'Admin';
+        if (!vendor.outreach.notes) {
+            vendor.outreach.notes = [];
+        }
+        vendor.outreach.notes.push({
+            text: note.trim(),
+            createdBy: adminUser?.id,
+            createdByName: adminName,
+            createdAt: new Date(),
+        });
+        vendor.outreach.lastContactedAt = new Date();
+    }
+    vendor.markModified('outreach');
+    await vendor.save();
+    res.json({
+        success: true,
+        message: 'Outreach updated',
+        data: { outreach: vendor.outreach },
     });
 });
 // ================================================================

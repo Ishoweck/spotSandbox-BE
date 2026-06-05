@@ -59,6 +59,18 @@ export interface IVendorProfile extends Document {
     reason?: string;
     at: Date;
   }[];
+  outreach?: {
+    status: 'not_contacted' | 'contacted' | 'follow_up' | 'responded' | 'converted' | 'not_interested';
+    assignee?: Types.ObjectId;
+    assigneeName?: string;
+    lastContactedAt?: Date;
+    notes: {
+      text: string;
+      createdBy?: Types.ObjectId;
+      createdByName?: string;
+      createdAt: Date;
+    }[];
+  };
 }
 
 const vendorProfileSchema = new Schema<IVendorProfile>({
@@ -208,6 +220,22 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     reason: String,
     at: { type: Date, default: Date.now },
   }],
+  outreach: {
+    status: {
+      type: String,
+      enum: ['not_contacted', 'contacted', 'follow_up', 'responded', 'converted', 'not_interested'],
+      default: 'not_contacted',
+    },
+    assignee: { type: Schema.Types.ObjectId, ref: 'User' },
+    assigneeName: String,
+    lastContactedAt: Date,
+    notes: [{
+      text: { type: String, required: true },
+      createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
+      createdByName: String,
+      createdAt: { type: Date, default: Date.now },
+    }],
+  },
 }, {
   timestamps: true,
 });

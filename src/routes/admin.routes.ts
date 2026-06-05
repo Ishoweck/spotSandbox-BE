@@ -34,6 +34,10 @@ import {
   validateVendorAddress,
   updateVendorKycDocument,
 
+  // Outreach Management
+  getOutreachList,
+  updateVendorOutreach,
+
   // Product Management
   getAllProducts,
   getProductDetails,
@@ -207,6 +211,7 @@ router.post('/vendors/:id/address/validate', authorize(SA, A, KA), validateVendo
 router.put('/vendors/:id/kyc/:docIndex', authorize(SA, A, KA), updateVendorKycDocument);
 router.post('/vendors/:id/wallet/resolve', authorize(SA), resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', authorize(SA), fixLegacyCommissionRates);
+router.put('/vendors/:id/outreach', authorize(...allAdmins), updateVendorOutreach);
 
 // ================================================================
 // PRODUCT MANAGEMENT — general + content
@@ -311,6 +316,11 @@ router.get('/challenges/:id/leaderboard', authorize(...marketingAdmins), getChal
 router.get('/reports/sales', authorize(SA, A, FA), getSalesReport);
 router.get('/reports/vendors', authorize(SA, A, FA), getVendorReport);
 router.get('/reports/products', authorize(SA, A, FA, CA), getProductReport);
+
+// ================================================================
+// OUTREACH MANAGEMENT
+// ================================================================
+router.get('/outreach', authorize(...allAdmins), getOutreachList);
 
 // ================================================================
 // ADDRESS MANAGEMENT

@@ -69,6 +69,7 @@ router.post('/vendors/:id/address/validate', (0, auth_1.authorize)(SA, A, KA), a
 router.put('/vendors/:id/kyc/:docIndex', (0, auth_1.authorize)(SA, A, KA), admin_controller_1.updateVendorKycDocument);
 router.post('/vendors/:id/wallet/resolve', (0, auth_1.authorize)(SA), admin_controller_1.resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', (0, auth_1.authorize)(SA), admin_controller_1.fixLegacyCommissionRates);
+router.put('/vendors/:id/outreach', (0, auth_1.authorize)(...allAdmins), admin_controller_1.updateVendorOutreach);
 // ================================================================
 // PRODUCT MANAGEMENT — general + content
 // ================================================================
@@ -161,6 +162,10 @@ router.get('/challenges/:id/leaderboard', (0, auth_1.authorize)(...marketingAdmi
 router.get('/reports/sales', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.getSalesReport);
 router.get('/reports/vendors', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.getVendorReport);
 router.get('/reports/products', (0, auth_1.authorize)(SA, A, FA, CA), admin_controller_1.getProductReport);
+// ================================================================
+// OUTREACH MANAGEMENT
+// ================================================================
+router.get('/outreach', (0, auth_1.authorize)(...allAdmins), admin_controller_1.getOutreachList);
 // ================================================================
 // ADDRESS MANAGEMENT
 // ================================================================
