@@ -65,8 +65,7 @@ const uploadDigitalFileToCloudinary = async (base64Data, folder = 'digital-produ
     try {
         const result = await cloudinary_1.v2.uploader.upload(base64Data, {
             folder,
-            resource_type: 'auto',
-            // Don't transform digital files
+            resource_type: 'raw',
         });
         return {
             url: result.secure_url,

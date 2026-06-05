@@ -82,8 +82,7 @@ export const uploadDigitalFileToCloudinary = async (
   try {
     const result = await cloudinary.uploader.upload(base64Data, {
       folder,
-      resource_type: 'auto',
-      // Don't transform digital files
+      resource_type: 'raw',
     });
 
     return {

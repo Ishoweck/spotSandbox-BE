@@ -90,21 +90,16 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
     if (productData.productType === 'digital' && productData.digitalFileBase64) {
       console.log('📁 Uploading digital file to Cloudinary...');
       
-      const digitalFileResult = await uploadToCloudinary(
+      const digitalFileResult = await uploadDigitalFileToCloudinary(
         productData.digitalFileBase64,
         `digital-products/${req.user?.id}`
       );
-      
-      // Extract file info from base64 string
-      const fileTypeMatch = productData.digitalFileBase64.match(/data:([^;]+);/);
-      const fileType = fileTypeMatch ? fileTypeMatch[1] : 'application/octet-stream';
-      const fileSize = Math.round((productData.digitalFileBase64.length * 0.75));
-      
+
       productData.digitalFile = {
         url: digitalFileResult.url,
-        fileName: productData.digitalFileName || 'digital-file',
-        fileSize: fileSize,
-        fileType: fileType,
+        fileName: productData.digitalFileName || digitalFileResult.fileName || 'digital-file',
+        fileSize: digitalFileResult.fileSize,
+        fileType: digitalFileResult.fileType,
         version: productData.digitalFileVersion || '1.0',
         uploadedAt: new Date(),
       };
