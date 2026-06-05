@@ -481,11 +481,21 @@ class VendorController {
             throw new error_1.AppError('Vendor profile not found', 404);
         }
         documents.forEach((doc) => {
-            vendorProfile.kycDocuments.push({
-                type: doc.type,
-                documentUrl: doc.documentUrl,
-                verificationStatus: 'pending',
-            });
+            const existingIdx = vendorProfile.kycDocuments.findIndex((d) => d.type === doc.type);
+            if (existingIdx >= 0) {
+                // Replace existing doc of same type — reset to pending so admin re-reviews it
+                vendorProfile.kycDocuments[existingIdx].documentUrl = doc.documentUrl;
+                vendorProfile.kycDocuments[existingIdx].verificationStatus = 'pending';
+                vendorProfile.kycDocuments[existingIdx].verifiedAt = undefined;
+                vendorProfile.kycDocuments[existingIdx].rejectionReason = undefined;
+            }
+            else {
+                vendorProfile.kycDocuments.push({
+                    type: doc.type,
+                    documentUrl: doc.documentUrl,
+                    verificationStatus: 'pending',
+                });
+            }
         });
         if (vendorProfile.verificationStatus === types_1.VendorVerificationStatus.PENDING) {
             vendorProfile.verificationStatus = types_1.VendorVerificationStatus.PENDING;

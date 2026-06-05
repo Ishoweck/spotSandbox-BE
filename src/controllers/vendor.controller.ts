@@ -531,11 +531,20 @@ export class VendorController {
     }
 
     documents.forEach((doc: any) => {
-      vendorProfile.kycDocuments.push({
-        type: doc.type,
-        documentUrl: doc.documentUrl,
-        verificationStatus: 'pending',
-      });
+      const existingIdx = vendorProfile.kycDocuments.findIndex((d) => d.type === doc.type);
+      if (existingIdx >= 0) {
+        // Replace existing doc of same type — reset to pending so admin re-reviews it
+        (vendorProfile.kycDocuments[existingIdx] as any).documentUrl = doc.documentUrl;
+        (vendorProfile.kycDocuments[existingIdx] as any).verificationStatus = 'pending';
+        (vendorProfile.kycDocuments[existingIdx] as any).verifiedAt = undefined;
+        (vendorProfile.kycDocuments[existingIdx] as any).rejectionReason = undefined;
+      } else {
+        vendorProfile.kycDocuments.push({
+          type: doc.type,
+          documentUrl: doc.documentUrl,
+          verificationStatus: 'pending',
+        });
+      }
     });
 
     if (vendorProfile.verificationStatus === VendorVerificationStatus.PENDING) {
