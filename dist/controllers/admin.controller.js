@@ -542,9 +542,25 @@ exports.getAllUsers = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
             .limit(limitNum),
         User_1.default.countDocuments(filter),
     ]);
+    // Attach hasVendorProfile so the admin UI can distinguish
+    // "vendor role, profile exists" from "vendor role, no profile yet"
+    const vendorRoleIds = users
+        .filter((u) => u.role === types_1.UserRole.VENDOR)
+        .map((u) => u._id);
+    let vendorProfileSet = new Set();
+    if (vendorRoleIds.length > 0) {
+        const existingIds = await VendorProfile_1.default.distinct('user', {
+            user: { $in: vendorRoleIds },
+        });
+        vendorProfileSet = new Set(existingIds.map((id) => id.toString()));
+    }
+    const usersWithMeta = users.map((u) => ({
+        ...u.toObject(),
+        hasVendorProfile: vendorProfileSet.has(u._id.toString()),
+    }));
     res.json({
         success: true,
-        data: users,
+        data: usersWithMeta,
         meta: (0, helpers_1.getPaginationMeta)(total, pageNum, limitNum),
     });
 });
@@ -1305,44 +1321,77 @@ exports.getOutreachList = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 30;
     const skip = (page - 1) * limit;
-    const { status, assignee, search } = req.query;
-    const filter = {};
-    if (status && status !== 'all') {
-        filter['outreach.status'] = status;
-    }
-    if (assignee) {
-        filter['outreach.assignee'] = assignee;
-    }
+    const { outreachStatus, userType, search } = req.query;
+    // Base filter on User collection
+    const userFilter = {};
     if (search) {
         const s = escapeRegex(search);
-        filter.$or = [
-            { businessName: { $regex: s, $options: 'i' } },
-            { businessEmail: { $regex: s, $options: 'i' } },
-            { businessPhone: { $regex: s, $options: 'i' } },
+        userFilter.$or = [
+            { firstName: { $regex: s, $options: 'i' } },
+            { lastName: { $regex: s, $options: 'i' } },
+            { email: { $regex: s, $options: 'i' } },
+            { phone: { $regex: s, $options: 'i' } },
         ];
     }
-    const [vendors, total, statusAgg] = await Promise.all([
-        VendorProfile_1.default.find(filter)
-            .populate('user', 'firstName lastName email phone')
-            .select('businessName businessEmail businessPhone businessLogo verificationStatus isActive outreach createdAt')
-            .sort({ 'outreach.lastContactedAt': -1, createdAt: -1 })
+    // userType filter: customer | vendor | all
+    if (userType === 'customer') {
+        userFilter.role = 'customer';
+    }
+    else if (userType === 'vendor') {
+        userFilter.role = 'vendor';
+    }
+    const [allUsers, total] = await Promise.all([
+        User_1.default.find(userFilter)
+            .select('firstName lastName email phone avatar role status createdAt')
+            .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .lean(),
-        VendorProfile_1.default.countDocuments(filter),
-        VendorProfile_1.default.aggregate([
-            {
-                $group: {
-                    _id: { $ifNull: ['$outreach.status', 'not_contacted'] },
-                    count: { $sum: 1 },
-                },
-            },
-        ]),
+        User_1.default.countDocuments(userFilter),
     ]);
-    const counts = statusAgg.reduce((acc, item) => ({ ...acc, [item._id]: item.count }), {});
+    // Join VendorProfile for vendor users
+    const userIds = allUsers.map((u) => u._id);
+    const vendorProfiles = await VendorProfile_1.default.find({ user: { $in: userIds } })
+        .select('user businessName businessEmail businessPhone businessLogo verificationStatus isActive outreach')
+        .lean();
+    const profileMap = new Map(vendorProfiles.map((vp) => [vp.user.toString(), vp]));
+    // Compute userType and attach profile + outreach
+    let result = allUsers.map((u) => {
+        const profile = profileMap.get(u._id.toString());
+        const type = u.role === 'vendor'
+            ? (profile ? 'vendor_with_profile' : 'vendor_no_profile')
+            : 'customer';
+        return {
+            ...u,
+            userType: type,
+            vendorProfile: profile || null,
+            outreach: profile?.outreach || null,
+        };
+    });
+    // Filter by outreach status (only meaningful for vendor_with_profile)
+    if (outreachStatus && outreachStatus !== 'all') {
+        result = result.filter((u) => (u.outreach?.status || 'not_contacted') === outreachStatus);
+    }
+    // Filter by userType (vendor_with_profile / vendor_no_profile / customer)
+    if (userType === 'vendor_with_profile') {
+        result = result.filter((u) => u.userType === 'vendor_with_profile');
+    }
+    else if (userType === 'vendor_no_profile') {
+        result = result.filter((u) => u.userType === 'vendor_no_profile');
+    }
+    // Count breakdown for tabs
+    const typeCounts = { customer: 0, vendor_with_profile: 0, vendor_no_profile: 0 };
+    result.forEach((u) => {
+        if (u.userType === 'customer')
+            typeCounts.customer++;
+        else if (u.userType === 'vendor_with_profile')
+            typeCounts.vendor_with_profile++;
+        else
+            typeCounts.vendor_no_profile++;
+    });
     res.json({
         success: true,
-        data: { vendors, total, page, limit, counts },
+        data: { users: result, total, page, limit, typeCounts },
         meta: (0, helpers_1.getPaginationMeta)(total, page, limit),
     });
 });
@@ -1353,9 +1402,13 @@ exports.getOutreachList = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
 exports.updateVendorOutreach = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
     const { id } = req.params;
     const { status, assigneeId, note } = req.body;
-    const vendor = await VendorProfile_1.default.findById(id);
+    // Accept either VendorProfile _id or User _id
+    let vendor = await VendorProfile_1.default.findById(id).catch(() => null);
     if (!vendor) {
-        res.status(404).json({ success: false, message: 'Vendor not found' });
+        vendor = await VendorProfile_1.default.findOne({ user: id });
+    }
+    if (!vendor) {
+        res.status(404).json({ success: false, message: 'Vendor profile not found for this user' });
         return;
     }
     if (!vendor.outreach) {
