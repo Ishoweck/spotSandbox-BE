@@ -19,6 +19,7 @@
   import { notificationService, emitOrderStatusUpdate, emitNewOrder } from '../services/notification.service';
   import { logger } from '../utils/logger';
   import Conversation from '../models/Conversation';
+  import axios from 'axios';
 
   /** Buyer Protection Fee tiers */
   function calculateServiceCharge(orderTotal: number): number {
@@ -2828,27 +2829,45 @@
         throw new AppError('This product is not a digital product', 400);
       }
 
-      let downloadUrl: string = product.digitalFile?.url || product.downloadLink;
+      const cloudinaryUrl: string = product.digitalFile?.url || product.downloadLink;
 
-      if (!downloadUrl) {
+      if (!cloudinaryUrl) {
         throw new AppError('Download URL not available', 404);
       }
 
-
       logger.info(`📥 User ${req.user?.id} downloading product ${product.name} from order ${order.orderNumber}`);
 
-      res.json({
-        success: true,
-        data: {
-          downloadUrl,
-          product: {
-            name: product.name,
-            fileSize: product.digitalFile?.fileSize,
-            fileType: product.digitalFile?.fileType,
-            version: product.digitalFile?.version,
-          },
-        },
+      const ext = (product.digitalFile?.fileType || 'bin').toLowerCase();
+      const safeName = (product.name as string)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 80);
+
+      const MIME_MAP: Record<string, string> = {
+        pdf: 'application/pdf',
+        zip: 'application/zip',
+        mp4: 'video/mp4',
+        mp3: 'audio/mpeg',
+        epub: 'application/epub+zip',
+      };
+      const contentType = MIME_MAP[ext] ?? 'application/octet-stream';
+
+      // Fetch from Cloudinary and pipe straight to the client — this avoids
+      // any CDN access-control issues that arise when the mobile app hits
+      // Cloudinary directly.
+      const fileStream = await axios.get(cloudinaryUrl, {
+        responseType: 'stream',
+        validateStatus: (s) => s >= 200 && s < 400,
       });
+
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${ext}"`);
+      res.setHeader('Content-Type', contentType);
+      if (product.digitalFile?.fileSize) {
+        res.setHeader('Content-Length', String(product.digitalFile.fileSize));
+      }
+
+      fileStream.data.pipe(res);
     }
 
     /**

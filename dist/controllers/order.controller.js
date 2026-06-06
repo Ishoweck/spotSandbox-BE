@@ -54,6 +54,7 @@ const email_1 = require("../utils/email");
 const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
 const Conversation_1 = __importDefault(require("../models/Conversation"));
+const axios_1 = __importDefault(require("axios"));
 /** Buyer Protection Fee tiers */
 function calculateServiceCharge(orderTotal) {
     if (orderTotal >= 100001)
@@ -2413,23 +2414,38 @@ class OrderController {
         if (!isDigital) {
             throw new error_1.AppError('This product is not a digital product', 400);
         }
-        let downloadUrl = product.digitalFile?.url || product.downloadLink;
-        if (!downloadUrl) {
+        const cloudinaryUrl = product.digitalFile?.url || product.downloadLink;
+        if (!cloudinaryUrl) {
             throw new error_1.AppError('Download URL not available', 404);
         }
         logger_1.logger.info(`📥 User ${req.user?.id} downloading product ${product.name} from order ${order.orderNumber}`);
-        res.json({
-            success: true,
-            data: {
-                downloadUrl,
-                product: {
-                    name: product.name,
-                    fileSize: product.digitalFile?.fileSize,
-                    fileType: product.digitalFile?.fileType,
-                    version: product.digitalFile?.version,
-                },
-            },
+        const ext = (product.digitalFile?.fileType || 'bin').toLowerCase();
+        const safeName = product.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 80);
+        const MIME_MAP = {
+            pdf: 'application/pdf',
+            zip: 'application/zip',
+            mp4: 'video/mp4',
+            mp3: 'audio/mpeg',
+            epub: 'application/epub+zip',
+        };
+        const contentType = MIME_MAP[ext] ?? 'application/octet-stream';
+        // Fetch from Cloudinary and pipe straight to the client — this avoids
+        // any CDN access-control issues that arise when the mobile app hits
+        // Cloudinary directly.
+        const fileStream = await axios_1.default.get(cloudinaryUrl, {
+            responseType: 'stream',
+            validateStatus: (s) => s >= 200 && s < 400,
         });
+        res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${ext}"`);
+        res.setHeader('Content-Type', contentType);
+        if (product.digitalFile?.fileSize) {
+            res.setHeader('Content-Length', String(product.digitalFile.fileSize));
+        }
+        fileStream.data.pipe(res);
     }
     /**
      * Track order shipment
