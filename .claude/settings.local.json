@@ -70,7 +70,13 @@
       "Bash(grep -rn 'User.*findByIdAndUpdate.*points\\\\|User.*findOneAndUpdate.*points\\\\|$inc.*points' 'C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src')",
       "Bash(dir /s /b \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\\\\src\\\\screens\")",
       "Bash(mongosh --version)",
-      "Bash(node scripts/migrate-vendors.js)"
+      "Bash(node scripts/migrate-vendors.js)",
+      "PowerShell(& \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\node_modules\\\\.bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
+      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
+      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\tsconfig.json\" 2>&1 | Select-Object -First 10)",
+      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
+      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\tsconfig.json\" 2>&1 | Select-Object -First 20; node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
+      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)"
     ]
   }
 }

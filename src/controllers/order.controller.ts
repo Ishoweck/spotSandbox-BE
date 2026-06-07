@@ -529,6 +529,26 @@
           destination.addressCode, // skip receiver validation if stored
         );
 
+        // If ShipBubble had to re-validate the sender (stale stored code), persist the
+        // fresh code so subsequent requests don't hit the same 422 again.
+        if (ratesResponse.freshSenderCode) {
+          try {
+            const freshCode = ratesResponse.freshSenderCode as number;
+            if (!hasProductPickup) {
+              await VendorProfile.updateOne(
+                { user: vendorGroup.vendorId },
+                {
+                  'businessAddress.shipBubble.addressCode': freshCode,
+                  'businessAddress.shipBubble.validatedAt': new Date(),
+                }
+              );
+              logger.info(`✅ Persisted fresh sender address code ${freshCode} for vendor ${vendorGroup.vendorName}`);
+            }
+          } catch (persistErr: any) {
+            logger.warn('⚠️ Could not persist fresh sender address code:', persistErr.message);
+          }
+        }
+
         if (ratesResponse.status === 'success' && ratesResponse.data?.couriers) {
           logger.info(`✅ Got ${ratesResponse.data.couriers.length} courier options from ShipBubble`);
 

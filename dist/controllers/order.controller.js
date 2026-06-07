@@ -472,6 +472,23 @@ class OrderController {
             });
             const ratesResponse = await shipbubble_service_1.shipBubbleService.getDeliveryRates(senderAddress, receiverAddress, packageItems, undefined, categoryId, senderStoredCode, // skip sender validation if stored
             destination.addressCode);
+            // If ShipBubble had to re-validate the sender (stale stored code), persist the
+            // fresh code so subsequent requests don't hit the same 422 again.
+            if (ratesResponse.freshSenderCode) {
+                try {
+                    const freshCode = ratesResponse.freshSenderCode;
+                    if (!hasProductPickup) {
+                        await VendorProfile_1.default.updateOne({ user: vendorGroup.vendorId }, {
+                            'businessAddress.shipBubble.addressCode': freshCode,
+                            'businessAddress.shipBubble.validatedAt': new Date(),
+                        });
+                        logger_1.logger.info(`✅ Persisted fresh sender address code ${freshCode} for vendor ${vendorGroup.vendorName}`);
+                    }
+                }
+                catch (persistErr) {
+                    logger_1.logger.warn('⚠️ Could not persist fresh sender address code:', persistErr.message);
+                }
+            }
             if (ratesResponse.status === 'success' && ratesResponse.data?.couriers) {
                 logger_1.logger.info(`✅ Got ${ratesResponse.data.couriers.length} courier options from ShipBubble`);
                 ratesResponse.data.couriers.forEach((courier, index) => {

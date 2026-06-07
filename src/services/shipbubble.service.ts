@@ -260,11 +260,60 @@ export class ShipBubbleService {
       
       logger.info('📤 Full request body:', JSON.stringify(requestBody, null, 2));
 
-      const response = await axios.post(
-        `${SHIPBUBBLE_BASE_URL}/shipping/fetch_rates`,
-        requestBody,
-        { headers: this.headers, timeout: 30000 }
-      );
+      // Attempt fetch_rates with automatic retry if the stored sender code is stale (422)
+      let response: any;
+      let freshSenderCode: number | undefined;
+
+      try {
+        response = await axios.post(
+          `${SHIPBUBBLE_BASE_URL}/shipping/fetch_rates`,
+          requestBody,
+          { headers: this.headers, timeout: 30000 }
+        );
+      } catch (fetchError: any) {
+        const is422 = fetchError.response?.status === 422;
+
+        if (is422 && senderAddressCode) {
+          logger.warn('⚠️ 422 with stored sender address code — evicting cache and re-validating...');
+          logger.warn('⚠️ Stale-code errors:', fetchError.response?.data?.errors);
+
+          // Evict the stale code from in-memory cache so validateAddress fetches a fresh one
+          const cacheKey = this.getAddressCacheKey(senderAddress);
+          this.addressCache.delete(cacheKey);
+
+          const freshSender = await this.validateAddress(senderAddress);
+          freshSenderCode = freshSender.address_code;
+          logger.info('✅ Re-validated sender address code:', freshSenderCode);
+
+          // Retry with the fresh code
+          const retryBody = { ...requestBody, sender_address_code: freshSenderCode };
+          response = await axios.post(
+            `${SHIPBUBBLE_BASE_URL}/shipping/fetch_rates`,
+            retryBody,
+            { headers: this.headers, timeout: 30000 }
+          );
+        } else {
+          logger.error('❌ ========================================');
+          logger.error('❌ SHIPBUBBLE FETCH_RATES ERROR');
+          logger.error('❌ ========================================');
+          logger.error('❌ Error Message:', fetchError.message);
+          logger.error('❌ Response Status:', fetchError.response?.status);
+          logger.error('❌ Response Status Text:', fetchError.response?.statusText);
+          logger.error('❌ Response Data:', JSON.stringify(fetchError.response?.data, null, 2));
+
+          if (fetchError.response?.status === 401) {
+            logger.error('🔐 Unauthorized - Check your SHIPBUBBLE_API_KEY');
+          } else if (fetchError.response?.status === 400) {
+            logger.error('⚠️ Bad Request - Invalid parameters');
+          } else if (fetchError.response?.status === 422) {
+            logger.error('⚠️ Unprocessable Entity - Validation failed:', {
+              errors: fetchError.response?.data?.errors,
+            });
+          }
+
+          throw fetchError;
+        }
+      }
 
       logger.info('📥 ========================================');
       logger.info('📥 SHIPBUBBLE RATES RESPONSE');
@@ -300,26 +349,10 @@ export class ShipBubbleService {
 
       logger.info('✅ ShipBubble rates retrieved successfully');
 
-      return response.data;
+      // Include freshSenderCode so the controller can persist it and avoid future stale-code 422s
+      return freshSenderCode ? { ...response.data, freshSenderCode } : response.data;
     } catch (error: any) {
-      logger.error('❌ ========================================');
-      logger.error('❌ SHIPBUBBLE FETCH_RATES ERROR');
-      logger.error('❌ ========================================');
-      logger.error('❌ Error Message:', error.message);
-      logger.error('❌ Response Status:', error.response?.status);
-      logger.error('❌ Response Status Text:', error.response?.statusText);
-      logger.error('❌ Response Data:', JSON.stringify(error.response?.data, null, 2));
-
-      if (error.response?.status === 401) {
-        logger.error('🔐 Unauthorized - Check your SHIPBUBBLE_API_KEY');
-      } else if (error.response?.status === 400) {
-        logger.error('⚠️ Bad Request - Invalid parameters');
-      } else if (error.response?.status === 422) {
-        logger.error('⚠️ Unprocessable Entity - Validation failed:', {
-          errors: error.response?.data?.errors,
-        });
-      }
-
+      logger.error('❌ ShipBubble getDeliveryRates failed:', error.message);
       throw error;
     }
   }
