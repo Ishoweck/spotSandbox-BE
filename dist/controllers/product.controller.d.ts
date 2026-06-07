@@ -14,7 +14,7 @@ export declare class ProductController {
     getNewArrivals(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     getProductsOnSale(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
-     * Get flash sale products (active, >=10% discount, isFlashSale=true, not expired)
+     * Get discounted products — any active product where price < compareAtPrice.
      */
     getFlashSaleProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**

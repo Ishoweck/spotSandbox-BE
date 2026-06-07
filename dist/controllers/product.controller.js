@@ -401,10 +401,11 @@ class ProductController {
     // NEW: Get Recommended Products
     async getRecommendedProducts(req, res) {
         const limit = parseInt(req.query.limit) || 10;
+        const page = parseInt(req.query.page) || 1;
+        const skip = (page - 1) * limit;
         const userId = req.user?.id;
         let preferredCategoryIds = [];
         if (userId) {
-            // Pull the user's last 20 orders to find preferred categories
             const recentOrders = await Order_1.default.find({ user: userId })
                 .sort({ createdAt: -1 })
                 .limit(20)
@@ -425,37 +426,28 @@ class ProductController {
         if (preferredCategoryIds.length > 0) {
             baseFilter.category = { $in: preferredCategoryIds };
         }
-        let products = await Product_1.default.find(baseFilter)
-            .populate('vendor', 'firstName lastName profileImage')
-            .populate('category', 'name')
-            .sort({ averageRating: -1, totalSales: -1, views: -1 })
-            .limit(limit)
-            .lean();
-        // If category filter returned fewer than half the limit, top up with global top-rated
-        if (products.length < Math.ceil(limit / 2)) {
-            const exclude = products.map((p) => p._id);
-            const extras = await Product_1.default.find({
-                status: types_1.ProductStatus.ACTIVE,
-                quantity: { $gt: 0 },
-                _id: { $nin: exclude },
-            })
+        const [products, total] = await Promise.all([
+            Product_1.default.find(baseFilter)
                 .populate('vendor', 'firstName lastName profileImage')
                 .populate('category', 'name')
                 .sort({ averageRating: -1, totalSales: -1, views: -1 })
-                .limit(limit - products.length)
-                .lean();
-            products = [...products, ...extras];
-        }
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            Product_1.default.countDocuments(baseFilter),
+        ]);
         const formattedProducts = products.map(this.formatProduct);
+        const totalPages = Math.ceil(total / limit);
         res.json({
             success: true,
             message: 'Recommended products fetched successfully',
             data: {
                 products: formattedProducts,
-                total: products.length,
-                page: 1,
+                total,
+                page,
                 limit,
-                hasMore: false,
+                totalPages,
+                hasMore: page < totalPages,
             },
         });
     }
@@ -558,32 +550,40 @@ class ProductController {
     // NEW: Get New Arrivals
     async getNewArrivals(req, res) {
         const limit = parseInt(req.query.limit) || 10;
-        // Products created in last 30 days
+        const page = parseInt(req.query.page) || 1;
+        const skip = (page - 1) * limit;
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         const activeVendorIds = await this.getActiveVendorIds();
-        const products = await Product_1.default.find({
+        const filter = {
             status: types_1.ProductStatus.ACTIVE,
             createdAt: { $gte: thirtyDaysAgo },
             quantity: { $gt: 0 },
             vendor: { $in: activeVendorIds },
-        })
-            .populate('vendor', 'firstName lastName profileImage')
-            .populate('category', 'name')
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .lean();
+        };
+        const [products, total] = await Promise.all([
+            Product_1.default.find(filter)
+                .populate('vendor', 'firstName lastName profileImage')
+                .populate('category', 'name')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            Product_1.default.countDocuments(filter),
+        ]);
         const formattedProducts = products.map(this.formatProduct);
+        const totalPages = Math.ceil(total / limit);
         res.json({
             success: true,
             message: 'New arrivals fetched successfully',
             data: {
                 products: formattedProducts,
-                total: products.length,
-                page: 1,
+                total,
+                page,
                 limit,
-                hasMore: false
-            }
+                totalPages,
+                hasMore: page < totalPages,
+            },
         });
     }
     // NEW: Get Products On Sale
@@ -617,34 +617,36 @@ class ProductController {
         });
     }
     /**
-     * Get flash sale products (active, >=10% discount, isFlashSale=true, not expired)
+     * Get discounted products — any active product where price < compareAtPrice.
      */
     async getFlashSaleProducts(req, res) {
         const limit = parseInt(req.query.limit) || 20;
-        const now = new Date();
+        const page = parseInt(req.query.page) || 1;
+        const skip = (page - 1) * limit;
         const activeVendorIds = await this.getActiveVendorIds();
-        const products = await Product_1.default.find({
+        const filter = {
             status: types_1.ProductStatus.ACTIVE,
-            isFlashSale: true,
             quantity: { $gt: 0 },
             compareAtPrice: { $exists: true, $gt: 0 },
             $expr: { $lt: ['$price', '$compareAtPrice'] },
             vendor: { $in: activeVendorIds },
-            $or: [
-                { flashSaleEndsAt: null },
-                { flashSaleEndsAt: { $gt: now } },
-            ],
-        })
-            .populate('vendor', 'firstName lastName profileImage')
-            .populate('category', 'name')
-            .sort({ updatedAt: -1 })
-            .limit(limit)
-            .lean();
+        };
+        const [products, total] = await Promise.all([
+            Product_1.default.find(filter)
+                .populate('vendor', 'firstName lastName profileImage')
+                .populate('category', 'name')
+                .sort({ updatedAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            Product_1.default.countDocuments(filter),
+        ]);
         const formattedProducts = products.map(this.formatProduct);
+        const totalPages = Math.ceil(total / limit);
         res.json({
             success: true,
-            message: 'Flash sale products fetched',
-            data: { products: formattedProducts, total: products.length, page: 1, limit, hasMore: false },
+            message: 'Discounted products fetched',
+            data: { products: formattedProducts, total, page, limit, totalPages, hasMore: page < totalPages },
         });
     }
     /**

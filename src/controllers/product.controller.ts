@@ -431,12 +431,13 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   // NEW: Get Recommended Products
   async getRecommendedProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const limit = parseInt(req.query.limit as string) || 10;
+    const page = parseInt(req.query.page as string) || 1;
+    const skip = (page - 1) * limit;
     const userId = req.user?.id;
 
     let preferredCategoryIds: any[] = [];
 
     if (userId) {
-      // Pull the user's last 20 orders to find preferred categories
       const recentOrders = await Order.find({ user: userId })
         .sort({ createdAt: -1 })
         .limit(20)
@@ -465,40 +466,30 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       baseFilter.category = { $in: preferredCategoryIds };
     }
 
-    let products = await Product.find(baseFilter)
-      .populate('vendor', 'firstName lastName profileImage')
-      .populate('category', 'name')
-      .sort({ averageRating: -1, totalSales: -1, views: -1 })
-      .limit(limit)
-      .lean();
-
-    // If category filter returned fewer than half the limit, top up with global top-rated
-    if (products.length < Math.ceil(limit / 2)) {
-      const exclude = products.map((p: any) => p._id);
-      const extras = await Product.find({
-        status: ProductStatus.ACTIVE,
-        quantity: { $gt: 0 },
-        _id: { $nin: exclude },
-      })
+    const [products, total] = await Promise.all([
+      Product.find(baseFilter)
         .populate('vendor', 'firstName lastName profileImage')
         .populate('category', 'name')
         .sort({ averageRating: -1, totalSales: -1, views: -1 })
-        .limit(limit - products.length)
-        .lean();
-      products = [...products, ...extras];
-    }
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(baseFilter),
+    ]);
 
     const formattedProducts = products.map(this.formatProduct);
+    const totalPages = Math.ceil(total / limit);
 
     res.json({
       success: true,
       message: 'Recommended products fetched successfully',
       data: {
         products: formattedProducts,
-        total: products.length,
-        page: 1,
+        total,
+        page,
         limit,
-        hasMore: false,
+        totalPages,
+        hasMore: page < totalPages,
       },
     });
   }
@@ -619,36 +610,45 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   // NEW: Get New Arrivals
   async getNewArrivals(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const limit = parseInt(req.query.limit as string) || 10;
+    const page = parseInt(req.query.page as string) || 1;
+    const skip = (page - 1) * limit;
 
-    // Products created in last 30 days
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const activeVendorIds = await this.getActiveVendorIds();
 
-    const products = await Product.find({
+    const filter = {
       status: ProductStatus.ACTIVE,
       createdAt: { $gte: thirtyDaysAgo },
       quantity: { $gt: 0 },
       vendor: { $in: activeVendorIds },
-    })
-      .populate('vendor', 'firstName lastName profileImage')
-      .populate('category', 'name')
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
+    };
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .populate('vendor', 'firstName lastName profileImage')
+        .populate('category', 'name')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
 
     const formattedProducts = products.map(this.formatProduct);
+    const totalPages = Math.ceil(total / limit);
 
     res.json({
       success: true,
       message: 'New arrivals fetched successfully',
       data: {
         products: formattedProducts,
-        total: products.length,
-        page: 1,
+        total,
+        page,
         limit,
-        hasMore: false
-      }
+        totalPages,
+        hasMore: page < totalPages,
+      },
     });
   }
 
@@ -687,37 +687,40 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   }
 
   /**
-   * Get flash sale products (active, >=10% discount, isFlashSale=true, not expired)
+   * Get discounted products — any active product where price < compareAtPrice.
    */
   async getFlashSaleProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const limit = parseInt(req.query.limit as string) || 20;
+    const page = parseInt(req.query.page as string) || 1;
+    const skip = (page - 1) * limit;
 
-    const now = new Date();
     const activeVendorIds = await this.getActiveVendorIds();
-    const products = await Product.find({
+    const filter = {
       status: ProductStatus.ACTIVE,
-      isFlashSale: true,
       quantity: { $gt: 0 },
       compareAtPrice: { $exists: true, $gt: 0 },
       $expr: { $lt: ['$price', '$compareAtPrice'] },
       vendor: { $in: activeVendorIds },
-      $or: [
-        { flashSaleEndsAt: null },
-        { flashSaleEndsAt: { $gt: now } },
-      ],
-    })
-      .populate('vendor', 'firstName lastName profileImage')
-      .populate('category', 'name')
-      .sort({ updatedAt: -1 })
-      .limit(limit)
-      .lean();
+    };
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .populate('vendor', 'firstName lastName profileImage')
+        .populate('category', 'name')
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
 
     const formattedProducts = products.map(this.formatProduct);
+    const totalPages = Math.ceil(total / limit);
 
     res.json({
       success: true,
-      message: 'Flash sale products fetched',
-      data: { products: formattedProducts, total: products.length, page: 1, limit, hasMore: false },
+      message: 'Discounted products fetched',
+      data: { products: formattedProducts, total, page, limit, totalPages, hasMore: page < totalPages },
     });
   }
 
