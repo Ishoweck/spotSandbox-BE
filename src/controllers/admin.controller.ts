@@ -34,10 +34,11 @@ import {
 } from '../models/Additional';
 import { notificationService } from '../services/notification.service';
 import { shipBubbleService } from '../services/shipbubble.service';
-import { sendEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
+import { sendEmail, sendActivationEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
 import { queueEmailsInBackground } from '../utils/email-queue';
 import { sendPushNotification } from '../config/firebase';
 import { getPaginationMeta, generateSlug } from '../utils/helpers';
+import crypto from 'crypto';
 import { asyncHandler } from '../utils/ayncHandler';
 import { logger } from '../utils/logger';
 import bcrypt from 'bcryptjs';
@@ -827,6 +828,49 @@ export const updateUserStatus = asyncHandler(
       message: `User status updated to ${status}`,
       data: { id: user._id, status: user.status },
     });
+  }
+);
+
+/**
+ * POST /admin/users/:id/send-activation
+ * Send activation OTP email to an inactive user.
+ * - If emailVerified=false → generates OTP and emails it; user verifies to become ACTIVE
+ * - If emailVerified=true  → directly sets status to ACTIVE (already verified, just inactive)
+ */
+export const sendUserActivation = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    if (user.status === UserStatus.ACTIVE) {
+      res.status(400).json({ success: false, message: 'User account is already active' });
+      return;
+    }
+
+    if (user.status === UserStatus.SUSPENDED) {
+      res.status(400).json({ success: false, message: 'Cannot activate a suspended account' });
+      return;
+    }
+
+    // Generate a signed activation token and email a link to the user
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    user.activationToken = hashedToken;
+    user.activationTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+    await user.save();
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const activationLink = `${frontendUrl}/activate?token=${rawToken}`;
+
+    await sendActivationEmail(user.email, user.firstName, activationLink);
+
+    res.json({ success: true, message: 'Activation email sent to user' });
   }
 );
 

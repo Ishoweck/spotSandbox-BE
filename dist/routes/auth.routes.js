@@ -57,6 +57,8 @@ router.post('/guest-register', authLimiter, (0, validation_1.validate)(guestRegi
 router.post('/register', authLimiter, (0, validation_1.validate)(registerValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.register.bind(auth_controller_1.authController)));
 router.post('/verify-email', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.verifyEmail.bind(auth_controller_1.authController)));
 router.post('/resend-otp', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resendOTP.bind(auth_controller_1.authController)));
+router.post('/resend-activation', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resendActivation.bind(auth_controller_1.authController)));
+router.post('/activate', (0, error_1.asyncHandler)(auth_controller_1.authController.activateAccount.bind(auth_controller_1.authController)));
 router.post('/login', authLimiter, (0, validation_1.validate)(loginValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.login.bind(auth_controller_1.authController)));
 router.post('/forgot-password', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.forgotPassword.bind(auth_controller_1.authController)));
 router.post('/reset-password', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resetPassword.bind(auth_controller_1.authController)));

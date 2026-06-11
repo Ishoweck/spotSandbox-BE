@@ -85,6 +85,8 @@ const userSchema = new Schema<IUserDocument>(
     },
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    activationToken: String,
+    activationTokenExpires: Date,
     fcmTokens: [String],
     lastLogin: Date,
     isAffiliate: {

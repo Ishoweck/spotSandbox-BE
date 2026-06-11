@@ -60,6 +60,8 @@ router.post('/guest-register', authLimiter, validate(guestRegisterValidation), a
 router.post('/register', authLimiter, validate(registerValidation), asyncHandler(authController.register.bind(authController)));
 router.post('/verify-email', authLimiter, asyncHandler(authController.verifyEmail.bind(authController)));
 router.post('/resend-otp', authLimiter, asyncHandler(authController.resendOTP.bind(authController)));
+router.post('/resend-activation', authLimiter, asyncHandler(authController.resendActivation.bind(authController)));
+router.post('/activate', asyncHandler(authController.activateAccount.bind(authController)));
 router.post('/login', authLimiter, validate(loginValidation), asyncHandler(authController.login.bind(authController)));
 router.post('/forgot-password', authLimiter, asyncHandler(authController.forgotPassword.bind(authController)));
 router.post('/reset-password', authLimiter, asyncHandler(authController.resetPassword.bind(authController)));

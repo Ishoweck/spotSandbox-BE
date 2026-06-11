@@ -4,7 +4,7 @@ import User from '../models/User';
 import { Wallet } from '../models/Additional';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt';
 import { generateOTP, generateAffiliateCode, generateResetCode } from '../utils/helpers';
-import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendFounderWelcomeEmail, sendVendorWelcomeEmail, sendProductPostingGuideEmail, sendBuyerFounderWelcomeEmail } from '../utils/email';
+import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendActivationEmail, sendFounderWelcomeEmail, sendVendorWelcomeEmail, sendProductPostingGuideEmail, sendBuyerFounderWelcomeEmail } from '../utils/email';
 import { AppError } from '../middleware/error';
 import crypto from 'crypto';
 import { queueEmailsInBackground } from '../utils/email-queue';
@@ -255,6 +255,68 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       success: true,
       message: 'OTP sent successfully',
     });
+  }
+
+  /**
+   * Request account activation link (self-service for inactive/unverified users)
+   */
+  async resendActivation(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      // Generic response — don't reveal whether email exists
+      res.json({ success: true, message: 'If that email belongs to an inactive account, an activation link has been sent.' });
+      return;
+    }
+
+    if (user.status === UserStatus.ACTIVE && user.emailVerified) {
+      throw new AppError('Account is already active', 400);
+    }
+
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new AppError('Account is suspended. Please contact support.', 403);
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    user.activationToken = hashedToken;
+    user.activationTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+    await user.save();
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const activationLink = `${frontendUrl}/activate?token=${rawToken}`;
+
+    await sendActivationEmail(user.email, user.firstName, activationLink);
+
+    res.json({ success: true, message: 'Activation link sent. Please check your email.' });
+  }
+
+  /**
+   * Activate account via link token
+   */
+  async activateAccount(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { token } = req.body;
+
+    if (!token) throw new AppError('Activation token is required', 400);
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      activationToken: hashedToken,
+      activationTokenExpires: { $gt: new Date() },
+    });
+
+    if (!user) throw new AppError('Activation link is invalid or has expired', 400);
+
+    user.emailVerified = true;
+    user.status = UserStatus.ACTIVE;
+    user.activationToken = undefined;
+    user.activationTokenExpires = undefined;
+    await user.save();
+
+    res.json({ success: true, message: 'Account activated successfully. You can now log in.' });
   }
 
 /**

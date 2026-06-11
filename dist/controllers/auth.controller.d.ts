@@ -18,6 +18,14 @@ export declare class AuthController {
      */
     resendOTP(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
+     * Request account activation link (self-service for inactive/unverified users)
+     */
+    resendActivation(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Activate account via link token
+     */
+    activateAccount(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
      * Login with daily login bonus
      */
     login(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;

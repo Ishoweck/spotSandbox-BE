@@ -259,6 +259,54 @@ class AuthController {
         });
     }
     /**
+     * Request account activation link (self-service for inactive/unverified users)
+     */
+    async resendActivation(req, res) {
+        const { email } = req.body;
+        const user = await User_1.default.findOne({ email });
+        if (!user) {
+            // Generic response — don't reveal whether email exists
+            res.json({ success: true, message: 'If that email belongs to an inactive account, an activation link has been sent.' });
+            return;
+        }
+        if (user.status === types_1.UserStatus.ACTIVE && user.emailVerified) {
+            throw new error_1.AppError('Account is already active', 400);
+        }
+        if (user.status === types_1.UserStatus.SUSPENDED) {
+            throw new error_1.AppError('Account is suspended. Please contact support.', 403);
+        }
+        const rawToken = crypto_1.default.randomBytes(32).toString('hex');
+        const hashedToken = crypto_1.default.createHash('sha256').update(rawToken).digest('hex');
+        user.activationToken = hashedToken;
+        user.activationTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+        await user.save();
+        const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+        const activationLink = `${frontendUrl}/activate?token=${rawToken}`;
+        await (0, email_1.sendActivationEmail)(user.email, user.firstName, activationLink);
+        res.json({ success: true, message: 'Activation link sent. Please check your email.' });
+    }
+    /**
+     * Activate account via link token
+     */
+    async activateAccount(req, res) {
+        const { token } = req.body;
+        if (!token)
+            throw new error_1.AppError('Activation token is required', 400);
+        const hashedToken = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        const user = await User_1.default.findOne({
+            activationToken: hashedToken,
+            activationTokenExpires: { $gt: new Date() },
+        });
+        if (!user)
+            throw new error_1.AppError('Activation link is invalid or has expired', 400);
+        user.emailVerified = true;
+        user.status = types_1.UserStatus.ACTIVE;
+        user.activationToken = undefined;
+        user.activationTokenExpires = undefined;
+        await user.save();
+        res.json({ success: true, message: 'Account activated successfully. You can now log in.' });
+    }
+    /**
      * Login with daily login bonus
      */
     async login(req, res) {

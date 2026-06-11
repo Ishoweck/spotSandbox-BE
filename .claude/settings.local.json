@@ -76,7 +76,10 @@
       "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\tsconfig.json\" 2>&1 | Select-Object -First 10)",
       "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
       "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\tsconfig.json\" 2>&1 | Select-Object -First 20; node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
-      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)"
+      "PowerShell(node \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit --project \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\tsconfig.json\" 2>&1 | Select-Object -First 20)",
+      "Bash(mongosh *)",
+      "Bash(node *)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")"
     ]
   }
 }

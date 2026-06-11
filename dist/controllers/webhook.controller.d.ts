@@ -6,9 +6,18 @@ export declare class WebhookController {
      */
     handleShipBubbleWebhook(req: Request, res: Response<ApiResponse>): Promise<void>;
     /**
-     * Map ShipBubble status to our OrderStatus
+     * Map ShipBubble status to our OrderStatus.
+     *
+     * Option-C domain separation: 'pending' and 'confirmed' are vendor-owned statuses.
+     * ShipBubble is never allowed to write them, so they are intentionally absent from
+     * this map. ShipBubble only owns statuses from 'picked_up' / courier hand-off onwards.
      */
     private mapShipBubbleStatus;
+    private static readonly ORDER_STATUS_RANK;
+    private static readonly SHIPMENT_STATUS_RANK;
+    /** Returns true only if `next` is strictly higher rank than `current`, or is a cancellation. */
+    private canAdvanceOrder;
+    private canAdvanceShipment;
     private deriveMultiVendorOrderStatus;
     /**
      * Refresh order status (for customers/vendors in sandbox testing)

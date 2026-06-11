@@ -55,6 +55,13 @@ export declare const getUserDetails: (req: import("express").Request, res: Respo
  */
 export declare const updateUserStatus: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * POST /admin/users/:id/send-activation
+ * Send activation OTP email to an inactive user.
+ * - If emailVerified=false → generates OTP and emails it; user verifies to become ACTIVE
+ * - If emailVerified=true  → directly sets status to ACTIVE (already verified, just inactive)
+ */
+export declare const sendUserActivation: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * PUT /admin/users/:id/role
  * Update user role (SUPER_ADMIN only)
  */

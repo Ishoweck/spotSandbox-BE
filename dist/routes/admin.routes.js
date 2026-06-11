@@ -53,6 +53,7 @@ router.delete('/admins/:id', (0, auth_1.authorize)(SA), admin_controller_1.remov
 router.get('/users', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.getAllUsers);
 router.get('/users/:id', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.getUserDetails);
 router.put('/users/:id/status', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.updateUserStatus);
+router.post('/users/:id/send-activation', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.sendUserActivation);
 router.put('/users/:id/role', (0, auth_1.authorize)(SA), admin_controller_1.updateUserRole);
 router.delete('/users/:id', (0, auth_1.authorize)(SA), admin_controller_1.deleteUser);
 // ================================================================

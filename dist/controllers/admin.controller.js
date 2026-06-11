@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDisputeDetails = exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.getAllAddresses = exports.validateProductPickupAddress = exports.updateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorOutreach = exports.getOutreachList = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
-exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = void 0;
+exports.getAllDisputes = exports.deleteReview = exports.updateReviewStatus = exports.getReviewById = exports.getAllReviews = exports.resolveVendorWallet = exports.processWithdrawal = exports.getPendingWithdrawals = exports.getTransactionById = exports.getAllTransactions = exports.getFinancialOverview = exports.processRefund = exports.addAdminNote = exports.updateOrderStatus = exports.getOrderDetails = exports.getAllOrders = exports.getAllAddresses = exports.validateProductPickupAddress = exports.updateProductPickupAddress = exports.deleteProduct = exports.toggleProductFeatured = exports.updateProductStatus = exports.getProductDetails = exports.getAllProducts = exports.updateVendorOutreach = exports.getOutreachList = exports.updateVendorKycDocument = exports.validateVendorAddress = exports.updateVendorAddress = exports.updateVendorCommission = exports.toggleVendorPremium = exports.toggleVendorStatus = exports.verifyVendor = exports.getVendorDetails = exports.fixLegacyCommissionRates = exports.getAllVendors = exports.deleteUser = exports.updateUserRole = exports.sendUserActivation = exports.updateUserStatus = exports.getUserDetails = exports.getAllUsers = exports.removeAdmin = exports.updateAdminRole = exports.getAllAdmins = exports.createAdmin = exports.getOrderAnalytics = exports.getUserAnalytics = exports.getRevenueAnalytics = exports.getDashboard = void 0;
+exports.getChallengeLeaderboard = exports.getPointsTransactions = exports.adjustUserPoints = exports.getRewardsUsers = exports.getRewardsOverview = exports.updateAppVersionConfig = exports.getAppVersionConfig = exports.globalSearch = exports.getActivityLog = exports.getProductReport = exports.getVendorReport = exports.getSalesReport = exports.deleteChallenge = exports.updateChallenge = exports.createChallenge = exports.getAllChallenges = exports.toggleAffiliateStatus = exports.getAffiliateLinks = exports.getAllAffiliates = exports.adminCreateDeletionRequest = exports.rejectAccountDeletion = exports.approveAccountDeletion = exports.getAccountDeletionRequests = exports.getNotificationHistory = exports.broadcastNotification = exports.toggleCategoryStatus = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getAllCategories = exports.toggleCouponActive = exports.getCouponUsage = exports.deleteCoupon = exports.updateCoupon = exports.createCoupon = exports.getAllCoupons = exports.closeDispute = exports.addDisputeMessage = exports.resolveDispute = exports.markDisputeUnderReview = exports.getDisputeDetails = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const types_1 = require("../types");
@@ -58,6 +58,7 @@ const email_1 = require("../utils/email");
 const email_queue_1 = require("../utils/email-queue");
 const firebase_1 = require("../config/firebase");
 const helpers_1 = require("../utils/helpers");
+const crypto_1 = __importDefault(require("crypto"));
 const ayncHandler_1 = require("../utils/ayncHandler");
 const logger_1 = require("../utils/logger");
 const AppVersion_1 = __importDefault(require("../models/AppVersion"));
@@ -719,6 +720,38 @@ exports.updateUserStatus = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         message: `User status updated to ${status}`,
         data: { id: user._id, status: user.status },
     });
+});
+/**
+ * POST /admin/users/:id/send-activation
+ * Send activation OTP email to an inactive user.
+ * - If emailVerified=false → generates OTP and emails it; user verifies to become ACTIVE
+ * - If emailVerified=true  → directly sets status to ACTIVE (already verified, just inactive)
+ */
+exports.sendUserActivation = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const user = await User_1.default.findById(id);
+    if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+    }
+    if (user.status === types_1.UserStatus.ACTIVE) {
+        res.status(400).json({ success: false, message: 'User account is already active' });
+        return;
+    }
+    if (user.status === types_1.UserStatus.SUSPENDED) {
+        res.status(400).json({ success: false, message: 'Cannot activate a suspended account' });
+        return;
+    }
+    // Generate a signed activation token and email a link to the user
+    const rawToken = crypto_1.default.randomBytes(32).toString('hex');
+    const hashedToken = crypto_1.default.createHash('sha256').update(rawToken).digest('hex');
+    user.activationToken = hashedToken;
+    user.activationTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+    await user.save();
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const activationLink = `${frontendUrl}/activate?token=${rawToken}`;
+    await (0, email_1.sendActivationEmail)(user.email, user.firstName, activationLink);
+    res.json({ success: true, message: 'Activation email sent to user' });
 });
 /**
  * PUT /admin/users/:id/role

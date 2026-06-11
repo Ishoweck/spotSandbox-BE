@@ -100,12 +100,17 @@ export class WebhookController {
       );
 
       if (shipment) {
-        shipment.status = mappedShipmentStatus;
+        if (this.canAdvanceShipment(shipment.status, mappedShipmentStatus)) {
+          shipment.status = mappedShipmentStatus;
+          logger.info('✅ Updated vendor shipment status:', { from: shipment.status, to: mappedShipmentStatus });
+        } else {
+          logger.info(`⏭️  Shipment rank guard blocked: ${shipment.status} → ${mappedShipmentStatus} (no regression)`);
+        }
+        // Always sync courier metadata regardless of status gate
         if (courier?.tracking_code) shipment.trackingCode = courier.tracking_code;
         if (tracking_url) shipment.trackingUrl = tracking_url;
         if (package_status?.length > 0) shipment.packageStatus = package_status;
         if (events?.length > 0) shipment.events = events;
-        logger.info('✅ Updated vendor shipment:', { status: shipment.status });
       }
 
       // Derive overall order status:
@@ -115,12 +120,17 @@ export class WebhookController {
         : newStatus;
 
       const oldStatus = order.status;
-      const orderStatusChanged = derivedStatus != null && order.status !== derivedStatus;
+      let orderStatusChanged = derivedStatus != null && order.status !== derivedStatus;
 
       if (orderStatusChanged) {
-        order.status = derivedStatus!;
-        if (derivedStatus === 'delivered' && !(order as any).deliveredAt) {
-          (order as any).deliveredAt = new Date();
+        if (this.canAdvanceOrder(order.status, derivedStatus!)) {
+          order.status = derivedStatus!;
+          if (derivedStatus === 'delivered' && !(order as any).deliveredAt) {
+            (order as any).deliveredAt = new Date();
+          }
+        } else {
+          logger.info(`⏭️  Order rank guard blocked: ${order.status} → ${derivedStatus} (no regression)`);
+          orderStatusChanged = false;
         }
       }
 
@@ -197,19 +207,49 @@ export class WebhookController {
   }
 
   /**
-   * Map ShipBubble status to our OrderStatus
+   * Map ShipBubble status to our OrderStatus.
+   *
+   * Option-C domain separation: 'pending' and 'confirmed' are vendor-owned statuses.
+   * ShipBubble is never allowed to write them, so they are intentionally absent from
+   * this map. ShipBubble only owns statuses from 'picked_up' / courier hand-off onwards.
    */
   private mapShipBubbleStatus(shipBubbleStatus: string): OrderStatus | null {
     const statusMap: { [key: string]: OrderStatus } = {
-      'pending': OrderStatus.CONFIRMED,
-      'confirmed': OrderStatus.PROCESSING,
+      // 'pending'   — omitted: vendor territory
+      // 'confirmed' — omitted: vendor territory (ShipBubble confirmed = label created,
+      //               not a vendor confirmation; handled at shipment level as 'created')
       'picked_up': OrderStatus.SHIPPED,
       'in_transit': OrderStatus.IN_TRANSIT,
-      'completed': OrderStatus.DELIVERED,
-      'cancelled': OrderStatus.CANCELLED,
+      'completed':  OrderStatus.DELIVERED,
+      'cancelled':  OrderStatus.CANCELLED,
     };
 
-    return statusMap[shipBubbleStatus.toLowerCase()] || null;
+    return statusMap[shipBubbleStatus.toLowerCase()] ?? null;
+  }
+
+  // ── Option-C rank guards ────────────────────────────────────────────────────
+
+  private static readonly ORDER_STATUS_RANK: Record<string, number> = {
+    pending: 0, confirmed: 1, processing: 2, shipped: 3, in_transit: 4, delivered: 5,
+  };
+
+  private static readonly SHIPMENT_STATUS_RANK: Record<string, number> = {
+    pending: 0, confirmed: 1, processing: 2, created: 3, shipped: 4, in_transit: 5, delivered: 6,
+  };
+
+  /** Returns true only if `next` is strictly higher rank than `current`, or is a cancellation. */
+  private canAdvanceOrder(current: string, next: string): boolean {
+    if (next === 'cancelled') return true;
+    const cur = WebhookController.ORDER_STATUS_RANK[current] ?? -1;
+    const nxt = WebhookController.ORDER_STATUS_RANK[next] ?? -1;
+    return nxt > cur;
+  }
+
+  private canAdvanceShipment(current: string, next: string): boolean {
+    if (next === 'cancelled') return true;
+    const cur = WebhookController.SHIPMENT_STATUS_RANK[current] ?? -1;
+    const nxt = WebhookController.SHIPMENT_STATUS_RANK[next] ?? -1;
+    return nxt > cur;
   }
 
   private deriveMultiVendorOrderStatus(shipments: any[]): OrderStatus {
@@ -428,7 +468,11 @@ export class WebhookController {
       const mappedShipmentStatus = shipmentStatusMap[rawStatus] || 'created';
 
       if (shipment) {
-        shipment.status = mappedShipmentStatus;
+        if (this.canAdvanceShipment(shipment.status, mappedShipmentStatus)) {
+          shipment.status = mappedShipmentStatus;
+        } else {
+          logger.info(`⏭️  Sync shipment rank guard blocked: ${shipment.status} → ${mappedShipmentStatus}`);
+        }
         if (trackData?.data?.tracking_url) shipment.trackingUrl = trackData.data.tracking_url;
         if (trackData?.data?.package_status?.length > 0) shipment.packageStatus = trackData.data.package_status;
         if (trackData?.data?.events?.length > 0) shipment.events = trackData.data.events;
@@ -444,11 +488,15 @@ export class WebhookController {
       : this.mapShipBubbleStatus(syncResults[0].rawStatus);
 
     if (newOrderStatus && order.status !== newOrderStatus) {
-      order.status = newOrderStatus;
-      if (newOrderStatus === OrderStatus.DELIVERED && !(order as any).deliveredAt) {
-        (order as any).deliveredAt = new Date();
+      if (this.canAdvanceOrder(order.status, newOrderStatus)) {
+        order.status = newOrderStatus;
+        if (newOrderStatus === OrderStatus.DELIVERED && !(order as any).deliveredAt) {
+          (order as any).deliveredAt = new Date();
+        }
+        anyStatusChanged = true;
+      } else {
+        logger.info(`⏭️  Sync order rank guard blocked: ${order.status} → ${newOrderStatus}`);
       }
-      anyStatusChanged = true;
     }
 
     await order.save();

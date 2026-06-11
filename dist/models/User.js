@@ -83,6 +83,8 @@ const userSchema = new mongoose_1.Schema({
     },
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    activationToken: String,
+    activationTokenExpires: Date,
     fcmTokens: [String],
     lastLogin: Date,
     isAffiliate: {

@@ -288,6 +288,8 @@ export interface IUserDocument extends Document {
     };
     resetPasswordToken?: string;
     resetPasswordExpires?: Date;
+    activationToken?: string;
+    activationTokenExpires?: Date;
     fcmTokens: string[];
     lastLogin?: Date;
     isAffiliate: boolean;

@@ -18,6 +18,7 @@ import {
   getAllUsers,
   getUserDetails,
   updateUserStatus,
+  sendUserActivation,
   updateUserRole,
   deleteUser,
 
@@ -194,6 +195,7 @@ router.delete('/admins/:id', authorize(SA), removeAdmin);
 router.get('/users', authorize(SA, A, SPA), getAllUsers);
 router.get('/users/:id', authorize(SA, A, SPA), getUserDetails);
 router.put('/users/:id/status', authorize(SA, A, SPA), updateUserStatus);
+router.post('/users/:id/send-activation', authorize(SA, A, SPA), sendUserActivation);
 router.put('/users/:id/role', authorize(SA), updateUserRole);
 router.delete('/users/:id', authorize(SA), deleteUser);
 
