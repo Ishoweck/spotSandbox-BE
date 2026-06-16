@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validate = exports.mongoSanitize = void 0;
 const express_validator_1 = require("express-validator");
+const logger_1 = require("../utils/logger");
 // Strip MongoDB operator keys ($gt, $where, etc.) from any object recursively
 function stripMongoOperators(obj) {
     if (Array.isArray(obj))
@@ -37,11 +38,17 @@ const validate = (validations) => {
         }
         const extractedErrors = [];
         errors.array().forEach((err) => {
-            extractedErrors.push({ [err.path]: err.msg });
+            extractedErrors.push({ field: err.path, message: err.msg });
+        });
+        const firstMessage = extractedErrors[0]?.message || 'Validation failed';
+        logger_1.logger.warn('Validation failed', {
+            method: req.method,
+            path: req.path,
+            errors: extractedErrors,
         });
         res.status(400).json({
             success: false,
-            message: 'Validation failed',
+            message: firstMessage,
             error: JSON.stringify(extractedErrors),
         });
     };

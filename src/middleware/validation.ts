@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { validationResult, ValidationChain } from 'express-validator';
 import { ApiResponse } from '../types';
+import { logger } from '../utils/logger';
 
 // Strip MongoDB operator keys ($gt, $where, etc.) from any object recursively
 function stripMongoOperators(obj: any): any {
@@ -37,12 +38,20 @@ export const validate = (validations: ValidationChain[]) => {
 
     const extractedErrors: any[] = [];
     errors.array().forEach((err: any) => {
-      extractedErrors.push({ [err.path]: err.msg });
+      extractedErrors.push({ field: err.path, message: err.msg });
+    });
+
+    const firstMessage = extractedErrors[0]?.message || 'Validation failed';
+
+    logger.warn('Validation failed', {
+      method: req.method,
+      path: req.path,
+      errors: extractedErrors,
     });
 
     res.status(400).json({
       success: false,
-      message: 'Validation failed',
+      message: firstMessage,
       error: JSON.stringify(extractedErrors),
     });
   };
