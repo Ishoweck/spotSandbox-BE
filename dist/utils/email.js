@@ -12,7 +12,7 @@ const resend = new resend_1.Resend(process.env.RESEND_API_KEY);
 const sendEmail = async (options) => {
     try {
         const { data, error } = await resend.emails.send({
-            from: process.env.EMAIL_FROM || 'VendorSpot <noreply@vendorspot.com>',
+            from: process.env.EMAIL_FROM || 'VendorSpot <noreply@vendorspotng.com>',
             to: options.to,
             subject: options.subject,
             text: options.text,
@@ -113,7 +113,7 @@ const sendOTPEmail = async (email, otp, name) => {
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.
@@ -147,7 +147,7 @@ const sendOTPEmail = async (email, otp, name) => {
 exports.sendOTPEmail = sendOTPEmail;
 const sendPasswordResetEmail = async (email, resetCode, name) => {
     const displayName = name || 'there';
-    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const resetLink = `${frontendUrl}/reset-password?code=${resetCode}`;
     const html = `
 <!DOCTYPE html>
@@ -220,7 +220,7 @@ const sendPasswordResetEmail = async (email, resetCode, name) => {
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.
@@ -276,7 +276,7 @@ const sendWelcomeEmail = async (email, name) => {
 exports.sendWelcomeEmail = sendWelcomeEmail;
 const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items) => {
     const displayName = name || 'there';
-    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const orderUrl = `${frontendUrl}/orders/${orderNumber}`;
     // Unique vendor names for summary
     const vendorNames = [...new Set((items || []).map((i) => i.vendorName).filter(Boolean))];
@@ -408,7 +408,7 @@ const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.
@@ -442,7 +442,7 @@ const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items
 exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
 const sendVendorWelcomeEmail = async (email, firstName) => {
     const displayName = firstName || 'there';
-    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const dashboardLink = `${frontendUrl}/dashboard`;
     const html = `
 <!DOCTYPE html>
@@ -493,7 +493,7 @@ const sendVendorWelcomeEmail = async (email, firstName) => {
           <!-- Support footer -->
           <tr>
             <td style="padding:20px 32px;">
-              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a></p>
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a></p>
               <p style="margin:0;font-size:13px;color:#374151;"><strong>Vendorspot</strong> — Confidence in every click.</p>
             </td>
           </tr>
@@ -523,7 +523,7 @@ const sendVendorWelcomeEmail = async (email, firstName) => {
 };
 exports.sendVendorWelcomeEmail = sendVendorWelcomeEmail;
 const sendFounderWelcomeEmail = async (email, firstName) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const ceoPhotoUrl = `${frontendUrl}/team/ceo.png`;
     const html = `
 <!DOCTYPE html>
@@ -604,7 +604,7 @@ const sendFounderWelcomeEmail = async (email, firstName) => {
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.
@@ -637,7 +637,7 @@ const sendFounderWelcomeEmail = async (email, firstName) => {
 };
 exports.sendFounderWelcomeEmail = sendFounderWelcomeEmail;
 const sendBuyerFounderWelcomeEmail = async (email, firstName) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const shopLink = `${frontendUrl}/products`;
     const html = `
 <!DOCTYPE html>
@@ -723,7 +723,7 @@ const sendBuyerFounderWelcomeEmail = async (email, firstName) => {
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.
@@ -993,7 +993,7 @@ const sendProductPostingGuideEmail = async (email) => {
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.
@@ -1112,7 +1112,7 @@ const sendActivationEmail = async (email, name, activationLink) => {
           <tr>
             <td style="padding:20px 32px;">
               <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
-                Need help? <a href="mailto:support@vendorspot.com" style="color:#CC3366;text-decoration:none;">support@vendorspot.com</a>
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
               </p>
               <p style="margin:0;font-size:13px;color:#374151;">
                 <strong>Vendorspot</strong> — Confidence in every click.

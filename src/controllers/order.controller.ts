@@ -480,14 +480,14 @@
         const senderAddress = {
           name: (hasProductPickup && productPickup!.fullName) || ownerFullName,
           phone: (hasProductPickup && productPickup!.phone) || vendorProfile?.businessPhone || vendor?.phone || '+2348000000000',
-          email: vendorProfile?.businessEmail || vendor?.email || 'sender@vendorspot.com',
+          email: vendorProfile?.businessEmail || vendor?.email || 'sender@vendorspotng.com',
           address: senderFullAddress,
         };
 
         const receiverAddress = {
           name: destination.fullName,
           phone: destination.phone,
-          email: 'customer@vendorspot.com',
+          email: 'customer@vendorspotng.com',
           address: receiverFullAddress,
         };
 

@@ -748,7 +748,7 @@ exports.sendUserActivation = (0, ayncHandler_1.asyncHandler)(async (req, res) =>
     user.activationToken = hashedToken;
     user.activationTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
     await user.save();
-    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspot.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const activationLink = `${frontendUrl}/activate?token=${rawToken}`;
     await (0, email_1.sendActivationEmail)(user.email, user.firstName, activationLink);
     res.json({ success: true, message: 'Activation email sent to user' });
