@@ -1881,7 +1881,12 @@ class OrderController {
                                 courier: selectedCourier.courier_name,
                             });
                             // Update order with tracking info
-                            const vendorShipment = order.vendorShipments.find((vs) => vs.vendor.toString() === group.vendorId);
+                            const vendorShipment = order.vendorShipments.find((vs) => {
+                                const vsId = typeof vs.vendor === 'object'
+                                    ? vs.vendor._id?.toString()
+                                    : vs.vendor?.toString();
+                                return vsId === group.vendorId;
+                            });
                             if (vendorShipment) {
                                 vendorShipment.trackingNumber = orderId;
                                 vendorShipment.shipmentId = shipment.data.shipment_id || orderId;
@@ -2302,14 +2307,15 @@ class OrderController {
             : { orderNumber: id, user: req.user?.id };
         const order = await Order_1.default.findOne(query)
             .populate('items.product', 'name images slug productType digitalFile')
-            .populate('items.vendor', 'firstName lastName email')
+            .populate('items.vendor', 'firstName lastName email businessName businessLogo')
             .populate('vendorShipments.vendor', 'firstName lastName');
         if (!order) {
             throw new error_1.AppError('Order not found', 404);
         }
+        const totalCustomerOrders = await Order_1.default.countDocuments({ user: req.user?.id });
         res.json({
             success: true,
-            data: { order },
+            data: { order: { ...order.toObject(), isFirstCustomerOrder: totalCustomerOrders === 1 } },
         });
     }
     /**
@@ -2337,12 +2343,17 @@ class OrderController {
                 : shipment.vendor?.toString();
             return shipVendorId === req.user?.id;
         });
-        const totalVendorOrders = await Order_1.default.countDocuments({ 'items.vendor': new mongoose_1.default.Types.ObjectId(req.user.id) });
+        const [totalVendorOrders, vendorProfile] = await Promise.all([
+            Order_1.default.countDocuments({ 'items.vendor': new mongoose_1.default.Types.ObjectId(req.user.id) }),
+            VendorProfile_1.default.findOne({ user: req.user.id }).select('businessName businessLogo').lean(),
+        ]);
         const orderData = {
             ...order.toObject(),
             items: vendorItems,
             vendorShipment: vendorShipment || null,
             isFirstVendorOrder: totalVendorOrders === 1,
+            vendorStoreName: vendorProfile?.businessName || null,
+            vendorStoreLogo: vendorProfile?.businessLogo || null,
         };
         res.json({
             success: true,

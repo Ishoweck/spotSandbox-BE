@@ -481,6 +481,21 @@ const sendVendorWelcomeEmail = async (email, firstName) => {
                 <span style="color:#CC3366;margin-right:6px;">&#8594;</span>
                 <a href="${dashboardLink}" style="color:#CC3366;font-weight:600;text-decoration:none;">${dashboardLink}</a>
               </p>
+              <p style="margin:0 0 10px 0;font-size:15px;font-weight:700;color:#111111;">Quick start guides:</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+                <tr>
+                  <td style="padding:4px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    <span style="color:#CC3366;margin-right:8px;">&#9654;</span>
+                    <a href="https://youtube.com/shorts/K9XQcO7syTY?feature=share" style="color:#CC3366;text-decoration:none;font-weight:600;">How to create your storefront on Vendorspot</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:4px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    <span style="color:#CC3366;margin-right:8px;">&#9654;</span>
+                    <a href="https://youtu.be/gVgJkesq1_0" style="color:#CC3366;text-decoration:none;font-weight:600;">How to post your products</a>
+                  </td>
+                </tr>
+              </table>
               <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">The stronger your Trust Score, the more buyers will choose you. Every on-time delivery, every satisfied customer, and every quick response builds your reputation on Vendorspot.</p>
               <p style="margin:0 0 4px 0;font-size:15px;color:#374151;">Let's grow together,</p>
               <p style="margin:0 0 28px 0;font-size:15px;color:#374151;font-weight:600;">The Vendorspot Team</p>

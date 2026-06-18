@@ -2217,7 +2217,12 @@
 
                 // Update order with tracking info
                 const vendorShipment = order.vendorShipments.find(
-                  (vs: any) => vs.vendor.toString() === group.vendorId
+                  (vs: any) => {
+                    const vsId = typeof vs.vendor === 'object'
+                      ? vs.vendor._id?.toString()
+                      : vs.vendor?.toString();
+                    return vsId === group.vendorId;
+                  }
                 );
                 
                 if (vendorShipment) {
@@ -2686,16 +2691,18 @@
 
       const order = await Order.findOne(query)
         .populate('items.product', 'name images slug productType digitalFile')
-        .populate('items.vendor', 'firstName lastName email')
+        .populate('items.vendor', 'firstName lastName email businessName businessLogo')
         .populate('vendorShipments.vendor', 'firstName lastName');
 
       if (!order) {
         throw new AppError('Order not found', 404);
       }
 
+      const totalCustomerOrders = await Order.countDocuments({ user: req.user?.id });
+
       res.json({
         success: true,
-        data: { order },
+        data: { order: { ...order.toObject(), isFirstCustomerOrder: totalCustomerOrders === 1 } },
       });
     }
 
@@ -2738,13 +2745,18 @@
         }
       );
 
-      const totalVendorOrders = await Order.countDocuments({ 'items.vendor': new mongoose.Types.ObjectId(req.user!.id) });
+      const [totalVendorOrders, vendorProfile] = await Promise.all([
+        Order.countDocuments({ 'items.vendor': new mongoose.Types.ObjectId(req.user!.id) }),
+        VendorProfile.findOne({ user: req.user!.id }).select('businessName businessLogo').lean(),
+      ]);
 
       const orderData = {
         ...order.toObject(),
         items: vendorItems,
         vendorShipment: vendorShipment || null,
         isFirstVendorOrder: totalVendorOrders === 1,
+        vendorStoreName: (vendorProfile as any)?.businessName || null,
+        vendorStoreLogo: (vendorProfile as any)?.businessLogo || null,
       };
 
       res.json({
