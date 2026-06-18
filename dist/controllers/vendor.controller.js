@@ -424,7 +424,14 @@ class VendorController {
         ];
         Object.keys(req.body).forEach((key) => {
             if (allowedUpdates.includes(key)) {
-                vendorProfile[key] = req.body[key];
+                if (key === 'businessAddress') {
+                    // Strip stale ShipBubble address code so it gets re-validated on next order
+                    const { shipBubble, ...freshAddress } = req.body.businessAddress;
+                    vendorProfile.businessAddress = freshAddress;
+                }
+                else {
+                    vendorProfile[key] = req.body[key];
+                }
             }
         });
         await vendorProfile.save();

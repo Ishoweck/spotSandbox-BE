@@ -367,6 +367,7 @@
             vendorName: vr.vendorName,
             vendorLogo: group?.vendorLogo,
             isVerified: group?.isVerified,
+            pickupCity: group?.pickupAddress?.city || group?.vendorAddress?.city || null,
             products: (group?.items || []).map(item => ({
               productId: item.productId,
               name: item.productName,
@@ -591,14 +592,29 @@
 
     private async groupItemsByVendor(items: any[]): Promise<VendorGroup[]> {
       const groups = new Map<string, VendorGroup>();
+      // Cache vendor profiles so we don't re-query for the same vendor across different pickup groups
+      const vendorProfileCache = new Map<string, any>();
 
       for (const item of items) {
         const product = item.product;
         const vendorId = product.vendor._id.toString();
 
-        if (!groups.has(vendorId)) {
-          const vendorProfile = await VendorProfile.findOne({ user: vendorId });
-          
+        // Build the group key: vendor + pickup address so products with different
+        // pickup locations become separate shipment groups
+        const pa = product.pickupAddress;
+        const hasPickup = pa?.street && pa?.city && pa?.state;
+        const pickupKey = hasPickup
+          ? `${pa.street}|${pa.city}|${pa.state}`.toLowerCase().replace(/\s+/g, '')
+          : 'default';
+        const groupKey = `${vendorId}::${pickupKey}`;
+
+        if (!groups.has(groupKey)) {
+          let vendorProfile = vendorProfileCache.get(vendorId);
+          if (!vendorProfile) {
+            vendorProfile = await VendorProfile.findOne({ user: vendorId });
+            vendorProfileCache.set(vendorId, vendorProfile);
+          }
+
           let vendorAddress = {
             street: '',
             city: process.env.SHIPBUBBLE_SENDER_CITY || '',
@@ -618,27 +634,25 @@
           const vendorName = vendorProfile?.businessName ||
                             `${product.vendor.firstName} ${product.vendor.lastName}`;
 
-          groups.set(vendorId, {
+          groups.set(groupKey, {
             vendorId,
             vendorName,
             vendorLogo: vendorProfile?.businessLogo,
             isVerified: vendorProfile?.verificationStatus === 'verified',
             vendorAddress,
-            pickupAddress: undefined,
+            pickupAddress: hasPickup ? pa : undefined,
             items: [],
             totalWeight: 0,
           });
         }
 
-        const group = groups.get(vendorId)!;
-        
+        const group = groups.get(groupKey)!;
+
         const productType = product.productType?.toUpperCase();
-        const isPhysical = 
-          productType === 'PHYSICAL' || 
+        const isPhysical =
+          productType === 'PHYSICAL' ||
           (!productType || (productType !== 'DIGITAL' && productType !== 'SERVICE'));
-        
-        // ✅ FIX: Use 0.5 KG default instead of 1 KG
-        // 1 KG was inflating weights and eliminating cheaper couriers
+
         const weight = product.weight || 0.5;
 
         group.items.push({
@@ -654,10 +668,6 @@
 
         if (isPhysical) {
           group.totalWeight += weight * item.quantity;
-          // Use the product's chosen pickup address (first physical item wins)
-          if (!group.pickupAddress && product.pickupAddress?.street && product.pickupAddress?.city && product.pickupAddress?.state) {
-            group.pickupAddress = product.pickupAddress;
-          }
         }
       }
 
@@ -901,12 +911,7 @@
               vendor: group.vendorId,
               vendorName: group.vendorName,
               items: group.items.map(item => item.productId),
-              origin: {
-                street: group.vendorAddress.street || '',
-                city: group.vendorAddress.city,
-                state: group.vendorAddress.state,
-                country: group.vendorAddress.country,
-              },
+              origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost: shippingCost,
               courier: vendorShipping?.courier || selectedCourier,
               status: 'pending',
@@ -932,12 +937,7 @@
               vendor: group.vendorId,
               vendorName: group.vendorName,
               items: group.items.map(item => item.productId),
-              origin: {
-                street: group.vendorAddress.street || '',
-                city: group.vendorAddress.city,
-                state: group.vendorAddress.state,
-                country: group.vendorAddress.country,
-              },
+              origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost: selectedDeliveryPrice,
               courier: selectedCourier,
               status: 'pending',
@@ -1691,12 +1691,7 @@
               vendor: group.vendorId,
               vendorName: group.vendorName,
               items: group.items.filter(item => item.isPhysical).map(item => item.productId),
-              origin: {
-                street: group.vendorAddress.street || '',
-                city: group.vendorAddress.city,
-                state: group.vendorAddress.state,
-                country: group.vendorAddress.country,
-              },
+              origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost,
               courier: vd?.courier || selectedCourier,
               status: 'pending',
@@ -1761,12 +1756,7 @@
               vendor: group.vendorId,
               vendorName: group.vendorName,
               items: group.items.map(item => item.productId),
-              origin: {
-                street: group.vendorAddress.street || '',
-                city: group.vendorAddress.city,
-                state: group.vendorAddress.state,
-                country: group.vendorAddress.country,
-              },
+              origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost: fallbackCost,
               courier: selectedCourier || 'Standard Courier',
               status: 'pending',
@@ -2093,8 +2083,9 @@
             businessAddress: vendorProfile?.businessAddress,
           });
 
-          // Build addresses
-          const senderFullAddress = `${group.vendorAddress.street || 'Store Address'}, ${group.vendorAddress.city}, ${group.vendorAddress.state}, ${group.vendorAddress.country}`;
+          // Build addresses — prefer product-level pickupAddress over vendor business address
+          const senderOrigin = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress;
+          const senderFullAddress = `${senderOrigin.street || 'Store Address'}, ${senderOrigin.city}, ${senderOrigin.state}, ${senderOrigin.country}`;
           const receiverFullAddress = `${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.state}, ${order.shippingAddress.country || 'Nigeria'}`;
 
           const senderAddress = {

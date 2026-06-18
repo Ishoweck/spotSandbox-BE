@@ -108,6 +108,15 @@ export class AddressController {
       return;
     }
 
+    // Vendors are limited to 2 saved addresses (pickup locations)
+    if (user.role === 'vendor' && user.addresses && user.addresses.length >= 2) {
+      res.status(400).json({
+        success: false,
+        message: 'Vendors can only save up to 2 addresses. Please delete an existing address before adding a new one.',
+      });
+      return;
+    }
+
     // If this is set as default, unset other defaults
     if (isDefault) {
       user.addresses?.forEach(addr => {
