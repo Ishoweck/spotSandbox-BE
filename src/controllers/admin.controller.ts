@@ -43,6 +43,7 @@ import { asyncHandler } from '../utils/ayncHandler';
 import { logger } from '../utils/logger';
 import bcrypt from 'bcryptjs';
 import AppVersion from '../models/AppVersion';
+import { orderController } from './order.controller';
 
 // ================================================================
 // DASHBOARD & ANALYTICS
@@ -2407,6 +2408,24 @@ export const addAdminNote = asyncHandler(
       return;
     }
     res.json({ success: true, message: 'Admin note saved', data: { adminNote: order.adminNote } });
+  }
+);
+
+/**
+ * POST /admin/orders/:id/retry-shipment
+ * Re-trigger ShipBubble label creation for stuck vendorShipments (no trackingNumber)
+ */
+export const retryShipment = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const force = req.body?.force === true;
+    logger.info(`[Admin] Retrying shipment for order ${id} by admin ${req.user?.id} (force=${force})`);
+    const result = await orderController.adminRetryShipment(id, force);
+    res.json({
+      success: true,
+      message: `Shipment retry triggered for ${result.retried} vendor(s)`,
+      data: result,
+    });
   }
 );
 

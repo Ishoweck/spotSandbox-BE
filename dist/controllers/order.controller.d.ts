@@ -139,6 +139,13 @@ export declare class OrderController {
     private getDefaultDescription;
     private getVendorFallbackRates;
     private getFallbackRates;
+    /**
+     * Admin retry: re-trigger ShipBubble label creation for all stuck
+     * vendorShipments (no trackingNumber) on a given order.
+     */
+    adminRetryShipment(orderId: string, force?: boolean): Promise<{
+        retried: number;
+    }>;
 }
 export declare const orderController: OrderController;
 //# sourceMappingURL=order.controller.d.ts.map

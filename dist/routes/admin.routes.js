@@ -89,6 +89,7 @@ router.get('/orders/:id', (0, auth_1.authorize)(SA, A, FA, SPA), admin_controlle
 router.put('/orders/:id/status', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.updateOrderStatus);
 router.post('/orders/:id/refund', (0, auth_1.authorize)(SA, A, FA), admin_controller_1.processRefund);
 router.put('/orders/:id/note', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.addAdminNote);
+router.post('/orders/:id/retry-shipment', (0, auth_1.authorize)(SA, A, SPA), admin_controller_1.retryShipment);
 router.post('/orders/:id/sync-shipment', (0, auth_1.authorize)(SA, A, SPA), (0, error_1.asyncHandler)(webhook_controller_1.webhookController.syncOrderShipment.bind(webhook_controller_1.webhookController)));
 // ================================================================
 // FINANCIAL MANAGEMENT — financial + general

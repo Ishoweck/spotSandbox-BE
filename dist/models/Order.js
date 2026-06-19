@@ -115,6 +115,7 @@ const vendorShipmentSchema = new mongoose_1.Schema({
     trackingUrl: String,
     shipmentId: String,
     courier: String,
+    requestedCourier: String,
     estimatedDelivery: Date,
     paidAt: Date,
     status: {

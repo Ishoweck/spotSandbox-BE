@@ -54,6 +54,7 @@ import {
   updateOrderStatus,
   processRefund,
   addAdminNote,
+  retryShipment,
 
   // Financial Management
   getFinancialOverview,
@@ -234,6 +235,7 @@ router.get('/orders/:id', authorize(SA, A, FA, SPA), getOrderDetails);
 router.put('/orders/:id/status', authorize(SA, A, SPA), updateOrderStatus);
 router.post('/orders/:id/refund', authorize(SA, A, FA), processRefund);
 router.put('/orders/:id/note', authorize(SA, A, SPA), addAdminNote);
+router.post('/orders/:id/retry-shipment', authorize(SA, A, SPA), retryShipment);
 router.post('/orders/:id/sync-shipment', authorize(SA, A, SPA), asyncHandler(webhookController.syncOrderShipment.bind(webhookController)));
 
 // ================================================================

@@ -14,6 +14,7 @@ export interface IVendorShipment {
     trackingNumber?: string;
     shipmentId?: string;
     courier?: string;
+    requestedCourier?: string;
     estimatedDelivery?: Date;
     trackingUrl?: string;
     paidAt?: Date;

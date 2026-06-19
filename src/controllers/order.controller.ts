@@ -887,14 +887,10 @@
             vendor: group.vendorId,
             vendorName: group.vendorName,
             items: group.items.filter(item => item.isPhysical).map(item => item.productId),
-            origin: {
-              street: group.vendorAddress.street || '',
-              city: group.vendorAddress.city,
-              state: group.vendorAddress.state,
-              country: group.vendorAddress.country,
-            },
+            origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
             shippingCost,
             courier: vd?.courier || selectedCourier,
+            requestedCourier: vd?.courier || selectedCourier,
             status: 'pending',
           });
           logger.info(`✅ Shipping for ${group.vendorName}: ₦${shippingCost} (${vd?.courier})`);
@@ -929,6 +925,7 @@
               origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost: shippingCost,
               courier: vendorShipping?.courier || selectedCourier,
+              requestedCourier: vendorShipping?.courier || selectedCourier,
               status: 'pending',
             });
 
@@ -955,6 +952,7 @@
               origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost: selectedDeliveryPrice,
               courier: selectedCourier,
+              requestedCourier: selectedCourier,
               status: 'pending',
             });
 
@@ -980,14 +978,10 @@
             vendor: group.vendorId,
             vendorName: group.vendorName,
             items: group.items.map(item => item.productId),
-            origin: {
-              street: group.vendorAddress.street || '',
-              city: group.vendorAddress.city,
-              state: group.vendorAddress.state,
-              country: group.vendorAddress.country,
-            },
+            origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
             shippingCost: fallbackCost,
             courier: selectedCourier || 'Standard Courier',
+            requestedCourier: selectedCourier || 'Standard Courier',
             status: 'pending',
           });
 
@@ -1709,6 +1703,7 @@
               origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost,
               courier: vd?.courier || selectedCourier,
+              requestedCourier: vd?.courier || selectedCourier,
               status: 'pending',
             });
           }
@@ -1728,14 +1723,10 @@
                 vendor: group.vendorId,
                 vendorName: group.vendorName,
                 items: group.items.map(item => item.productId),
-                origin: {
-                  street: group.vendorAddress.street || '',
-                  city: group.vendorAddress.city,
-                  state: group.vendorAddress.state,
-                  country: group.vendorAddress.country,
-                },
+                origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
                 shippingCost,
                 courier: vendorShipping?.courier || selectedCourier,
+                requestedCourier: vendorShipping?.courier || selectedCourier,
                 status: 'pending',
               });
             }
@@ -1749,14 +1740,10 @@
                 vendor: group.vendorId,
                 vendorName: group.vendorName,
                 items: group.items.map(item => item.productId),
-                origin: {
-                  street: group.vendorAddress.street || '',
-                  city: group.vendorAddress.city,
-                  state: group.vendorAddress.state,
-                  country: group.vendorAddress.country,
-                },
+                origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
                 shippingCost: selectedDeliveryPrice,
                 courier: selectedCourier,
+                requestedCourier: selectedCourier,
                 status: 'pending',
               });
             }
@@ -1774,6 +1761,7 @@
               origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost: fallbackCost,
               courier: selectedCourier || 'Standard Courier',
+              requestedCourier: selectedCourier || 'Standard Courier',
               status: 'pending',
             });
           }
@@ -1923,7 +1911,7 @@
         const customerId = req.user!.id;
         for (const vendorId of vendorIds) {
           await Conversation.updateMany(
-            { participants: { $all: [customerId, vendorId], isActive: false } },
+            { participants: { $all: [customerId, vendorId] }, isActive: false },
             { isActive: true }
           );
         }
@@ -2099,7 +2087,8 @@
           });
 
           // Build addresses — prefer product-level pickupAddress over vendor business address
-          const senderOrigin = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress;
+          const usingPickupAddress = !!(group as any).pickupAddress?.street;
+          const senderOrigin = usingPickupAddress ? (group as any).pickupAddress : group.vendorAddress;
           const senderFullAddress = `${senderOrigin.street || 'Store Address'}, ${senderOrigin.city}, ${senderOrigin.state}, ${senderOrigin.country}`;
           const receiverFullAddress = `${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.state}, ${order.shippingAddress.country || 'Nigeria'}`;
 
@@ -2117,18 +2106,20 @@
             address: receiverFullAddress,
           };
 
-          logger.info('📍 SENDER ADDRESS:', {
-            name: senderAddress.name,
-            phone: senderAddress.phone,
-            email: senderAddress.email,
-            address: senderAddress.address,
-          });
-
-          logger.info('📍 RECEIVER ADDRESS:', {
-            name: receiverAddress.name,
-            phone: receiverAddress.phone,
-            email: receiverAddress.email,
-            address: receiverAddress.address,
+          logger.info('📍 SHIPBUBBLE ADDRESSES:', {
+            addressSource: usingPickupAddress ? 'product pickupAddress' : 'vendor businessAddress',
+            sender: {
+              name: senderAddress.name,
+              phone: senderAddress.phone,
+              email: senderAddress.email,
+              address: senderAddress.address,
+            },
+            receiver: {
+              name: receiverAddress.name,
+              phone: receiverAddress.phone,
+              email: receiverAddress.email,
+              address: receiverAddress.address,
+            },
           });
 
           const packageItems = physicalItems.map((item: any) => ({
@@ -2175,7 +2166,10 @@
                 return vsId === group.vendorId;
               }
             );
-            const storedCourierName: string | undefined = storedVendorShipment?.courier;
+            // Prefer requestedCourier (customer's original choice, never overwritten)
+            // Fall back to courier for orders created before this field was added
+            const storedCourierName: string | undefined =
+              storedVendorShipment?.requestedCourier || storedVendorShipment?.courier;
 
             // Try to match the stored courier name against the fresh rate list
             let selectedCourier;
@@ -2240,7 +2234,7 @@
               const orderId = shipment.data?.order_id;
               const trackingUrl = shipment.data?.tracking_url;
               
-              if (orderId && trackingUrl) {
+              if (orderId) {
                 logger.info('✅ Shipment created successfully:', {
                   orderId: orderId,
                   trackingUrl: trackingUrl,
@@ -2257,14 +2251,15 @@
                     return vsId === group.vendorId;
                   }
                 );
-                
+
                 if (vendorShipment) {
+                  // Always save orderId so the no-tracking guard doesn't re-trigger
                   vendorShipment.trackingNumber = orderId;
                   vendorShipment.shipmentId = shipment.data.shipment_id || orderId;
                   vendorShipment.courier = selectedCourier.courier_name;
                   vendorShipment.status = 'created';
-                  vendorShipment.trackingUrl = trackingUrl;
-                  
+                  if (trackingUrl) vendorShipment.trackingUrl = trackingUrl;
+
                   logger.info('✅ Updated order with tracking info:', {
                     trackingNumber: vendorShipment.trackingNumber,
                     shipmentId: vendorShipment.shipmentId,
@@ -2276,7 +2271,7 @@
                 await order.save();
                 logger.info(`✅ Shipment created for vendor ${group.vendorName}. Order ID: ${orderId}`);
               } else {
-                logger.error('❌ Missing order_id or tracking_url in shipment response:', {
+                logger.error('❌ Missing order_id in shipment response:', {
                   hasOrderId: !!orderId,
                   hasTrackingUrl: !!trackingUrl,
                   response: shipment,
@@ -3439,9 +3434,12 @@
         return;
       }
 
-      // Guard: if the vendor's shipment is already at this status, do nothing
+      // Guard: if the vendor's shipment is already at this status, do nothing —
+      // UNLESS it's 'processing' with no tracking number yet (allows ShipBubble retry)
       const currentVendorStatus = vendorShipmentForGuard?.status || order.status;
-      if (currentVendorStatus === status) {
+      const isMissingShipment =
+        status === 'processing' && !vendorShipmentForGuard?.trackingNumber;
+      if (currentVendorStatus === status && !isMissingShipment) {
         res.json({
           success: true,
           message: 'Order is already at this status',
@@ -4206,6 +4204,145 @@
         },
       ];
     }
+
+  /**
+   * Admin retry: re-trigger ShipBubble label creation for all stuck
+   * vendorShipments (no trackingNumber) on a given order.
+   */
+  async adminRetryShipment(orderId: string, force = false): Promise<{ retried: number }> {
+    const order = await Order.findById(orderId)
+      .populate('user')
+      .populate('items.product');
+
+    if (!order) throw new AppError('Order not found', 404);
+
+    const allShipments = (order as any).vendorShipments || [];
+
+    // force=true: retry even when tracking exists (e.g. stale test-mode labels)
+    const stuckShipments = force
+      ? allShipments.filter((vs: any) => vs.status !== 'delivered' && vs.status !== 'cancelled')
+      : allShipments.filter((vs: any) => !vs.trackingNumber);
+
+    if (stuckShipments.length === 0) {
+      throw new AppError(
+        force
+          ? 'No eligible vendor shipments to retry'
+          : 'All shipments already have tracking numbers — use force retry to override',
+        400
+      );
+    }
+
+    // When forcing, clear the old (possibly test-mode) tracking data so a fresh label is created
+    if (force) {
+      for (const vs of stuckShipments) {
+        vs.trackingNumber = undefined;
+        vs.trackingUrl = undefined;
+      }
+      await order.save();
+      logger.info(`[AdminRetry] Cleared tracking data for ${stuckShipments.length} shipment(s) on order ${orderId} (force retry)`);
+    }
+
+    const vendorGroups: VendorGroup[] = [];
+
+    for (const vs of stuckShipments) {
+      const vendorId =
+        typeof vs.vendor === 'object'
+          ? vs.vendor._id?.toString()
+          : vs.vendor?.toString();
+
+      const [vendorProfile, vendor] = await Promise.all([
+        VendorProfile.findOne({ user: vendorId }),
+        User.findById(vendorId),
+      ]);
+
+      if (!vendor) continue;
+
+      const vendorItems = order.items.filter(
+        (item: any) => item.vendor.toString() === vendorId
+      );
+
+      const vendorAddress = vendorProfile?.businessAddress
+        ? {
+            street: vendorProfile.businessAddress.street || '',
+            city: vendorProfile.businessAddress.city,
+            state: vendorProfile.businessAddress.state,
+            country: vendorProfile.businessAddress.country,
+          }
+        : {
+            street: '',
+            city: process.env.SHIPBUBBLE_SENDER_CITY || '',
+            state: process.env.SHIPBUBBLE_SENDER_STATE || '',
+            country: process.env.SHIPBUBBLE_SENDER_COUNTRY || 'Nigeria',
+          };
+
+      const group: VendorGroup = {
+        vendorId,
+        // Always prefer the current DB value so stale order snapshots don't win
+        vendorName:
+          vendorProfile?.businessName ||
+          vs.vendorName ||
+          `${vendor.firstName} ${vendor.lastName}`,
+        vendorAddress,
+        // Restore the pickup address that was captured at checkout
+        pickupAddress: vs.origin?.street
+          ? {
+              street: vs.origin.street,
+              city: vs.origin.city,
+              state: vs.origin.state,
+              country: vs.origin.country,
+            }
+          : undefined,
+        items: vendorItems.map((item: any) => {
+          const product = item.product as any;
+          const productType =
+            product?.productType?.toUpperCase() ||
+            item.productType?.toUpperCase();
+          const isPhysical =
+            productType === 'PHYSICAL' ||
+            (!productType ||
+              (productType !== 'DIGITAL' && productType !== 'SERVICE'));
+          return {
+            productId: product?._id?.toString() || item.product.toString(),
+            productName: item.productName,
+            quantity: item.quantity,
+            weight: product?.weight || 0.5,
+            isPhysical,
+            price: item.price,
+            category: product?.category,
+          };
+        }),
+        totalWeight: 0,
+      };
+
+      group.totalWeight = group.items
+        .filter((i) => i.isPhysical)
+        .reduce((sum, i) => sum + i.weight * i.quantity, 0);
+
+      vendorGroups.push(group);
+    }
+
+    if (vendorGroups.length === 0) {
+      throw new AppError('Could not build vendor groups — vendor data missing', 400);
+    }
+
+    // Reset order and stuck vendorShipment statuses back to 'processing'
+    // so ShipBubble webhooks can drive the correct sequence after label creation
+    order.status = 'processing' as any;
+    for (const vs of stuckShipments) {
+      vs.status = 'processing';
+    }
+    await order.save();
+
+    await this.createVendorShipments(
+      order,
+      order.user as any,
+      vendorGroups,
+      (order as any).deliveryType || 'standard'
+    );
+
+    return { retried: vendorGroups.length };
   }
+
+  } // end OrderController
 
   export const orderController = new OrderController();

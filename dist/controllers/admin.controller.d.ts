@@ -193,6 +193,11 @@ export declare const updateOrderStatus: (req: import("express").Request, res: Re
  */
 export declare const addAdminNote: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 /**
+ * POST /admin/orders/:id/retry-shipment
+ * Re-trigger ShipBubble label creation for stuck vendorShipments (no trackingNumber)
+ */
+export declare const retryShipment: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+/**
  * POST /admin/orders/:id/refund
  * Process order refund
  */

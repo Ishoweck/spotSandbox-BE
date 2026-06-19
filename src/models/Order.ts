@@ -17,6 +17,7 @@ export interface IVendorShipment {
   trackingNumber?: string;
   shipmentId?: string;
   courier?: string;
+  requestedCourier?: string;
   estimatedDelivery?: Date;
   trackingUrl?: string;
   paidAt?: Date;
@@ -157,6 +158,7 @@ const vendorShipmentSchema = new Schema<IVendorShipment>({
   trackingUrl: String,
   shipmentId: String,
   courier: String,
+  requestedCourier: String,
   estimatedDelivery: Date,
   paidAt: Date,
   status: {
