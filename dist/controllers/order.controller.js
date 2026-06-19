@@ -177,26 +177,40 @@ class OrderController {
      * returns the most relevant couriers for the product type.
      */
     determineCategoryForItems(items) {
+        for (const item of items) {
+            const product = item.product || item;
+            const categoryObj = product.category;
+            // Use the populated category name from the DB (most accurate)
+            if (categoryObj && typeof categoryObj === 'object' && categoryObj.name) {
+                const categoryId = shipbubble_service_1.shipBubbleService.getCategoryIdByName(categoryObj.name);
+                if (categoryId !== 77179563) {
+                    logger_1.logger.info(`📦 Category from DB: "${categoryObj.name}" (ID: ${categoryId}) for product "${product.name || item.productName}"`);
+                    return categoryId;
+                }
+                // If it mapped to the default, log but keep trying other items
+                logger_1.logger.info(`📦 Category "${categoryObj.name}" has no specific ShipBubble mapping — trying next item`);
+            }
+        }
+        // Fallback: keyword match on product name
         const categoryKeywords = {
             'fashion': [
-                'shoe', 'sneaker', 'sandal', 'boot', 'heel',
-                'shirt', 'dress', 'cloth', 'wear', 'jacket', 'jean', 'trouser', 'skirt',
-                'bag', 'handbag', 'purse', 'belt', 'cap', 'hat', 'scarf',
-                'fashion', 'apparel', 'outfit', 'hoodie', 'jogger', 'shorts',
-                'adidas', 'nike', 'puma', 'reebok', 'new balance', 'vans',
+                'shoe', 'sneaker', 'sandal', 'boot', 'heel', 'shirt', 'dress',
+                'cloth', 'wear', 'jacket', 'jean', 'trouser', 'skirt', 'bag',
+                'handbag', 'purse', 'belt', 'cap', 'hat', 'scarf', 'fashion',
+                'apparel', 'outfit', 'hoodie', 'jogger', 'shorts',
             ],
             'electronics': [
                 'phone', 'laptop', 'tablet', 'charger', 'cable', 'adapter',
                 'earphone', 'headphone', 'earbuds', 'airpod', 'speaker', 'bluetooth',
-                'watch', 'smartwatch', 'gadget', 'electronic', 'samsung', 'apple', 'iphone',
-                'power bank', 'battery', 'camera', 'console', 'controller', 'keyboard', 'mouse',
-                'monitor', 'screen', 'tv', 'television', 'projector',
+                'watch', 'smartwatch', 'gadget', 'electronic', 'samsung', 'apple',
+                'iphone', 'power bank', 'battery', 'camera', 'console', 'keyboard',
+                'mouse', 'monitor', 'tv', 'television', 'projector',
             ],
             'health and beauty': [
                 'cream', 'lotion', 'soap', 'perfume', 'cologne', 'fragrance',
                 'makeup', 'beauty', 'skincare', 'hair', 'cosmetic', 'serum',
-                'sunscreen', 'moisturizer', 'shampoo', 'conditioner', 'oil',
-                'lipstick', 'foundation', 'mascara', 'nail', 'body spray',
+                'sunscreen', 'moisturizer', 'shampoo', 'conditioner', 'lipstick',
+                'foundation', 'mascara', 'nail', 'body spray', 'glow',
             ],
             'groceries': [
                 'food', 'rice', 'oil', 'grocery', 'snack', 'drink', 'beverage',
@@ -213,18 +227,16 @@ class OrderController {
                 'notebook', 'journal', 'card', 'envelope', 'letter',
             ],
         };
-        // Check each item's product name against keywords
         for (const item of items) {
             const name = (item.productName || item.name || '').toLowerCase();
             for (const [category, keywords] of Object.entries(categoryKeywords)) {
                 if (keywords.some(kw => name.includes(kw))) {
                     const categoryId = shipbubble_service_1.shipBubbleService.getCategoryIdByName(category);
-                    logger_1.logger.info(`📦 Category detected: "${category}" (ID: ${categoryId}) from product "${item.productName || item.name}"`);
+                    logger_1.logger.info(`📦 Category from keyword match: "${category}" (ID: ${categoryId}) for product "${item.productName || item.name}"`);
                     return categoryId;
                 }
             }
         }
-        // Default to Electronics and gadgets
         logger_1.logger.info('📦 No category match found — using default (Electronics: 77179563)');
         return 77179563;
     }
@@ -246,13 +258,13 @@ class OrderController {
             });
             // Get user's cart
             const cart = await Cart_1.default.findOne({
-                user: req.user?.id
+                user: req.user?.id,
             }).populate({
                 path: 'items.product',
-                populate: {
-                    path: 'vendor',
-                    select: 'firstName lastName',
-                },
+                populate: [
+                    { path: 'vendor', select: 'firstName lastName' },
+                    { path: 'category', select: 'name slug' },
+                ],
             });
             if (!cart || cart.items.length === 0) {
                 throw new error_1.AppError('Cart is empty', 400);
@@ -1825,15 +1837,37 @@ class OrderController {
                 });
                 if (ratesResponse.status === 'success' && ratesResponse.data?.request_token) {
                     logger_1.logger.info('✅ Delivery rates fetched successfully');
-                    // Select courier based on delivery type
+                    // Find the courier the customer originally chose for this vendor
+                    const storedVendorShipment = order.vendorShipments?.find((vs) => {
+                        const vsId = typeof vs.vendor === 'object'
+                            ? vs.vendor._id?.toString()
+                            : vs.vendor?.toString();
+                        return vsId === group.vendorId;
+                    });
+                    const storedCourierName = storedVendorShipment?.courier;
+                    // Try to match the stored courier name against the fresh rate list
                     let selectedCourier;
-                    if (deliveryType === 'express' || deliveryType === 'same_day') {
-                        selectedCourier = ratesResponse.data.fastest_courier || ratesResponse.data.couriers[0];
-                        logger_1.logger.info('⚡ Selected fastest courier');
+                    if (storedCourierName && ratesResponse.data?.couriers?.length) {
+                        const normalizedStored = storedCourierName.toLowerCase();
+                        selectedCourier = ratesResponse.data.couriers.find((c) => c.courier_name?.toLowerCase().includes(normalizedStored) ||
+                            normalizedStored.includes(c.courier_name?.toLowerCase()));
+                        if (selectedCourier) {
+                            logger_1.logger.info(`✅ Matched stored courier "${storedCourierName}" → "${selectedCourier.courier_name}"`);
+                        }
+                        else {
+                            logger_1.logger.warn(`⚠️ Stored courier "${storedCourierName}" not in fresh rates, falling back`);
+                        }
                     }
-                    else {
-                        selectedCourier = ratesResponse.data.cheapest_courier || ratesResponse.data.couriers[0];
-                        logger_1.logger.info('💰 Selected cheapest courier');
+                    // Fall back to cheapest/fastest when no stored courier matched
+                    if (!selectedCourier) {
+                        if (deliveryType === 'express' || deliveryType === 'same_day') {
+                            selectedCourier = ratesResponse.data.fastest_courier || ratesResponse.data.couriers[0];
+                            logger_1.logger.info('⚡ Selected fastest courier (fallback)');
+                        }
+                        else {
+                            selectedCourier = ratesResponse.data.cheapest_courier || ratesResponse.data.couriers[0];
+                            logger_1.logger.info('💰 Selected cheapest courier (fallback)');
+                        }
                     }
                     if (selectedCourier) {
                         logger_1.logger.info('🚚 Selected courier:', {
@@ -3057,6 +3091,13 @@ class OrderController {
                     vendorId: req.user?.id,
                     vendorName,
                     vendorAddress,
+                    // Restore the product-level pickup address that was captured at checkout
+                    pickupAddress: vendorShipment?.origin ? {
+                        street: vendorShipment.origin.street || '',
+                        city: vendorShipment.origin.city,
+                        state: vendorShipment.origin.state,
+                        country: vendorShipment.origin.country,
+                    } : undefined,
                     items: vendorItems.map((item) => {
                         const product = item.product;
                         const productType = product?.productType?.toUpperCase() || item.productType?.toUpperCase();

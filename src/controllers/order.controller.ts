@@ -7,6 +7,7 @@
   import Order, { IVendorShipment } from '../models/Order';
   import Cart from '../models/Cart';
   import Product from '../models/Product';
+  import Category from '../models/Category';
   import User from '../models/User';
   import VendorProfile from '../models/VendorProfile';
   import { Wallet, AffiliateLink } from '../models/Additional';
@@ -170,26 +171,42 @@
      * returns the most relevant couriers for the product type.
      */
     private determineCategoryForItems(items: any[]): number {
+      for (const item of items) {
+        const product = item.product || item;
+        const categoryObj = product.category;
+
+        // Use the populated category name from the DB (most accurate)
+        if (categoryObj && typeof categoryObj === 'object' && categoryObj.name) {
+          const categoryId = shipBubbleService.getCategoryIdByName(categoryObj.name);
+          if (categoryId !== 77179563) {
+            logger.info(`📦 Category from DB: "${categoryObj.name}" (ID: ${categoryId}) for product "${product.name || item.productName}"`);
+            return categoryId;
+          }
+          // If it mapped to the default, log but keep trying other items
+          logger.info(`📦 Category "${categoryObj.name}" has no specific ShipBubble mapping — trying next item`);
+        }
+      }
+
+      // Fallback: keyword match on product name
       const categoryKeywords: { [key: string]: string[] } = {
         'fashion': [
-          'shoe', 'sneaker', 'sandal', 'boot', 'heel',
-          'shirt', 'dress', 'cloth', 'wear', 'jacket', 'jean', 'trouser', 'skirt',
-          'bag', 'handbag', 'purse', 'belt', 'cap', 'hat', 'scarf',
-          'fashion', 'apparel', 'outfit', 'hoodie', 'jogger', 'shorts',
-          'adidas', 'nike', 'puma', 'reebok', 'new balance', 'vans',
+          'shoe', 'sneaker', 'sandal', 'boot', 'heel', 'shirt', 'dress',
+          'cloth', 'wear', 'jacket', 'jean', 'trouser', 'skirt', 'bag',
+          'handbag', 'purse', 'belt', 'cap', 'hat', 'scarf', 'fashion',
+          'apparel', 'outfit', 'hoodie', 'jogger', 'shorts',
         ],
         'electronics': [
           'phone', 'laptop', 'tablet', 'charger', 'cable', 'adapter',
           'earphone', 'headphone', 'earbuds', 'airpod', 'speaker', 'bluetooth',
-          'watch', 'smartwatch', 'gadget', 'electronic', 'samsung', 'apple', 'iphone',
-          'power bank', 'battery', 'camera', 'console', 'controller', 'keyboard', 'mouse',
-          'monitor', 'screen', 'tv', 'television', 'projector',
+          'watch', 'smartwatch', 'gadget', 'electronic', 'samsung', 'apple',
+          'iphone', 'power bank', 'battery', 'camera', 'console', 'keyboard',
+          'mouse', 'monitor', 'tv', 'television', 'projector',
         ],
         'health and beauty': [
           'cream', 'lotion', 'soap', 'perfume', 'cologne', 'fragrance',
           'makeup', 'beauty', 'skincare', 'hair', 'cosmetic', 'serum',
-          'sunscreen', 'moisturizer', 'shampoo', 'conditioner', 'oil',
-          'lipstick', 'foundation', 'mascara', 'nail', 'body spray',
+          'sunscreen', 'moisturizer', 'shampoo', 'conditioner', 'lipstick',
+          'foundation', 'mascara', 'nail', 'body spray', 'glow',
         ],
         'groceries': [
           'food', 'rice', 'oil', 'grocery', 'snack', 'drink', 'beverage',
@@ -207,19 +224,17 @@
         ],
       };
 
-      // Check each item's product name against keywords
       for (const item of items) {
         const name = (item.productName || item.name || '').toLowerCase();
         for (const [category, keywords] of Object.entries(categoryKeywords)) {
           if (keywords.some(kw => name.includes(kw))) {
             const categoryId = shipBubbleService.getCategoryIdByName(category);
-            logger.info(`📦 Category detected: "${category}" (ID: ${categoryId}) from product "${item.productName || item.name}"`);
+            logger.info(`📦 Category from keyword match: "${category}" (ID: ${categoryId}) for product "${item.productName || item.name}"`);
             return categoryId;
           }
         }
       }
 
-      // Default to Electronics and gadgets
       logger.info('📦 No category match found — using default (Electronics: 77179563)');
       return 77179563;
     }
@@ -244,14 +259,14 @@
         });
 
         // Get user's cart
-        const cart = await Cart.findOne({ 
-          user: req.user?.id 
+        const cart = await Cart.findOne({
+          user: req.user?.id,
         }).populate({
           path: 'items.product',
-          populate: {
-            path: 'vendor',
-            select: 'firstName lastName',
-          },
+          populate: [
+            { path: 'vendor', select: 'firstName lastName' },
+            { path: 'category', select: 'name slug' },
+          ],
         });
 
         if (!cart || cart.items.length === 0) {
@@ -2151,14 +2166,41 @@
           if (ratesResponse.status === 'success' && ratesResponse.data?.request_token) {
             logger.info('✅ Delivery rates fetched successfully');
 
-            // Select courier based on delivery type
+            // Find the courier the customer originally chose for this vendor
+            const storedVendorShipment = order.vendorShipments?.find(
+              (vs: any) => {
+                const vsId = typeof vs.vendor === 'object'
+                  ? vs.vendor._id?.toString()
+                  : vs.vendor?.toString();
+                return vsId === group.vendorId;
+              }
+            );
+            const storedCourierName: string | undefined = storedVendorShipment?.courier;
+
+            // Try to match the stored courier name against the fresh rate list
             let selectedCourier;
-            if (deliveryType === 'express' || deliveryType === 'same_day') {
-              selectedCourier = ratesResponse.data.fastest_courier || ratesResponse.data.couriers[0];
-              logger.info('⚡ Selected fastest courier');
-            } else {
-              selectedCourier = ratesResponse.data.cheapest_courier || ratesResponse.data.couriers[0];
-              logger.info('💰 Selected cheapest courier');
+            if (storedCourierName && ratesResponse.data?.couriers?.length) {
+              const normalizedStored = storedCourierName.toLowerCase();
+              selectedCourier = ratesResponse.data.couriers.find(
+                (c: any) => c.courier_name?.toLowerCase().includes(normalizedStored) ||
+                            normalizedStored.includes(c.courier_name?.toLowerCase())
+              );
+              if (selectedCourier) {
+                logger.info(`✅ Matched stored courier "${storedCourierName}" → "${selectedCourier.courier_name}"`);
+              } else {
+                logger.warn(`⚠️ Stored courier "${storedCourierName}" not in fresh rates, falling back`);
+              }
+            }
+
+            // Fall back to cheapest/fastest when no stored courier matched
+            if (!selectedCourier) {
+              if (deliveryType === 'express' || deliveryType === 'same_day') {
+                selectedCourier = ratesResponse.data.fastest_courier || ratesResponse.data.couriers[0];
+                logger.info('⚡ Selected fastest courier (fallback)');
+              } else {
+                selectedCourier = ratesResponse.data.cheapest_courier || ratesResponse.data.couriers[0];
+                logger.info('💰 Selected cheapest courier (fallback)');
+              }
             }
 
             if (selectedCourier) {
@@ -3608,6 +3650,13 @@
             vendorId: req.user?.id,
             vendorName,
             vendorAddress,
+            // Restore the product-level pickup address that was captured at checkout
+            pickupAddress: vendorShipment?.origin ? {
+              street: vendorShipment.origin.street || '',
+              city: vendorShipment.origin.city,
+              state: vendorShipment.origin.state,
+              country: vendorShipment.origin.country,
+            } : undefined,
             items: vendorItems.map((item: any) => {
               const product = item.product as any;
               const productType = product?.productType?.toUpperCase() || item.productType?.toUpperCase();

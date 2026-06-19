@@ -294,29 +294,78 @@ class ShipBubbleService {
      */
     getCategoryIdByName(categoryName) {
         const categories = {
+            // Food
             'hot food': 98190590,
+            'food': 98190590,
             'dry food': 24032950,
             'dry food and supplements': 24032950,
+            // Electronics
             'electronics': 77179563,
             'electronics and gadgets': 77179563,
             'electronic gadgets': 77179563,
+            'gadgets': 77179563,
+            'phones': 77179563,
+            'computers': 77179563,
+            'appliances': 77179563,
+            // Groceries
             'groceries': 2178251,
+            'grocery': 2178251,
+            'supermarket': 2178251,
+            // Sensitive / Documents
             'sensitive items': 67658572,
             'documents': 67658572,
+            // Light weight
             'light weight': 20754594,
             'light weight items': 20754594,
+            'books': 20754594,
+            'stationery': 20754594,
+            // Machinery
             'machinery': 67008831,
+            'tools': 67008831,
+            'industrial': 67008831,
+            // Medical
             'medical supplies': 57487393,
+            'health': 57487393,
+            'pharmacy': 57487393,
+            // Beauty
             'health and beauty': 99652979,
             'beauty': 99652979,
+            'skincare': 99652979,
+            'cosmetics': 99652979,
+            'hair care': 99652979,
+            'personal care': 99652979,
+            'wellness': 99652979,
+            // Furniture
             'furniture': 25590994,
             'furniture and fittings': 25590994,
+            'home decor': 25590994,
+            'home and living': 25590994,
+            'home & living': 25590994,
+            'interior': 25590994,
+            // Fashion
             'fashion': 74794423,
             'fashion wears': 74794423,
-            'default': 77179563, // Default to Electronics and gadgets
+            'clothing': 74794423,
+            'apparel': 74794423,
+            'shoes': 74794423,
+            'footwear': 74794423,
+            'accessories': 74794423,
+            'bags': 74794423,
+            'jewelry': 74794423,
+            'jewellery': 74794423,
+            'watches': 74794423,
+            'sportswear': 74794423,
+            'kids fashion': 74794423,
+            'men fashion': 74794423,
+            'women fashion': 74794423,
+            'default': 77179563,
         };
         const normalized = categoryName.toLowerCase().trim();
-        return categories[normalized] || categories['default'];
+        // Try exact match first, then partial match
+        if (categories[normalized])
+            return categories[normalized];
+        const partialKey = Object.keys(categories).find(k => normalized.includes(k) || k.includes(normalized));
+        return partialKey ? categories[partialKey] : categories['default'];
     }
     /**
      * Get all validated addresses
