@@ -23,7 +23,8 @@
     "patch:pending": "npx ts-node src/scripts/patch-migrated-to-pending.ts",
     "seed:vendors": "npx ts-node src/scripts/seedVendors.ts",
     "backfill:ratings": "npx ts-node src/scripts/backfillVendorRatings.ts",
-    "backfill:addresses": "npx ts-node src/scripts/backfillVendorAddresses.ts"
+    "backfill:addresses": "npx ts-node src/scripts/backfillVendorAddresses.ts",
+    "seed:notif-templates": "npx ts-node scripts/seed-notification-templates.ts"
   },
   "keywords": [
     "ecommerce",
@@ -38,6 +39,7 @@
     "archiver": "^7.0.1",
     "axios": "^1.13.4",
     "bcryptjs": "^2.4.3",
+    "bullmq": "^5.79.0",
     "cloudinary": "^1.41.0",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
@@ -49,7 +51,9 @@
     "firebase-admin": "^12.0.0",
     "google-auth-library": "^10.5.0",
     "groq-sdk": "^1.1.2",
+    "handlebars": "^4.7.9",
     "helmet": "^7.1.0",
+    "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.0.3",
     "morgan": "^1.10.0",

@@ -1435,6 +1435,23 @@
 
       let paymentData: any = null;
 
+      // Track this payment attempt — used by the webhook and recovery endpoint
+      const { PendingPayment } = await import('../models/PendingPayment');
+      await PendingPayment.findOneAndUpdate(
+        { reference: paymentReference },
+        {
+          reference: paymentReference,
+          userId: user._id.toString(),
+          type: 'order',
+          amount: cardChargeAmount,
+          gateway: paymentMethod === PaymentMethod.PAYSTACK ? 'paystack' : 'flutterwave',
+          status: 'pending',
+          snapshotJson: JSON.stringify(checkoutSnapshot),
+          expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+        },
+        { upsert: true, new: true }
+      );
+
       if (paymentMethod === PaymentMethod.PAYSTACK) {
         logger.info('💳 Initializing Paystack...');
         try {
@@ -1447,6 +1464,7 @@
               checkoutSnapshot: JSON.stringify(checkoutSnapshot),
               userId: user._id.toString(),
               isDigital: isDigitalOnly,
+              purpose: 'order',
             },
           });
 
@@ -1868,6 +1886,15 @@
       });
 
       logger.info(`✅ Order created with verified payment: ${order._id}`);
+
+      // Mark the pending payment record as done
+      try {
+        const { PendingPayment } = await import('../models/PendingPayment');
+        await PendingPayment.findOneAndUpdate(
+          { reference },
+          { status: 'completed', completedAt: new Date() }
+        );
+      } catch { /* non-critical */ }
 
       // Deduct VCredits NOW — payment is confirmed, safe to remove from wallet
       const vCreditsApplied = snapshot.vCreditsApplied || 0;
@@ -2305,6 +2332,170 @@
     /**
      * Verify payment - Supports Paystack and Flutterwave
      */
+    /**
+     * GET /orders/payment/status/:reference
+     * Mobile recovery endpoint — called when user re-opens app after a dropped payment session.
+     * Returns order if created, or re-verifies with Paystack and creates the order if payment succeeded.
+     */
+    async getPaymentStatus(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+      const { reference } = req.params;
+
+      // 1. Order already created (happy path or webhook already handled it)
+      const existingOrder = await Order.findOne({
+        orderNumber: reference,
+        user: req.user?.id,
+      });
+      if (existingOrder) {
+        res.json({
+          success: true,
+          data: { status: 'completed', order: existingOrder },
+        });
+        return;
+      }
+
+      // 2. Check PendingPayment record
+      const { PendingPayment } = await import('../models/PendingPayment');
+      const pending = await PendingPayment.findOne({ reference, userId: req.user?.id });
+
+      if (!pending) {
+        res.json({ success: true, data: { status: 'not_found' } });
+        return;
+      }
+
+      if (pending.status === 'failed') {
+        res.json({ success: true, data: { status: 'failed' } });
+        return;
+      }
+
+      // 3. Payment is pending — actively re-verify with Paystack
+      try {
+        const verification = await paystackService.verifyPayment(reference);
+        if (verification.data.status !== 'success') {
+          res.json({ success: true, data: { status: 'pending' } });
+          return;
+        }
+
+        // Payment DID succeed — Paystack's webhook may have been delayed.
+        // Re-use the snapshot we saved to build the order now.
+        if (!pending.snapshotJson) {
+          res.json({ success: true, data: { status: 'processing', message: 'Payment confirmed — order being created' } });
+          return;
+        }
+
+        const snapshot = JSON.parse(pending.snapshotJson);
+        const paidAmountNaira = verification.data.amount / 100;
+
+        // Validate amount
+        if (paidAmountNaira < snapshot.cardChargeAmount - 1) {
+          await PendingPayment.findOneAndUpdate({ reference }, { status: 'failed' });
+          res.json({ success: true, data: { status: 'failed', message: 'Payment amount mismatch' } });
+          return;
+        }
+
+        // Re-check idempotency (webhook may have just created it)
+        const raceCheck = await Order.findOne({ orderNumber: reference });
+        if (raceCheck) {
+          res.json({ success: true, data: { status: 'completed', order: raceCheck } });
+          return;
+        }
+
+        // Create order from snapshot (same core logic used by webhook handler)
+        const cart = await Cart.findById(snapshot.cartId).populate({
+          path: 'items.product',
+          populate: { path: 'vendor', select: 'firstName lastName email' },
+        });
+
+        let orderItems: any[] = [];
+        const isDigitalOnly: boolean = snapshot.isDigitalOnly || false;
+        if (cart && cart.items.length > 0) {
+          orderItems = cart.items.map((item: any) => ({
+            product:      item.product._id,
+            productName:  item.product.name,
+            productImage: item.product.images?.[0],
+            productType:  item.product.productType || 'physical',
+            variant:      item.variant,
+            quantity:     item.quantity,
+            price:        item.price,
+            vendor:       item.product.vendor._id,
+          }));
+        }
+
+        const order = await Order.create({
+          orderNumber:      reference,
+          user:             req.user?.id,
+          items:            orderItems,
+          subtotal:         snapshot.subtotal,
+          discount:         snapshot.discount || 0,
+          shippingCost:     snapshot.totalShippingCost || 0,
+          tax:              snapshot.tax || 0,
+          serviceCharge:    snapshot.serviceCharge || 0,
+          total:            snapshot.total,
+          status:           isDigitalOnly ? OrderStatus.DELIVERED : OrderStatus.PENDING,
+          paymentStatus:    PaymentStatus.COMPLETED,
+          paymentMethod:    snapshot.paymentMethod,
+          paymentReference: reference,
+          shippingAddress:  isDigitalOnly ? undefined : snapshot.shippingAddress,
+          couponCode:       snapshot.couponCode,
+          notes:            snapshot.notes,
+          deliveryType:     isDigitalOnly ? 'digital' : snapshot.deliveryType,
+          isPickup:         snapshot.deliveryType === 'pickup' || isDigitalOnly,
+          isDigital:        isDigitalOnly,
+        });
+
+        await PendingPayment.findOneAndUpdate(
+          { reference },
+          { status: 'completed', completedAt: new Date() }
+        );
+
+        // Deduct VCredits
+        if ((snapshot.vCreditsApplied || 0) > 0) {
+          await Wallet.findOneAndUpdate(
+            { user: req.user?.id, vCredits: { $gte: snapshot.vCreditsApplied } },
+            {
+              $inc: { vCredits: -snapshot.vCreditsApplied },
+              $push: {
+                transactions: {
+                  type: TransactionType.DEBIT, amount: snapshot.vCreditsApplied,
+                  purpose: WalletPurpose.PURCHASE, reference: `VCREDITS-${order._id}`,
+                  description: `VCredits applied to order #${order.orderNumber}`,
+                  status: 'completed', timestamp: new Date(),
+                },
+              },
+            }
+          );
+        }
+
+        // Stock deduction
+        for (const item of orderItems) {
+          const isPhysical = item.productType?.toUpperCase() !== 'DIGITAL' && item.productType?.toUpperCase() !== 'SERVICE';
+          if (isPhysical) {
+            await Product.findOneAndUpdate(
+              { _id: item.product, quantity: { $gte: item.quantity } },
+              { $inc: { quantity: -item.quantity, totalSales: item.quantity } }
+            );
+          } else {
+            await Product.findByIdAndUpdate(item.product, { $inc: { totalSales: item.quantity } });
+          }
+        }
+
+        // Clear cart
+        if (cart && cart.items.length > 0) { cart.items = []; await cart.save(); }
+
+        // Notify
+        try {
+          const vendorIds = [...new Set(orderItems.map((i: any) => i.vendor.toString()))];
+          await notificationService.orderPlaced(order._id.toString(), order.orderNumber, order.total, req.user!.id, vendorIds);
+          await notificationService.paymentCompleted(order._id.toString(), order.orderNumber, order.total, req.user!.id);
+        } catch { /* non-critical */ }
+
+        logger.info(`[PaymentStatus] Order recovered for ${reference}: ${order._id}`);
+        res.json({ success: true, data: { status: 'completed', order } });
+      } catch (err: any) {
+        logger.error(`[PaymentStatus] Error checking ${reference}:`, err.message);
+        res.json({ success: true, data: { status: 'pending' } });
+      }
+    }
+
     async verifyPayment(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       const { reference } = req.params;
       const { provider, transaction_id } = req.query;

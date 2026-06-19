@@ -37,6 +37,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.webhookController = exports.WebhookController = void 0;
+exports.handlePaystackWebhook = handlePaystackWebhook;
+exports.handleResendWebhook = handleResendWebhook;
 const types_1 = require("../types");
 const Order_1 = __importDefault(require("../models/Order"));
 const notification_service_1 = require("../services/notification.service");
@@ -513,4 +515,285 @@ WebhookController.SHIPMENT_STATUS_RANK = {
     pending: 0, confirmed: 1, processing: 2, created: 3, shipped: 4, in_transit: 5, delivered: 6,
 };
 exports.webhookController = new WebhookController();
+// ================================================================
+// PAYSTACK PAYMENT WEBHOOK
+// POST /webhooks/paystack
+// ================================================================
+const Additional_1 = require("../models/Additional");
+const Cart_1 = __importDefault(require("../models/Cart"));
+const Product_1 = __importDefault(require("../models/Product"));
+const User_1 = __importDefault(require("../models/User"));
+const PendingPayment_1 = require("../models/PendingPayment");
+const notification_service_2 = require("../services/notification.service");
+const types_2 = require("../types");
+const crypto_1 = __importDefault(require("crypto"));
+async function handlePaystackWebhook(req, res) {
+    // 1. Verify HMAC-SHA512 signature — Paystack signs with your secret key
+    const rawBody = req.rawBody;
+    const signature = req.headers['x-paystack-signature'];
+    const secret = process.env.PAYSTACK_SECRET_KEY || '';
+    if (signature && secret) {
+        const expected = crypto_1.default
+            .createHmac('sha512', secret)
+            .update(rawBody || Buffer.from(JSON.stringify(req.body)))
+            .digest('hex');
+        if (expected !== signature) {
+            logger_1.logger.warn('[Paystack Webhook] Invalid signature — request rejected');
+            res.status(401).json({ success: false, message: 'Unauthorized' });
+            return;
+        }
+    }
+    // Acknowledge immediately so Paystack doesn't retry due to timeout
+    res.status(200).json({ received: true });
+    const event = req.body;
+    logger_1.logger.info(`[Paystack Webhook] Event: ${event.event}`);
+    try {
+        if (event.event === 'charge.success') {
+            const { reference, amount, metadata = {} } = event.data;
+            const paidAmountNaira = amount / 100;
+            const purpose = metadata.purpose || 'order';
+            if (purpose === 'wallet_topup') {
+                await _fulfillWalletTopUp(reference, metadata.userId, paidAmountNaira);
+            }
+            else {
+                await _fulfillOrder(reference, paidAmountNaira, metadata);
+            }
+        }
+    }
+    catch (err) {
+        logger_1.logger.error('[Paystack Webhook] Processing error:', err.message);
+    }
+}
+async function _fulfillOrder(reference, paidAmountNaira, metadata) {
+    // Guard: if order was already created (by confirmPayment), just mark PendingPayment and exit
+    const existingOrder = await Order_1.default.findOne({ orderNumber: reference });
+    if (existingOrder) {
+        logger_1.logger.info(`[Paystack Webhook] Order ${reference} already exists — marking complete`);
+        await PendingPayment_1.PendingPayment.findOneAndUpdate({ reference }, { status: 'completed', completedAt: new Date() });
+        return;
+    }
+    // Parse the checkout snapshot embedded in Paystack metadata
+    let snapshot;
+    try {
+        snapshot = typeof metadata.checkoutSnapshot === 'string'
+            ? JSON.parse(metadata.checkoutSnapshot)
+            : metadata.checkoutSnapshot;
+    }
+    catch {
+        logger_1.logger.error(`[Paystack Webhook] Cannot parse snapshot for ${reference}`);
+        return;
+    }
+    if (!snapshot?.userId) {
+        logger_1.logger.error(`[Paystack Webhook] No snapshot/userId in metadata for ${reference}`);
+        return;
+    }
+    const userId = snapshot.userId;
+    // Fetch cart and user in parallel
+    const [cart, user] = await Promise.all([
+        Cart_1.default.findById(snapshot.cartId).populate({
+            path: 'items.product',
+            populate: { path: 'vendor', select: 'firstName lastName email' },
+        }),
+        User_1.default.findById(userId),
+    ]);
+    if (!user) {
+        logger_1.logger.error(`[Paystack Webhook] User ${userId} not found for reference ${reference}`);
+        return;
+    }
+    // Build order items from cart (cart might be cleared if confirmPayment ran partially)
+    let orderItems = [];
+    const isDigitalOnly = snapshot.isDigitalOnly || false;
+    if (cart && cart.items.length > 0) {
+        orderItems = cart.items.map((item) => ({
+            product: item.product._id,
+            productName: item.product.name,
+            productImage: item.product.images?.[0],
+            productType: item.product.productType || 'physical',
+            variant: item.variant,
+            quantity: item.quantity,
+            price: item.price,
+            vendor: item.product.vendor._id,
+        }));
+    }
+    else {
+        logger_1.logger.warn(`[Paystack Webhook] Cart ${snapshot.cartId} empty/missing for ${reference} — creating partial order`);
+    }
+    // Build vendorShipments from snapshot delivery data
+    const vendorShipments = [];
+    if (!isDigitalOnly && snapshot.deliveryType !== 'pickup' && orderItems.length > 0) {
+        const vendorItemMap = new Map();
+        for (const item of orderItems) {
+            const vid = item.vendor.toString();
+            if (!vendorItemMap.has(vid))
+                vendorItemMap.set(vid, []);
+            vendorItemMap.get(vid).push(item.product);
+        }
+        for (const [vendorId, productIds] of vendorItemMap.entries()) {
+            const deliveries = snapshot.vendorDeliveries || [];
+            const breakdown = snapshot.vendorBreakdown || [];
+            const vd = deliveries.find((v) => v.vendorId === vendorId)
+                || breakdown.find((v) => v.vendorId === vendorId);
+            vendorShipments.push({
+                vendor: vendorId,
+                vendorName: '',
+                items: productIds,
+                origin: { street: '', city: '', state: '', country: 'Nigeria' },
+                shippingCost: vd?.price ?? snapshot.selectedDeliveryPrice ?? 0,
+                courier: vd?.courier || snapshot.selectedCourier || 'Standard',
+                requestedCourier: vd?.courier || snapshot.selectedCourier || 'Standard',
+                status: 'pending',
+            });
+        }
+    }
+    // Create the order with snapshot financials
+    const order = await Order_1.default.create({
+        orderNumber: reference,
+        user: userId,
+        items: orderItems,
+        subtotal: snapshot.subtotal,
+        discount: snapshot.discount || 0,
+        shippingCost: snapshot.totalShippingCost || 0,
+        tax: snapshot.tax || 0,
+        serviceCharge: snapshot.serviceCharge || 0,
+        total: snapshot.total,
+        status: isDigitalOnly ? types_1.OrderStatus.DELIVERED : types_1.OrderStatus.PENDING,
+        paymentStatus: types_2.PaymentStatus.COMPLETED,
+        paymentMethod: snapshot.paymentMethod,
+        paymentReference: reference,
+        shippingAddress: isDigitalOnly ? undefined : snapshot.shippingAddress,
+        couponCode: snapshot.couponCode,
+        notes: snapshot.notes,
+        deliveryType: isDigitalOnly ? 'digital' : snapshot.deliveryType,
+        isPickup: snapshot.deliveryType === 'pickup' || isDigitalOnly,
+        vendorShipments,
+        isDigital: isDigitalOnly,
+    });
+    logger_1.logger.info(`[Paystack Webhook] Order created: ${order._id} (ref: ${reference})`);
+    // Mark PendingPayment as completed
+    await PendingPayment_1.PendingPayment.findOneAndUpdate({ reference }, { status: 'completed', completedAt: new Date() });
+    // Deduct VCredits atomically (same guard as confirmPayment)
+    const vCreditsApplied = snapshot.vCreditsApplied || 0;
+    if (vCreditsApplied > 0) {
+        await Additional_1.Wallet.findOneAndUpdate({ user: userId, vCredits: { $gte: vCreditsApplied } }, {
+            $inc: { vCredits: -vCreditsApplied },
+            $push: {
+                transactions: {
+                    type: 'debit',
+                    amount: vCreditsApplied,
+                    purpose: 'purchase',
+                    reference: `VCREDITS-${order._id}`,
+                    description: `VCredits applied to order #${order.orderNumber}`,
+                    status: 'completed',
+                    timestamp: new Date(),
+                },
+            },
+        });
+    }
+    // Reduce stock atomically
+    for (const item of orderItems) {
+        const isPhysical = item.productType?.toUpperCase() !== 'DIGITAL' && item.productType?.toUpperCase() !== 'SERVICE';
+        if (isPhysical) {
+            await Product_1.default.findOneAndUpdate({ _id: item.product, quantity: { $gte: item.quantity } }, { $inc: { quantity: -item.quantity, totalSales: item.quantity } });
+        }
+        else {
+            await Product_1.default.findByIdAndUpdate(item.product, { $inc: { totalSales: item.quantity } });
+        }
+    }
+    // Clear cart
+    if (cart && cart.items.length > 0) {
+        cart.items = [];
+        await cart.save();
+    }
+    // Notifications (non-blocking)
+    try {
+        const vendorIds = [...new Set(orderItems.map((i) => i.vendor.toString()))];
+        await notification_service_1.notificationService.orderPlaced(order._id.toString(), order.orderNumber, order.total, userId, vendorIds);
+        await notification_service_1.notificationService.paymentCompleted(order._id.toString(), order.orderNumber, order.total, userId);
+        (0, notification_service_2.emitNewOrder)({ orderId: order._id.toString(), orderNumber: order.orderNumber, vendorIds });
+    }
+    catch (notifErr) {
+        logger_1.logger.error('[Paystack Webhook] Notification error:', notifErr.message);
+    }
+}
+async function _fulfillWalletTopUp(reference, userId, amountNaira) {
+    if (!userId) {
+        logger_1.logger.error(`[Paystack Webhook] wallet_topup missing userId for ${reference}`);
+        return;
+    }
+    // Atomic: only credit if this reference hasn't been processed yet
+    const wallet = await Additional_1.Wallet.findOneAndUpdate({
+        user: userId,
+        $nor: [{ transactions: { $elemMatch: { reference, status: 'completed' } } }],
+    }, {
+        $inc: { balance: amountNaira, totalEarned: amountNaira },
+        $push: {
+            transactions: {
+                type: 'credit',
+                amount: amountNaira,
+                purpose: 'top_up',
+                reference,
+                description: 'Wallet top-up via Paystack (webhook)',
+                status: 'completed',
+                timestamp: new Date(),
+            },
+        },
+    }, { new: true });
+    if (!wallet) {
+        logger_1.logger.info(`[Paystack Webhook] Wallet top-up ${reference} already credited — skipping`);
+        return;
+    }
+    await PendingPayment_1.PendingPayment.findOneAndUpdate({ reference }, { status: 'completed', completedAt: new Date() });
+    try {
+        await notification_service_1.notificationService.walletTopUp(userId, amountNaira, wallet.balance);
+    }
+    catch (e) {
+        logger_1.logger.error('[Paystack Webhook] Wallet top-up notification error:', e.message);
+    }
+    logger_1.logger.info(`[Paystack Webhook] Wallet top-up ${reference}: ₦${amountNaira} credited to ${userId}`);
+}
+// ================================================================
+// RESEND DELIVERY STATUS WEBHOOK
+// POST /webhooks/resend
+// ================================================================
+async function handleResendWebhook(req, res) {
+    // Verify Resend webhook signature
+    const secret = process.env.RESEND_WEBHOOK_SECRET;
+    if (secret) {
+        const signature = req.headers['svix-signature'];
+        const msgId = req.headers['svix-id'];
+        const timestamp = req.headers['svix-timestamp'];
+        if (!signature || !msgId || !timestamp) {
+            res.status(401).json({ success: false, message: 'Missing webhook headers' });
+            return;
+        }
+        const toSign = `${msgId}.${timestamp}.${JSON.stringify(req.body)}`;
+        const expected = crypto_1.default.createHmac('sha256', secret).update(toSign).digest('base64');
+        const signatures = signature.split(' ').map((s) => s.split(',')[1]);
+        const valid = signatures.some((s) => s === expected);
+        if (!valid) {
+            res.status(401).json({ success: false, message: 'Invalid signature' });
+            return;
+        }
+    }
+    const { type, data } = req.body;
+    const statusMap = {
+        'email.delivered': 'delivered',
+        'email.bounced': 'bounced',
+        'email.complained': 'bounced',
+        'email.delivery_delayed': 'pending',
+    };
+    const emailStatus = statusMap[type];
+    if (!emailStatus || !data?.email_id) {
+        res.status(200).json({ success: true }); // Acknowledge unknown events
+        return;
+    }
+    try {
+        await Additional_1.Notification.updateMany({ 'data.resendEmailId': data.email_id }, { $set: { emailStatus } });
+        logger_1.logger.info(`[ResendWebhook] ${type} → emailStatus: ${emailStatus} (emailId: ${data.email_id})`);
+    }
+    catch (err) {
+        logger_1.logger.error('[ResendWebhook] Failed to update delivery status:', err.message);
+    }
+    res.status(200).json({ success: true });
+}
 //# sourceMappingURL=webhook.controller.js.map

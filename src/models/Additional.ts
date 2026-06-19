@@ -225,6 +225,8 @@ export interface INotification extends Document {
   data?: any;
   read: boolean;
   link?: string;
+  pushStatus?: 'pending' | 'sent' | 'failed';
+  emailStatus?: 'pending' | 'sent' | 'delivered' | 'failed' | 'bounced';
 }
 
 const notificationSchema = new Schema<INotification>({
@@ -252,6 +254,15 @@ const notificationSchema = new Schema<INotification>({
     default: false,
   },
   link: String,
+  pushStatus: {
+    type: String,
+    enum: ['pending', 'sent', 'failed'],
+    default: 'pending',
+  },
+  emailStatus: {
+    type: String,
+    enum: ['pending', 'sent', 'delivered', 'failed', 'bounced'],
+  },
 }, {
   timestamps: true,
 });

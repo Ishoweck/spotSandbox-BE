@@ -60,6 +60,12 @@ export declare class OrderController {
     /**
      * Verify payment - Supports Paystack and Flutterwave
      */
+    /**
+     * GET /orders/payment/status/:reference
+     * Mobile recovery endpoint — called when user re-opens app after a dropped payment session.
+     * Returns order if created, or re-verifies with Paystack and creates the order if payment succeeded.
+     */
+    getPaymentStatus(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     verifyPayment(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
      * Check if the current user has an active order involving a counterparty.

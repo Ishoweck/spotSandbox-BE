@@ -12,7 +12,10 @@ import { errorHandler, notFound } from './middleware/error';
 import { mongoSanitize } from './middleware/validation';
 import { logger } from './utils/logger';
 import { initializeSocket } from './config/socket';
-import { setSocketInstance } from './services/notification.service';
+import { setSocketInstance, setQueueReady } from './services/notification.service';
+import { connectRedis } from './config/redis';
+import { startNotificationWorkers } from './workers/notification.worker';
+import { startEmailWorker } from './workers/email.worker';
 import { setupDailyBackup } from './utils/backup';
 import { setupOrderAutoComplete } from './utils/order-autocomplete';
 import { setupPointsExpiryReminders } from './utils/points-expiry-reminder';
@@ -33,6 +36,15 @@ const server = http.createServer(app);
 
 // Connect to database
 connectDB();
+
+// Connect Redis and start BullMQ workers
+connectRedis().then(() => {
+  setQueueReady(true);
+  startNotificationWorkers();
+  startEmailWorker();
+}).catch((err) => {
+  logger.warn('[Redis] Workers not started — notifications will use direct fallback:', err?.message);
+});
 
 // Initialize Socket.io
 const io = initializeSocket(server);
@@ -57,11 +69,15 @@ app.use((req, res, next) => {
 // BODY PARSER - ONLY ONCE with 50MB limit
 // ============================================================
 // Upload routes handle their own large payloads (base64 images) — everything else is capped at 1MB
-app.use((req, res, next) => {
+app.use((req: any, res, next) => {
   const isUploadRoute =
     req.path.startsWith('/api/v1/upload') ||
     req.path.startsWith('/api/v1/products');
-  express.json({ limit: isUploadRoute ? '50mb' : '1mb' })(req, res, next);
+  express.json({
+    limit: isUploadRoute ? '50mb' : '1mb',
+    // Capture raw body for webhook signature verification (Paystack, Resend)
+    verify: (_req: any, _res, buf) => { _req.rawBody = buf; },
+  })(req, res, next);
 });
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 

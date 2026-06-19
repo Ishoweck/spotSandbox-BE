@@ -19,6 +19,9 @@ const validation_1 = require("./middleware/validation");
 const logger_1 = require("./utils/logger");
 const socket_1 = require("./config/socket");
 const notification_service_1 = require("./services/notification.service");
+const redis_1 = require("./config/redis");
+const notification_worker_1 = require("./workers/notification.worker");
+const email_worker_1 = require("./workers/email.worker");
 const backup_1 = require("./utils/backup");
 const order_autocomplete_1 = require("./utils/order-autocomplete");
 const points_expiry_reminder_1 = require("./utils/points-expiry-reminder");
@@ -34,6 +37,14 @@ app.set('trust proxy', 1);
 const server = http_1.default.createServer(app);
 // Connect to database
 (0, database_1.default)();
+// Connect Redis and start BullMQ workers
+(0, redis_1.connectRedis)().then(() => {
+    (0, notification_service_1.setQueueReady)(true);
+    (0, notification_worker_1.startNotificationWorkers)();
+    (0, email_worker_1.startEmailWorker)();
+}).catch((err) => {
+    logger_1.logger.warn('[Redis] Workers not started — notifications will use direct fallback:', err?.message);
+});
 // Initialize Socket.io
 const io = (0, socket_1.initializeSocket)(server);
 exports.io = io;
@@ -57,7 +68,11 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
     const isUploadRoute = req.path.startsWith('/api/v1/upload') ||
         req.path.startsWith('/api/v1/products');
-    express_1.default.json({ limit: isUploadRoute ? '50mb' : '1mb' })(req, res, next);
+    express_1.default.json({
+        limit: isUploadRoute ? '50mb' : '1mb',
+        // Capture raw body for webhook signature verification (Paystack, Resend)
+        verify: (_req, _res, buf) => { _req.rawBody = buf; },
+    })(req, res, next);
 });
 app.use(express_1.default.urlencoded({ limit: '1mb', extended: true }));
 // Security middleware

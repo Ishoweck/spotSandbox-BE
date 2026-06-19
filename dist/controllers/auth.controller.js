@@ -188,9 +188,7 @@ class AuthController {
         Promise.resolve().then(() => __importStar(require('./reward.controller'))).then(({ rewardController: rc }) => rc.checkBadges(user._id.toString())).catch(() => { });
         // Vendor welcome emails are sent after admin approval, not at email verification
         if (user.role !== 'vendor') {
-            (0, email_queue_1.queueEmailsInBackground)([
-                () => (0, email_1.sendBuyerFounderWelcomeEmail)(user.email, user.firstName),
-            ], 10000);
+            (0, email_queue_1.enqueueEmail)(email_queue_1.EmailJobType.BUYER_FOUNDER_WELCOME, user.email, user.firstName).catch(() => { });
         }
         // Send welcome notification
         try {

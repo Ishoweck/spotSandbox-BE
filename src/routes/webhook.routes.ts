@@ -1,6 +1,6 @@
 // routes/webhook.routes.ts
 import { Router } from 'express';
-import { webhookController } from '../controllers/webhook.controller';
+import { webhookController, handleResendWebhook, handlePaystackWebhook } from '../controllers/webhook.controller';
 import { adminWebhookController } from '../controllers/admin-webhook.controller';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../utils/ayncHandler';
@@ -9,12 +9,22 @@ import { UserRole } from '../types';
 const router = Router();
 
 // ============================================
-// PUBLIC WEBHOOK ENDPOINT (No Auth Required)
+// PUBLIC WEBHOOK ENDPOINTS (No Auth Required)
 // ============================================
-// This is the endpoint ShipBubble will call
+
+// Paystack payment events (charge.success → create order or credit wallet)
+router.post('/paystack', asyncHandler(handlePaystackWebhook));
+
+// ShipBubble delivery status updates
 router.post(
   '/shipbubble',
   asyncHandler(webhookController.handleShipBubbleWebhook.bind(webhookController))
+);
+
+// Resend email delivery status updates (delivered, bounced, complained)
+router.post(
+  '/resend',
+  asyncHandler(handleResendWebhook)
 );
 
 // ============================================

@@ -35,6 +35,8 @@ export interface INotification extends Document {
     data?: any;
     read: boolean;
     link?: string;
+    pushStatus?: 'pending' | 'sent' | 'failed';
+    emailStatus?: 'pending' | 'sent' | 'delivered' | 'failed' | 'bounced';
 }
 export interface IChatMessage extends Document {
     conversationId: string;

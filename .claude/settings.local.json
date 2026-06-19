@@ -80,7 +80,11 @@
       "Bash(mongosh *)",
       "Bash(node *)",
       "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(xargs wc -l)",
+      "Bash(Select-Object -Property FullName, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\" -Directory | ForEach-Object { $_.Name })"
     ]
   }
 }

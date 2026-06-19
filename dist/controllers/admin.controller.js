@@ -1088,11 +1088,10 @@ exports.verifyVendor = (0, ayncHandler_1.asyncHandler)(async (req, res) => {
         // Send vendor welcome emails now that the store is approved
         const vendorUser = await User_1.default.findById(vendor.user).select('email firstName');
         if (vendorUser) {
-            (0, email_queue_1.queueEmailsInBackground)([
-                () => (0, email_1.sendVendorWelcomeEmail)(vendorUser.email, vendorUser.firstName),
-                () => (0, email_1.sendFounderWelcomeEmail)(vendorUser.email, vendorUser.firstName),
-                () => (0, email_1.sendProductPostingGuideEmail)(vendorUser.email),
-            ], 10000);
+            // Stagger emails: 0s, 30s, 60s apart to avoid provider rate limits
+            (0, email_queue_1.enqueueEmail)(email_queue_1.EmailJobType.VENDOR_WELCOME, vendorUser.email, vendorUser.firstName, 0).catch(() => { });
+            (0, email_queue_1.enqueueEmail)(email_queue_1.EmailJobType.FOUNDER_WELCOME, vendorUser.email, vendorUser.firstName, 30000).catch(() => { });
+            (0, email_queue_1.enqueueEmail)(email_queue_1.EmailJobType.PRODUCT_POSTING_GUIDE, vendorUser.email, undefined, 60000).catch(() => { });
         }
     }
     else {

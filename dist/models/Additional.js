@@ -242,6 +242,15 @@ const notificationSchema = new mongoose_1.Schema({
         default: false,
     },
     link: String,
+    pushStatus: {
+        type: String,
+        enum: ['pending', 'sent', 'failed'],
+        default: 'pending',
+    },
+    emailStatus: {
+        type: String,
+        enum: ['pending', 'sent', 'delivered', 'failed', 'bounced'],
+    },
 }, {
     timestamps: true,
 });

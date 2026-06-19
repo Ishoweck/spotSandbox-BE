@@ -7,7 +7,7 @@ import { generateOTP, generateAffiliateCode, generateResetCode } from '../utils/
 import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendActivationEmail, sendFounderWelcomeEmail, sendVendorWelcomeEmail, sendProductPostingGuideEmail, sendBuyerFounderWelcomeEmail } from '../utils/email';
 import { AppError } from '../middleware/error';
 import crypto from 'crypto';
-import { queueEmailsInBackground } from '../utils/email-queue';
+import { enqueueEmail, EmailJobType } from '../utils/email-queue';
 import VendorProfile from '../models/VendorProfile';
 import { VendorVerificationStatus } from '../types';
 import { deleteFromCloudinary, uploadToCloudinary } from '../utils/cloudinary';
@@ -177,9 +177,7 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
 
   // Vendor welcome emails are sent after admin approval, not at email verification
   if (user.role !== 'vendor') {
-    queueEmailsInBackground([
-      () => sendBuyerFounderWelcomeEmail(user.email, user.firstName),
-    ], 10000);
+    enqueueEmail(EmailJobType.BUYER_FOUNDER_WELCOME, user.email, user.firstName).catch(() => {});
   }
 
   // Send welcome notification

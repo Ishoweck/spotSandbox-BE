@@ -103,6 +103,9 @@ const getDeliveryRatesValidation = [
 router.get('/delivery-rates', (0, validation_1.validate)(getDeliveryRatesValidation), (0, error_1.asyncHandler)(order_controller_1.orderController.getDeliveryRates.bind(order_controller_1.orderController)));
 // Payment verification - kept as webhook fallback
 router.get('/payment/verify/:reference', (0, error_1.asyncHandler)(order_controller_1.orderController.verifyPayment.bind(order_controller_1.orderController)));
+// Recovery endpoint — mobile app calls this when user re-opens after a dropped payment session
+// Returns the order if created, or re-verifies with Paystack and creates it on the spot
+router.get('/payment/status/:reference', (0, error_1.asyncHandler)(order_controller_1.orderController.getPaymentStatus.bind(order_controller_1.orderController)));
 // Get user's digital products
 router.get('/my-digital-products', (0, error_1.asyncHandler)(order_controller_1.orderController.getUserDigitalProducts.bind(order_controller_1.orderController)));
 // Check active order with a counterparty (used by chat lock)

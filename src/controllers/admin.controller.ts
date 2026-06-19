@@ -35,7 +35,7 @@ import {
 import { notificationService } from '../services/notification.service';
 import { shipBubbleService } from '../services/shipbubble.service';
 import { sendEmail, sendActivationEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
-import { queueEmailsInBackground } from '../utils/email-queue';
+import { enqueueEmail, EmailJobType } from '../utils/email-queue';
 import { sendPushNotification } from '../config/firebase';
 import { getPaginationMeta, generateSlug } from '../utils/helpers';
 import crypto from 'crypto';
@@ -1301,11 +1301,10 @@ export const verifyVendor = asyncHandler(
       // Send vendor welcome emails now that the store is approved
       const vendorUser = await User.findById(vendor.user).select('email firstName');
       if (vendorUser) {
-        queueEmailsInBackground([
-          () => sendVendorWelcomeEmail(vendorUser.email, vendorUser.firstName),
-          () => sendFounderWelcomeEmail(vendorUser.email, vendorUser.firstName),
-          () => sendProductPostingGuideEmail(vendorUser.email),
-        ], 10000);
+        // Stagger emails: 0s, 30s, 60s apart to avoid provider rate limits
+        enqueueEmail(EmailJobType.VENDOR_WELCOME, vendorUser.email, vendorUser.firstName, 0).catch(() => {});
+        enqueueEmail(EmailJobType.FOUNDER_WELCOME, vendorUser.email, vendorUser.firstName, 30_000).catch(() => {});
+        enqueueEmail(EmailJobType.PRODUCT_POSTING_GUIDE, vendorUser.email, undefined, 60_000).catch(() => {});
       }
     } else {
       await notificationService.vendorRejected(vendor.user.toString(), rejectionReason);

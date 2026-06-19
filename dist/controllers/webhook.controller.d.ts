@@ -35,4 +35,6 @@ export declare class WebhookController {
     syncOrderShipment(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
 }
 export declare const webhookController: WebhookController;
+export declare function handlePaystackWebhook(req: Request, res: Response): Promise<void>;
+export declare function handleResendWebhook(req: Request, res: Response): Promise<void>;
 //# sourceMappingURL=webhook.controller.d.ts.map

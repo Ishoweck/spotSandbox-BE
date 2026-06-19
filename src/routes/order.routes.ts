@@ -119,6 +119,13 @@ router.get(
   asyncHandler(orderController.verifyPayment.bind(orderController))
 );
 
+// Recovery endpoint — mobile app calls this when user re-opens after a dropped payment session
+// Returns the order if created, or re-verifies with Paystack and creates it on the spot
+router.get(
+  '/payment/status/:reference',
+  asyncHandler(orderController.getPaymentStatus.bind(orderController))
+);
+
 // Get user's digital products
 router.get('/my-digital-products', asyncHandler(orderController.getUserDigitalProducts.bind(orderController)));
 

@@ -1,6 +1,7 @@
 import { NotificationType } from '../types';
 import { Server as SocketServer } from 'socket.io';
 export declare const setSocketInstance: (io: SocketServer) => void;
+export declare const setQueueReady: (ready: boolean) => void;
 interface NotifyOptions {
     userId: string;
     type: NotificationType;
@@ -8,6 +9,7 @@ interface NotifyOptions {
     message: string;
     data?: Record<string, any>;
     link?: string;
+    referenceId?: string;
 }
 interface NotifyManyOptions {
     userIds: string[];
@@ -17,16 +19,29 @@ interface NotifyManyOptions {
     data?: Record<string, any>;
     link?: string;
     skipPush?: boolean;
+    referenceId?: string;
 }
 declare class NotificationService {
     /**
-     * Send notification to a single user (in-app + push)
+     * Send notification to a single user.
+     * In-app record + socket emit are synchronous (instant UX).
+     * FCM push is queued via BullMQ (reliable, with retries).
      */
     send(options: NotifyOptions): Promise<void>;
     /**
-     * Send notification to multiple users
+     * Send notification to multiple users.
+     * In-app records inserted in bulk (synchronous).
+     * Push is queued per user (async).
      */
     sendToMany(options: NotifyManyOptions): Promise<void>;
+    /**
+     * Fan-out broadcast to a large filtered user set.
+     * Paginates users in 10k chunks and queues each chunk separately.
+     * Prevents loading millions of IDs into memory at once.
+     */
+    private _broadcastToFilter;
+    /** Direct FCM push — used only as a fallback when BullMQ is unavailable */
+    private _directPush;
     orderPlaced(orderId: string, orderNumber: string, total: number, customerId: string, vendorIds: string[]): Promise<void>;
     orderStatusUpdated(orderId: string, orderNumber: string, status: string, customerId: string): Promise<void>;
     orderCancelled(orderId: string, orderNumber: string, customerId: string, vendorIds: string[], cancelledBy: 'customer' | 'vendor'): Promise<void>;
@@ -55,30 +70,15 @@ declare class NotificationService {
     disputeResolved(orderId: string, orderNumber: string, vendorId: string, buyerId: string, resolution: string, disputeId?: string): Promise<void>;
     referralSignup(referrerId: string, refereeName: string): Promise<void>;
     referralPurchase(referrerId: string, commission: number): Promise<void>;
-    /**
-     * Notify relevant users when a new challenge is created
-     */
     newChallengeCreated(challengeId: string, title: string, description: string, type: 'buyer' | 'seller' | 'affiliate'): Promise<void>;
-    /**
-     * Notify a user when they complete a challenge
-     */
     challengeCompleted(userId: string, challengeId: string, challengeTitle: string): Promise<void>;
-    /**
-     * Notify a user when they claim a challenge reward
-     */
     challengeRewardClaimed(userId: string, challengeId: string, challengeTitle: string, rewardType: string, rewardValue: number): Promise<void>;
-    /**
-     * Notify buyers who have a product in their cart when stock hits 0 or drops to ≤5.
-     * Also emits a dedicated `product_stock_update` socket event so the cart UI
-     * can react in real time without waiting for a screen refresh.
-     */
     productStockAlert(userIds: string[], productId: string, productName: string, newQuantity: number): Promise<void>;
     vendorSaleCompleted(vendorId: string, orderNumber: string, amount: number, earnings: number): Promise<void>;
 }
 export declare const notificationService: NotificationService;
 /**
  * Emit a real-time new_order event to all vendors when an order is placed.
- * Called from order.controller after order creation.
  */
 export declare const emitNewOrder: (payload: {
     orderId: string;
@@ -87,7 +87,6 @@ export declare const emitNewOrder: (payload: {
 }) => void;
 /**
  * Emit a real-time order status update to the customer and all vendors on that order.
- * Called from webhook.controller after ShipBubble updates an order.
  */
 export declare const emitOrderStatusUpdate: (payload: {
     orderId: string;

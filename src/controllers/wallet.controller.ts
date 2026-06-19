@@ -107,6 +107,20 @@ export class WalletController {
         },
       });
 
+      // Track payment so the webhook and recovery can credit the wallet safely
+      try {
+        const { PendingPayment } = await import('../models/PendingPayment');
+        await PendingPayment.create({
+          reference,
+          userId: user._id.toString(),
+          type: 'wallet_topup',
+          amount,
+          gateway: 'paystack',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+        });
+      } catch { /* non-critical */ }
+
       res.json({
         success: true,
         message: 'Payment initialized',
@@ -167,6 +181,15 @@ export class WalletController {
         }
 
         logger.info(`Wallet top-up verified: ${reference} - ₦${amount}`);
+
+        // Mark PendingPayment as completed
+        try {
+          const { PendingPayment } = await import('../models/PendingPayment');
+          await PendingPayment.findOneAndUpdate(
+            { reference },
+            { status: 'completed', completedAt: new Date() }
+          );
+        } catch { /* non-critical */ }
 
         // Notify user
         try {

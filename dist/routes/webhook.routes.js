@@ -9,10 +9,14 @@ const ayncHandler_1 = require("../utils/ayncHandler");
 const types_1 = require("../types");
 const router = (0, express_1.Router)();
 // ============================================
-// PUBLIC WEBHOOK ENDPOINT (No Auth Required)
+// PUBLIC WEBHOOK ENDPOINTS (No Auth Required)
 // ============================================
-// This is the endpoint ShipBubble will call
+// Paystack payment events (charge.success → create order or credit wallet)
+router.post('/paystack', (0, ayncHandler_1.asyncHandler)(webhook_controller_1.handlePaystackWebhook));
+// ShipBubble delivery status updates
 router.post('/shipbubble', (0, ayncHandler_1.asyncHandler)(webhook_controller_1.webhookController.handleShipBubbleWebhook.bind(webhook_controller_1.webhookController)));
+// Resend email delivery status updates (delivered, bounced, complained)
+router.post('/resend', (0, ayncHandler_1.asyncHandler)(webhook_controller_1.handleResendWebhook));
 // ============================================
 // CUSTOMER & VENDOR - Check Real-Time Status
 // ============================================

@@ -10,7 +10,6 @@ import { OAuth2Client } from 'google-auth-library';
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import { createPublicKey } from 'crypto';
-import { queueEmailsInBackground } from '../utils/email-queue';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
