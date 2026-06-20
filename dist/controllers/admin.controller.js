@@ -1632,6 +1632,12 @@ exports.updateProductStatus = (0, ayncHandler_1.asyncHandler)(async (req, res) =
             logger_1.logger.error('Error sending follower notification on product approval:', err);
         }
     }
+    // Ambassador 40% commission: trigger when product is approved and vendor account is active
+    if (status === types_1.ProductStatus.ACTIVE) {
+        Promise.resolve().then(() => __importStar(require('./ambassador.controller'))).then(({ handleVendorProductApproved }) => {
+            handleVendorProductApproved(product.vendor.toString());
+        }).catch(() => { });
+    }
     res.json({
         success: true,
         message: `Product status updated to ${status}`,

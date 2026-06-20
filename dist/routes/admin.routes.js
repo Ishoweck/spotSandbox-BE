@@ -8,6 +8,7 @@ const audit_1 = require("../middleware/audit");
 const error_1 = require("../middleware/error");
 const ai_chat_controller_1 = require("../controllers/ai-chat.controller");
 const webhook_controller_1 = require("../controllers/webhook.controller");
+const ambassador_controller_1 = require("../controllers/ambassador.controller");
 const router = (0, express_1.Router)();
 // All admin routes require authentication
 router.use(auth_1.authenticate);
@@ -144,6 +145,17 @@ router.get('/account-deletions', (0, auth_1.authorize)(SA), admin_controller_1.g
 router.post('/account-deletions', (0, auth_1.authorize)(SA), admin_controller_1.adminCreateDeletionRequest);
 router.post('/account-deletions/:id/approve', (0, auth_1.authorize)(SA), admin_controller_1.approveAccountDeletion);
 router.post('/account-deletions/:id/reject', (0, auth_1.authorize)(SA), admin_controller_1.rejectAccountDeletion);
+// ================================================================
+// AMBASSADOR MANAGEMENT — general + marketing
+// ================================================================
+router.get('/ambassadors', (0, auth_1.authorize)(SA, A, MA), ambassador_controller_1.getAllApplications);
+router.get('/ambassadors/:id', (0, auth_1.authorize)(SA, A, MA), ambassador_controller_1.getApplication);
+router.put('/ambassadors/:id', (0, auth_1.authorize)(SA, A), ambassador_controller_1.updateApplication);
+router.delete('/ambassadors/:id', (0, auth_1.authorize)(SA, A), ambassador_controller_1.deleteApplication);
+router.post('/ambassadors/:id/approve', (0, auth_1.authorize)(SA, A), ambassador_controller_1.approveApplication);
+router.post('/ambassadors/:id/reject', (0, auth_1.authorize)(SA, A), ambassador_controller_1.rejectApplication);
+router.put('/ambassadors/:id/notes', (0, auth_1.authorize)(SA, A, MA), ambassador_controller_1.addNote);
+router.get('/ambassadors/:id/referrals', (0, auth_1.authorize)(SA, A, MA), ambassador_controller_1.getAmbassadorReferrals);
 // ================================================================
 // AFFILIATE MANAGEMENT — general + financial
 // ================================================================

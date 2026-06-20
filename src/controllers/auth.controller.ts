@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest, ApiResponse, UserRole, UserStatus } from '../types';
 import User from '../models/User';
+import Ambassador from '../models/Ambassador';
 import { Wallet } from '../models/Additional';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt';
 import { generateOTP, generateAffiliateCode, generateResetCode } from '../utils/helpers';
@@ -12,6 +13,7 @@ import VendorProfile from '../models/VendorProfile';
 import { VendorVerificationStatus } from '../types';
 import { deleteFromCloudinary, uploadToCloudinary } from '../utils/cloudinary';
 import { notificationService } from '../services/notification.service';
+import { logger } from '../utils/logger';
 
 export class AuthController {
   /**
@@ -62,6 +64,23 @@ export class AuthController {
     if (role === UserRole.AFFILIATE || user.isAffiliate) {
       user.affiliateCode = generateAffiliateCode(email);
       await user.save();
+    }
+
+    // Handle referral code — link this new user to the ambassador who referred them
+    const { referralCode } = req.body;
+    if (referralCode) {
+      try {
+        const referrer = await User.findOne({ affiliateCode: referralCode.toUpperCase(), isAffiliate: true });
+        if (referrer) {
+          user.referredBy = referrer._id as any;
+          await user.save();
+          const { createReferralRecord } = await import('./ambassador.controller');
+          const referredUserType = (safeRole === UserRole.VENDOR) ? 'vendor' : 'customer';
+          await createReferralRecord(referrer._id.toString(), user._id.toString(), referredUserType);
+        }
+      } catch (refErr) {
+        logger.error('Error processing referral code during register:', refErr);
+      }
     }
 
     // Send OTP email
@@ -367,6 +386,8 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
         phone: user.phone,
         role: user.role,
         avatar: user.avatar,
+        isAffiliate: user.isAffiliate,
+        affiliateCode: user.affiliateCode,
       },
       ...tokens,
     },
@@ -721,6 +742,76 @@ async updateAvatar(req: AuthRequest, res: Response<ApiResponse>): Promise<void> 
     res.json({
       success: true,
       message: 'Password changed successfully',
+    });
+  }
+
+  /**
+   * Ambassador registration — validates invite token, creates user, activates affiliate
+   */
+  async ambassadorRegister(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { token, firstName, lastName, password } = req.body;
+
+    if (!token || !firstName || !lastName || !password) {
+      throw new AppError('All fields are required', 400);
+    }
+    if (password.length < 6) {
+      throw new AppError('Password must be at least 6 characters', 400);
+    }
+
+    const hashed = crypto.createHash('sha256').update(token).digest('hex');
+    const ambassador = await Ambassador.findOne({
+      inviteToken: hashed,
+      inviteTokenExpires: { $gt: new Date() },
+      status: 'approved',
+    }).select('+inviteToken');
+
+    if (!ambassador) throw new AppError('Invalid or expired invite link', 400);
+    if (ambassador.userId) throw new AppError('This invite has already been used', 400);
+
+    const existingUser = await User.findOne({ email: ambassador.email });
+    if (existingUser) throw new AppError('An account with this email already exists', 400);
+
+    // Create user — email already verified via invite link
+    const user = await User.create({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: ambassador.email,
+      password,
+      role: UserRole.CUSTOMER,
+      emailVerified: true,
+      status: UserStatus.ACTIVE,
+      isAffiliate: true,
+      affiliateCode: ambassador.ambassadorCode,
+    });
+
+    await Wallet.create({ user: user._id });
+
+    // Link ambassador doc
+    ambassador.userId = user._id as any;
+    ambassador.inviteToken = undefined;
+    ambassador.inviteTokenExpires = undefined;
+    await ambassador.save();
+
+    const tokens = generateTokens(user._id, user.email, user.role);
+
+    enqueueEmail(EmailJobType.BUYER_FOUNDER_WELCOME, user.email, user.firstName).catch(() => {});
+
+    logger.info(`Ambassador account created: ${user.email} | Code: ${ambassador.ambassadorCode}`);
+
+    res.status(201).json({
+      success: true,
+      message: 'Ambassador account created successfully',
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          role: user.role,
+          ambassadorCode: ambassador.ambassadorCode,
+        },
+        ...tokens,
+      },
     });
   }
 }

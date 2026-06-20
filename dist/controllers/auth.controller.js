@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authController = exports.AuthController = void 0;
 const types_1 = require("../types");
 const User_1 = __importDefault(require("../models/User"));
+const Ambassador_1 = __importDefault(require("../models/Ambassador"));
 const Additional_1 = require("../models/Additional");
 const jwt_1 = require("../utils/jwt");
 const helpers_1 = require("../utils/helpers");
@@ -50,6 +51,7 @@ const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const types_2 = require("../types");
 const cloudinary_1 = require("../utils/cloudinary");
 const notification_service_1 = require("../services/notification.service");
+const logger_1 = require("../utils/logger");
 class AuthController {
     /**
      * Register new user
@@ -92,6 +94,23 @@ class AuthController {
         if (role === types_1.UserRole.AFFILIATE || user.isAffiliate) {
             user.affiliateCode = (0, helpers_1.generateAffiliateCode)(email);
             await user.save();
+        }
+        // Handle referral code — link this new user to the ambassador who referred them
+        const { referralCode } = req.body;
+        if (referralCode) {
+            try {
+                const referrer = await User_1.default.findOne({ affiliateCode: referralCode.toUpperCase(), isAffiliate: true });
+                if (referrer) {
+                    user.referredBy = referrer._id;
+                    await user.save();
+                    const { createReferralRecord } = await Promise.resolve().then(() => __importStar(require('./ambassador.controller')));
+                    const referredUserType = (safeRole === types_1.UserRole.VENDOR) ? 'vendor' : 'customer';
+                    await createReferralRecord(referrer._id.toString(), user._id.toString(), referredUserType);
+                }
+            }
+            catch (refErr) {
+                logger_1.logger.error('Error processing referral code during register:', refErr);
+            }
         }
         // Send OTP email
         if (process.env.NODE_ENV !== 'production') {
@@ -346,6 +365,8 @@ class AuthController {
                     phone: user.phone,
                     role: user.role,
                     avatar: user.avatar,
+                    isAffiliate: user.isAffiliate,
+                    affiliateCode: user.affiliateCode,
                 },
                 ...tokens,
             },
@@ -648,6 +669,67 @@ class AuthController {
         res.json({
             success: true,
             message: 'Password changed successfully',
+        });
+    }
+    /**
+     * Ambassador registration — validates invite token, creates user, activates affiliate
+     */
+    async ambassadorRegister(req, res) {
+        const { token, firstName, lastName, password } = req.body;
+        if (!token || !firstName || !lastName || !password) {
+            throw new error_1.AppError('All fields are required', 400);
+        }
+        if (password.length < 6) {
+            throw new error_1.AppError('Password must be at least 6 characters', 400);
+        }
+        const hashed = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        const ambassador = await Ambassador_1.default.findOne({
+            inviteToken: hashed,
+            inviteTokenExpires: { $gt: new Date() },
+            status: 'approved',
+        }).select('+inviteToken');
+        if (!ambassador)
+            throw new error_1.AppError('Invalid or expired invite link', 400);
+        if (ambassador.userId)
+            throw new error_1.AppError('This invite has already been used', 400);
+        const existingUser = await User_1.default.findOne({ email: ambassador.email });
+        if (existingUser)
+            throw new error_1.AppError('An account with this email already exists', 400);
+        // Create user — email already verified via invite link
+        const user = await User_1.default.create({
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            email: ambassador.email,
+            password,
+            role: types_1.UserRole.CUSTOMER,
+            emailVerified: true,
+            status: types_1.UserStatus.ACTIVE,
+            isAffiliate: true,
+            affiliateCode: ambassador.ambassadorCode,
+        });
+        await Additional_1.Wallet.create({ user: user._id });
+        // Link ambassador doc
+        ambassador.userId = user._id;
+        ambassador.inviteToken = undefined;
+        ambassador.inviteTokenExpires = undefined;
+        await ambassador.save();
+        const tokens = (0, jwt_1.generateTokens)(user._id, user.email, user.role);
+        (0, email_queue_1.enqueueEmail)(email_queue_1.EmailJobType.BUYER_FOUNDER_WELCOME, user.email, user.firstName).catch(() => { });
+        logger_1.logger.info(`Ambassador account created: ${user.email} | Code: ${ambassador.ambassadorCode}`);
+        res.status(201).json({
+            success: true,
+            message: 'Ambassador account created successfully',
+            data: {
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    role: user.role,
+                    ambassadorCode: ambassador.ambassadorCode,
+                },
+                ...tokens,
+            },
         });
     }
 }

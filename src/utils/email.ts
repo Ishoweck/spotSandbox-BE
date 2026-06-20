@@ -1202,3 +1202,156 @@ export const sendActivationEmail = async (email: string, name: string | undefine
     html,
   });
 };
+
+export const sendAmbassadorApprovalEmail = async (
+  email: string,
+  name: string,
+  ambassadorCode: string,
+  signupLink: string
+): Promise<void> => {
+  const firstName = name.split(' ')[0];
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              ${emailLogo}
+            </td>
+          </tr>
+
+          <!-- Hero banner -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <div style="background:linear-gradient(135deg,#CC3366 0%,#99004d 100%);border-radius:10px;padding:28px 24px;text-align:center;">
+                <p style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:rgba(255,255,255,0.8);letter-spacing:1px;text-transform:uppercase;">You&rsquo;re In</p>
+                <h1 style="margin:0;font-size:26px;font-weight:800;color:#ffffff;line-height:1.2;">Welcome to the<br/>Vendorspot Ambassador Program</h1>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+                Congratulations! Your application to the Vendorspot Ambassador Program has been <strong style="color:#CC3366;">approved</strong>. We're thrilled to have you represent Vendorspot.
+              </p>
+              <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+                As an ambassador, you'll earn real commissions by inviting vendors and customers to the platform — and enjoy exclusive perks along the way.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Ambassador Code box -->
+          <tr>
+            <td style="padding:0 32px;">
+              <div style="background:#f9fafb;border:2px dashed #CC3366;border-radius:10px;padding:20px 24px;text-align:center;">
+                <p style="margin:0 0 6px 0;font-size:12px;font-weight:700;color:#CC3366;letter-spacing:1px;text-transform:uppercase;">Your Ambassador Code</p>
+                <p style="margin:0;font-size:30px;font-weight:800;color:#111111;letter-spacing:3px;font-family:monospace;">${ambassadorCode}</p>
+                <p style="margin:8px 0 0 0;font-size:12px;color:#9ca3af;">Share this code with vendors &amp; customers you refer</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- What you earn -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#111111;">What you earn:</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="padding:5px 0;font-size:13px;color:#374151;line-height:1.6;">
+                    <span style="color:#CC3366;margin-right:8px;">&#10003;</span>
+                    <strong>Vendor referrals:</strong> Earn up to ₦300/vendor as they grow on the platform
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:5px 0;font-size:13px;color:#374151;line-height:1.6;">
+                    <span style="color:#CC3366;margin-right:8px;">&#10003;</span>
+                    <strong>Customer referrals:</strong> Earn 3% commission on their first 3 completed orders
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:5px 0;font-size:13px;color:#374151;line-height:1.6;">
+                    <span style="color:#CC3366;margin-right:8px;">&#10003;</span>
+                    <strong>Monthly awards:</strong> Top Ambassador ₦25,000 · Top Campus ₦30,000 · Most Improved ₦10,000
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <p style="margin:0 0 16px 0;font-size:14px;color:#374151;">
+                Click the button below to create your Vendorspot account and activate your ambassador profile:
+              </p>
+              <a href="${signupLink}"
+                style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;">
+                Create My Account
+              </a>
+              <p style="margin:12px 0 0 0;font-size:12px;color:#9ca3af;">This link expires in 48 hours and can only be used once.</p>
+            </td>
+          </tr>
+
+          <!-- Fallback link -->
+          <tr>
+            <td style="padding:12px 32px 0 32px;">
+              <p style="margin:0 0 4px 0;font-size:12px;color:#9ca3af;">Or copy and paste this link:</p>
+              <a href="${signupLink}" style="font-size:12px;color:#CC3366;word-break:break-all;text-decoration:none;">${signupLink}</a>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Questions? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;"><strong>Vendorspot</strong> — Confidence in every click.</p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You applied to the Vendorspot Ambassador Program and were approved.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+
+  await sendEmail({
+    to: email,
+    subject: '🎉 You\'ve been approved — Welcome to the Vendorspot Ambassador Program',
+    html,
+  });
+};

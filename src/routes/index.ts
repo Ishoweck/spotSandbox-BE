@@ -29,6 +29,7 @@ import aiChatRoutes from './ai-chat.routes';
 import contactRoutes from './contact.routes';
 import blogRoutes from './blog.routes';
 import deferredLinkRoutes from './deferred-link.routes';
+import ambassadorRoutes from './ambassador.routes';
 import { getAppVersionConfig } from '../controllers/admin.controller';
 
 
@@ -64,6 +65,7 @@ router.use('/ai-chat', aiChatRoutes);
 router.use('/contact', contactRoutes);
 router.use('/blogs', blogRoutes);
 router.use('/deferred-link', deferredLinkRoutes);
+router.use('/ambassadors', ambassadorRoutes);
 
 
 // Public app version check (no auth required — called by the mobile app on startup)

@@ -25,5 +25,6 @@ export declare const sendFounderWelcomeEmail: (email: string, firstName?: string
 export declare const sendBuyerFounderWelcomeEmail: (email: string, firstName: string) => Promise<void>;
 export declare const sendProductPostingGuideEmail: (email: string) => Promise<void>;
 export declare const sendActivationEmail: (email: string, name: string | undefined, activationLink: string) => Promise<void>;
+export declare const sendAmbassadorApprovalEmail: (email: string, name: string, ambassadorCode: string, signupLink: string) => Promise<void>;
 export {};
 //# sourceMappingURL=email.d.ts.map

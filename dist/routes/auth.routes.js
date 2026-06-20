@@ -55,6 +55,7 @@ const guestRegisterValidation = [
 // Standard auth routes
 router.post('/guest-register', authLimiter, (0, validation_1.validate)(guestRegisterValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.guestRegister.bind(auth_controller_1.authController)));
 router.post('/register', authLimiter, (0, validation_1.validate)(registerValidation), (0, error_1.asyncHandler)(auth_controller_1.authController.register.bind(auth_controller_1.authController)));
+router.post('/ambassador-register', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.ambassadorRegister.bind(auth_controller_1.authController)));
 router.post('/verify-email', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.verifyEmail.bind(auth_controller_1.authController)));
 router.post('/resend-otp', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resendOTP.bind(auth_controller_1.authController)));
 router.post('/resend-activation', authLimiter, (0, error_1.asyncHandler)(auth_controller_1.authController.resendActivation.bind(auth_controller_1.authController)));

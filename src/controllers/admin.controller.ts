@@ -1950,6 +1950,13 @@ export const updateProductStatus = asyncHandler(
       }
     }
 
+    // Ambassador 40% commission: trigger when product is approved and vendor account is active
+    if (status === ProductStatus.ACTIVE) {
+      import('./ambassador.controller').then(({ handleVendorProductApproved }) => {
+        handleVendorProductApproved(product.vendor.toString());
+      }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: `Product status updated to ${status}`,

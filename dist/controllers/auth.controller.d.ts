@@ -62,6 +62,10 @@ export declare class AuthController {
      * Change password
      */
     changePassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Ambassador registration — validates invite token, creates user, activates affiliate
+     */
+    ambassadorRegister(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
 }
 export declare const authController: AuthController;
 //# sourceMappingURL=auth.controller.d.ts.map

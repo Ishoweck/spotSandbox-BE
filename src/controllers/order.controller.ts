@@ -4100,7 +4100,16 @@
             await vendorProfile.save();
             logger.info(`✅ Vendor referral unlocked for vendor ${vendorId}`);
           }
+          // Ambassador 60% commission — fire regardless of referralRewarded flag (separate system)
+          import('./ambassador.controller').then(({ handleVendorFirstSale }) => {
+            handleVendorFirstSale(vendorId);
+          }).catch(() => {});
         }
+
+        // Ambassador customer commission (3% on first 3 completed orders)
+        import('./ambassador.controller').then(({ handleCustomerOrderCompleted }) => {
+          handleCustomerOrderCompleted(order.user.toString(), order._id.toString(), order.total);
+        }).catch(() => {});
       } catch (error) {
         logger.error('Error awarding points on delivery:', error);
       }
@@ -4249,7 +4258,16 @@
               vProfile.referralRewarded = true;
               await vProfile.save();
             }
+            // Ambassador 60% commission
+            import('./ambassador.controller').then(({ handleVendorFirstSale }) => {
+              handleVendorFirstSale(vId);
+            }).catch(() => {});
           }
+
+          // Ambassador customer commission (3% on first 3 completed orders)
+          import('./ambassador.controller').then(({ handleCustomerOrderCompleted }) => {
+            handleCustomerOrderCompleted(order.user.toString(), order._id.toString(), order.total);
+          }).catch(() => {});
         } catch (pointsError) {
           logger.error('Error awarding points on full shipment receipt:', pointsError);
         }

@@ -142,6 +142,16 @@ import { auditMiddleware } from '../middleware/audit';
 import { asyncHandler } from '../middleware/error';
 import { aiChatController } from '../controllers/ai-chat.controller';
 import { webhookController } from '../controllers/webhook.controller';
+import {
+  getAllApplications as getAllAmbassadors,
+  getApplication as getAmbassador,
+  approveApplication as approveAmbassador,
+  rejectApplication as rejectAmbassador,
+  addNote as addAmbassadorNote,
+  getAmbassadorReferrals,
+  updateApplication as updateAmbassador,
+  deleteApplication as deleteAmbassador,
+} from '../controllers/ambassador.controller';
 
 const router = Router();
 
@@ -297,6 +307,18 @@ router.get('/account-deletions', authorize(SA), getAccountDeletionRequests);
 router.post('/account-deletions', authorize(SA), adminCreateDeletionRequest);
 router.post('/account-deletions/:id/approve', authorize(SA), approveAccountDeletion);
 router.post('/account-deletions/:id/reject', authorize(SA), rejectAccountDeletion);
+
+// ================================================================
+// AMBASSADOR MANAGEMENT — general + marketing
+// ================================================================
+router.get('/ambassadors', authorize(SA, A, MA), getAllAmbassadors);
+router.get('/ambassadors/:id', authorize(SA, A, MA), getAmbassador);
+router.put('/ambassadors/:id', authorize(SA, A), updateAmbassador);
+router.delete('/ambassadors/:id', authorize(SA, A), deleteAmbassador);
+router.post('/ambassadors/:id/approve', authorize(SA, A), approveAmbassador);
+router.post('/ambassadors/:id/reject', authorize(SA, A), rejectAmbassador);
+router.put('/ambassadors/:id/notes', authorize(SA, A, MA), addAmbassadorNote);
+router.get('/ambassadors/:id/referrals', authorize(SA, A, MA), getAmbassadorReferrals);
 
 // ================================================================
 // AFFILIATE MANAGEMENT — general + financial
