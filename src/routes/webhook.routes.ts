@@ -1,6 +1,6 @@
 // routes/webhook.routes.ts
 import { Router } from 'express';
-import { webhookController, handleResendWebhook, handlePaystackWebhook } from '../controllers/webhook.controller';
+import { webhookController, handleResendWebhook, handlePaystackWebhook, handleFlutterwaveWebhook } from '../controllers/webhook.controller';
 import { adminWebhookController } from '../controllers/admin-webhook.controller';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../utils/ayncHandler';
@@ -14,6 +14,9 @@ const router = Router();
 
 // Paystack payment events (charge.success → create order or credit wallet)
 router.post('/paystack', asyncHandler(handlePaystackWebhook));
+
+// Flutterwave payment events (charge.completed → create order or credit wallet)
+router.post('/flutterwave', asyncHandler(handleFlutterwaveWebhook));
 
 // ShipBubble delivery status updates
 router.post(

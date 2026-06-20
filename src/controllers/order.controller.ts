@@ -2367,15 +2367,32 @@
         return;
       }
 
-      // 3. Payment is pending — actively re-verify with Paystack
+      // 3. Payment is pending — actively re-verify with the right gateway
       try {
-        const verification = await paystackService.verifyPayment(reference);
-        if (verification.data.status !== 'success') {
+        let paymentVerified = false;
+        let paidAmountNaira = 0;
+
+        if (pending.gateway === 'flutterwave') {
+          const verification = await flutterwaveService.verifyPaymentByRef(reference);
+          if (verification.data?.status === 'successful') {
+            paymentVerified = true;
+            paidAmountNaira = verification.data.charged_amount ?? verification.data.amount;
+          }
+        } else {
+          // Default: Paystack
+          const verification = await paystackService.verifyPayment(reference);
+          if (verification.data.status === 'success') {
+            paymentVerified = true;
+            paidAmountNaira = verification.data.amount / 100;
+          }
+        }
+
+        if (!paymentVerified) {
           res.json({ success: true, data: { status: 'pending' } });
           return;
         }
 
-        // Payment DID succeed — Paystack's webhook may have been delayed.
+        // Payment DID succeed — webhook may have been delayed.
         // Re-use the snapshot we saved to build the order now.
         if (!pending.snapshotJson) {
           res.json({ success: true, data: { status: 'processing', message: 'Payment confirmed — order being created' } });
@@ -2383,7 +2400,6 @@
         }
 
         const snapshot = JSON.parse(pending.snapshotJson);
-        const paidAmountNaira = verification.data.amount / 100;
 
         // Validate amount
         if (paidAmountNaira < snapshot.cardChargeAmount - 1) {

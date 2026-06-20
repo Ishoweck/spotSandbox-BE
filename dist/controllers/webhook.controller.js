@@ -38,6 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.webhookController = exports.WebhookController = void 0;
 exports.handlePaystackWebhook = handlePaystackWebhook;
+exports.handleFlutterwaveWebhook = handleFlutterwaveWebhook;
 exports.handleResendWebhook = handleResendWebhook;
 const types_1 = require("../types");
 const Order_1 = __importDefault(require("../models/Order"));
@@ -750,6 +751,61 @@ async function _fulfillWalletTopUp(reference, userId, amountNaira) {
         logger_1.logger.error('[Paystack Webhook] Wallet top-up notification error:', e.message);
     }
     logger_1.logger.info(`[Paystack Webhook] Wallet top-up ${reference}: ₦${amountNaira} credited to ${userId}`);
+}
+// ================================================================
+// FLUTTERWAVE PAYMENT WEBHOOK
+// POST /webhooks/flutterwave
+// ================================================================
+const flutterwave_service_1 = require("../services/flutterwave.service");
+async function handleFlutterwaveWebhook(req, res) {
+    // Flutterwave signs with a secret hash you configure in the dashboard
+    // Set FLW_SECRET_HASH in your env to match what you set in Flutterwave → Webhooks
+    const secretHash = process.env.FLW_SECRET_HASH;
+    const signature = req.headers['verif-hash'];
+    if (secretHash && signature !== secretHash) {
+        logger_1.logger.warn('[Flutterwave Webhook] Invalid verif-hash — request rejected');
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+    }
+    // Acknowledge immediately
+    res.status(200).json({ received: true });
+    const event = req.body;
+    logger_1.logger.info(`[Flutterwave Webhook] Event: ${event.event}`);
+    try {
+        if (event.event === 'charge.completed') {
+            const data = event.data;
+            if (data.status !== 'successful') {
+                logger_1.logger.info(`[Flutterwave Webhook] Payment not successful (${data.status}) — skipping`);
+                return;
+            }
+            const reference = data.tx_ref; // our generated reference
+            const transactionId = String(data.id); // Flutterwave's transaction_id
+            const paidAmount = data.charged_amount ?? data.amount;
+            const meta = data.meta || {};
+            const purpose = meta.purpose || 'order';
+            if (purpose === 'wallet_topup') {
+                await _fulfillWalletTopUp(reference, meta.userId, paidAmount);
+            }
+            else {
+                // Re-verify with Flutterwave to confirm the charge before acting
+                try {
+                    const verification = await flutterwave_service_1.flutterwaveService.verifyPayment(transactionId);
+                    if (verification.data?.status !== 'successful') {
+                        logger_1.logger.warn(`[Flutterwave Webhook] Re-verification failed for ${reference}`);
+                        return;
+                    }
+                }
+                catch (verifyErr) {
+                    logger_1.logger.error(`[Flutterwave Webhook] Re-verify error for ${reference}:`, verifyErr.message);
+                    return;
+                }
+                await _fulfillOrder(reference, paidAmount, meta);
+            }
+        }
+    }
+    catch (err) {
+        logger_1.logger.error('[Flutterwave Webhook] Processing error:', err.message);
+    }
 }
 // ================================================================
 // RESEND DELIVERY STATUS WEBHOOK

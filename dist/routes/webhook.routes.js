@@ -13,6 +13,8 @@ const router = (0, express_1.Router)();
 // ============================================
 // Paystack payment events (charge.success → create order or credit wallet)
 router.post('/paystack', (0, ayncHandler_1.asyncHandler)(webhook_controller_1.handlePaystackWebhook));
+// Flutterwave payment events (charge.completed → create order or credit wallet)
+router.post('/flutterwave', (0, ayncHandler_1.asyncHandler)(webhook_controller_1.handleFlutterwaveWebhook));
 // ShipBubble delivery status updates
 router.post('/shipbubble', (0, ayncHandler_1.asyncHandler)(webhook_controller_1.webhookController.handleShipBubbleWebhook.bind(webhook_controller_1.webhookController)));
 // Resend email delivery status updates (delivered, bounced, complained)

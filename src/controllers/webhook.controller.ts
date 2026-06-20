@@ -842,6 +842,69 @@ async function _fulfillWalletTopUp(reference: string, userId: string, amountNair
 }
 
 // ================================================================
+// FLUTTERWAVE PAYMENT WEBHOOK
+// POST /webhooks/flutterwave
+// ================================================================
+
+import { flutterwaveService } from '../services/flutterwave.service';
+
+export async function handleFlutterwaveWebhook(req: Request, res: Response): Promise<void> {
+  // Flutterwave signs with a secret hash you configure in the dashboard
+  // Set FLW_SECRET_HASH in your env to match what you set in Flutterwave → Webhooks
+  const secretHash = process.env.FLW_SECRET_HASH;
+  const signature = req.headers['verif-hash'] as string | undefined;
+
+  if (secretHash && signature !== secretHash) {
+    logger.warn('[Flutterwave Webhook] Invalid verif-hash — request rejected');
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+
+  // Acknowledge immediately
+  res.status(200).json({ received: true });
+
+  const event = req.body;
+  logger.info(`[Flutterwave Webhook] Event: ${event.event}`);
+
+  try {
+    if (event.event === 'charge.completed') {
+      const data = event.data as any;
+
+      if (data.status !== 'successful') {
+        logger.info(`[Flutterwave Webhook] Payment not successful (${data.status}) — skipping`);
+        return;
+      }
+
+      const reference: string = data.tx_ref;                   // our generated reference
+      const transactionId: string = String(data.id);           // Flutterwave's transaction_id
+      const paidAmount: number = data.charged_amount ?? data.amount;
+      const meta: any = data.meta || {};
+      const purpose: string = meta.purpose || 'order';
+
+      if (purpose === 'wallet_topup') {
+        await _fulfillWalletTopUp(reference, meta.userId as string, paidAmount);
+      } else {
+        // Re-verify with Flutterwave to confirm the charge before acting
+        try {
+          const verification = await flutterwaveService.verifyPayment(transactionId);
+          if (verification.data?.status !== 'successful') {
+            logger.warn(`[Flutterwave Webhook] Re-verification failed for ${reference}`);
+            return;
+          }
+        } catch (verifyErr: any) {
+          logger.error(`[Flutterwave Webhook] Re-verify error for ${reference}:`, verifyErr.message);
+          return;
+        }
+
+        await _fulfillOrder(reference, paidAmount, meta);
+      }
+    }
+  } catch (err: any) {
+    logger.error('[Flutterwave Webhook] Processing error:', err.message);
+  }
+}
+
+// ================================================================
 // RESEND DELIVERY STATUS WEBHOOK
 // POST /webhooks/resend
 // ================================================================
