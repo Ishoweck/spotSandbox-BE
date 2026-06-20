@@ -200,7 +200,7 @@ async function generateStatementPDF(data) {
     // Brand wordmark: "endorspot" in white next to logo
     const BRAND_X = LOGO_X + LOGO_SZ + 12;
     const BRAND_Y = LOGO_Y + LOGO_SZ - 20;
-    cur.pg.drawText('endorspot', { x: BRAND_X, y: BRAND_Y, size: 18, font: bold, color: WHITE });
+    cur.pg.drawText('Vendorspot', { x: BRAND_X, y: BRAND_Y, size: 18, font: bold, color: WHITE });
     cur.pg.drawText('Confidence in every click', { x: BRAND_X, y: BRAND_Y - 14, size: 7.5, font, color: PINK_MID });
     // "ACCOUNT STATEMENT" label right-aligned, same vertical centre as logo
     cur.pg.drawText('ACCOUNT STATEMENT', { x: PW - M - 118, y: BRAND_Y, size: 10, font: bold, color: WHITE });
@@ -287,11 +287,12 @@ async function generateStatementPDF(data) {
     cur.y -= 4;
     sectionTitle('ALL ORDERS IN PERIOD', data.orders.length);
     const orderCols = [
-        { h: 'ORDER #', w: 88 },
-        { h: 'DATE', w: 68 },
-        { h: 'CUSTOMER', w: 120 },
-        { h: 'ITEMS', w: 42, right: true },
-        { h: 'AMOUNT', w: 100, right: true },
+        { h: 'S/N', w: 28 },
+        { h: 'ORDER #', w: 82 },
+        { h: 'DATE', w: 62 },
+        { h: 'CUSTOMER', w: 112 },
+        { h: 'ITEMS', w: 38, right: true },
+        { h: 'AMOUNT', w: 96, right: true },
         { h: 'STATUS', w: 97 },
     ];
     if (data.orders.length === 0) {
@@ -301,18 +302,19 @@ async function generateStatementPDF(data) {
         tableHeader(orderCols);
         data.orders.forEach((o, i) => {
             const sc = statusColour(o.status);
-            tableRow(orderCols, [o.orderNumber, fmtDate(o.date), o.customer, String(o.itemCount), fmtMoney(o.vendorAmount), cap(o.status)], i, [DARK, DARK, DARK, GRAY, o.vendorAmount > 0 ? GREEN : DARK, sc]);
+            tableRow(orderCols, [String(i + 1), o.orderNumber, fmtDate(o.date), o.customer, String(o.itemCount), fmtMoney(o.vendorAmount), cap(o.status)], i, [GRAY, DARK, DARK, DARK, GRAY, o.vendorAmount > 0 ? GREEN : DARK, sc]);
         });
     }
     // ── Wallet Transactions Section ───────────────────────────────────────────
     cur.y -= 18;
     sectionTitle('WALLET TRANSACTIONS (CREDITS & DEBITS)', data.txns.length);
     const txnCols = [
-        { h: 'DATE', w: 72 },
-        { h: 'TYPE', w: 60 },
-        { h: 'PURPOSE', w: 95 },
-        { h: 'AMOUNT', w: 100, right: true },
-        { h: 'DESCRIPTION', w: 188 },
+        { h: 'S/N', w: 28 },
+        { h: 'DATE', w: 66 },
+        { h: 'TYPE', w: 56 },
+        { h: 'PURPOSE', w: 88 },
+        { h: 'AMOUNT', w: 95, right: true },
+        { h: 'DESCRIPTION', w: 182 },
     ];
     if (data.txns.length === 0) {
         noData('No wallet transactions in this period.');
@@ -322,17 +324,18 @@ async function generateStatementPDF(data) {
         data.txns.forEach((t, i) => {
             const tc = statusColour(t.type);
             const sign = t.type.toLowerCase() === 'credit' ? '+' : '-';
-            tableRow(txnCols, [fmtDate(t.date), cap(t.type), cap(t.purpose), `${sign} ${fmtMoney(t.amount)}`, t.description], i, [DARK, tc, DARK, tc, GRAY]);
+            tableRow(txnCols, [String(i + 1), fmtDate(t.date), cap(t.type), cap(t.purpose), `${sign} ${fmtMoney(t.amount)}`, t.description], i, [GRAY, DARK, tc, DARK, tc, GRAY]);
         });
     }
     // ── Disputes Section ───────────────────────────────────────────────────────
     cur.y -= 18;
     sectionTitle('DISPUTES', data.disputes.length);
     const dispCols = [
-        { h: 'DISPUTE #', w: 88 },
-        { h: 'DATE', w: 72 },
-        { h: 'ORDER #', w: 88 },
-        { h: 'REASON', w: 150 },
+        { h: 'S/N', w: 28 },
+        { h: 'DISPUTE #', w: 82 },
+        { h: 'DATE', w: 66 },
+        { h: 'ORDER #', w: 82 },
+        { h: 'REASON', w: 140 },
         { h: 'STATUS', w: 117 },
     ];
     if (data.disputes.length === 0) {
@@ -342,7 +345,7 @@ async function generateStatementPDF(data) {
         tableHeader(dispCols);
         data.disputes.forEach((d, i) => {
             const sc = statusColour(d.status);
-            tableRow(dispCols, [d.disputeNumber, fmtDate(d.date), d.orderNumber, cap(d.reason), cap(d.status)], i, [DARK, DARK, DARK, DARK, sc]);
+            tableRow(dispCols, [String(i + 1), d.disputeNumber, fmtDate(d.date), d.orderNumber, cap(d.reason), cap(d.status)], i, [GRAY, DARK, DARK, DARK, DARK, sc]);
         });
     }
     // ── Footer ─────────────────────────────────────────────────────────────────

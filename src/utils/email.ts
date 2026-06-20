@@ -18,7 +18,7 @@ const emailLogo = `
         <img src="${LOGO_URL}" alt="Vendorspot" width="38" height="38" style="display:block;width:38px;height:38px;" />
       </td>
       <td style="vertical-align:middle;">
-        <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">endorspot</span>
+        <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">Vendorspot</span>
       </td>
     </tr>
   </table>`;
@@ -279,7 +279,7 @@ export const sendPasswordResetEmail = async (email: string, resetCode: string, n
 export const sendWelcomeEmail = async (email: string, name: string): Promise<void> => {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #ff6600;">Welcome to VendorSpot! 🎉</h2>
+      <h2 style="color: #ff6600;">Welcome to VendorSpot!</h2>
       <p>Hi ${name},</p>
       <p>Thank you for joining VendorSpot - your one-stop marketplace for everything!</p>
       <p>Get started by:</p>

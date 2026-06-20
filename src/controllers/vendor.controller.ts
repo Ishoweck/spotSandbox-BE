@@ -1383,7 +1383,7 @@ export class VendorController {
                     <img src="${LOGO_URL}" alt="Vendorspot" width="38" height="38" style="display:block;width:38px;height:38px;" />
                   </td>
                   <td style="vertical-align:middle;">
-                    <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">endorspot</span>
+                    <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">Vendorspot</span>
                   </td>
                 </tr>
               </table>
@@ -1420,13 +1420,13 @@ export class VendorController {
               <div style="background:#fff0f5;border-radius:8px;padding:16px 20px;">
                 <p style="margin:0 0 10px 0;font-size:12px;font-weight:700;color:#CC3366;letter-spacing:0.5px;text-transform:uppercase;">What's inside the PDF</p>
                 ${[
-                  ['&#128722;', '<strong>All orders</strong> from your store in the period — every status (pending, processing, delivered, cancelled)'],
-                  ['&#128200;', '<strong>Revenue breakdown</strong> — gross sales from all orders + earned revenue from delivered orders only'],
-                  ['&#128179;', '<strong>Wallet summary</strong> — current balance, pending balance, and every credit & debit transaction'],
-                  ['&#9878;&#65039;', '<strong>Disputes</strong> — all disputes raised against your store and their resolutions'],
-                ].map(([icon, text]) => `
+                  '<strong>All orders</strong> from your store in the period — every status (pending, processing, delivered, cancelled)',
+                  '<strong>Revenue breakdown</strong> — gross sales from all orders + earned revenue from delivered orders only',
+                  '<strong>Wallet summary</strong> — current balance, pending balance, and every credit & debit transaction',
+                  '<strong>Disputes</strong> — all disputes raised against your store and their resolutions',
+                ].map((text) => `
                 <p style="margin:0 0 8px 0;font-size:13px;color:#7b3555;line-height:1.5;">
-                  <span style="margin-right:8px;">${icon}</span>${text}
+                  <span style="color:#CC3366;margin-right:8px;">&#10003;</span>${text}
                 </p>`).join('')}
               </div>
             </td>
