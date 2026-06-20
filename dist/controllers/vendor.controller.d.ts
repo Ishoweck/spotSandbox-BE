@@ -70,6 +70,11 @@ export declare class VendorController {
      * Get Nigerian banks list from Paystack API
      */
     getBanks(req: Request, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * POST /vendor/statement
+     * Generate and email an account statement PDF for the given date range
+     */
+    requestStatement(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
 }
 export declare const vendorController: VendorController;
 /**

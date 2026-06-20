@@ -53,6 +53,9 @@ const Dispute_1 = __importDefault(require("../models/Dispute"));
 const Additional_1 = require("../models/Additional");
 const error_1 = require("../middleware/error");
 const notification_service_1 = require("../services/notification.service");
+const statement_service_1 = require("../services/statement.service");
+const email_1 = require("../utils/email");
+const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
 const logger_1 = require("../utils/logger");
 const STATS_CACHE_HOURS = 24;
 const FAST_REPLY_HOURS = 24;
@@ -1149,6 +1152,180 @@ class VendorController {
             logger_1.logger.warn('Paystack banks API unavailable, using static list');
         }
         res.json({ success: true, data: { banks: staticBanks } });
+    }
+    /**
+     * POST /vendor/statement
+     * Generate and email an account statement PDF for the given date range
+     */
+    async requestStatement(req, res) {
+        const vendorId = req.user.id;
+        const { startDate, endDate } = req.body;
+        if (!startDate || !endDate) {
+            res.status(400).json({ success: false, message: 'startDate and endDate are required' });
+            return;
+        }
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            res.status(400).json({ success: false, message: 'Invalid date format' });
+            return;
+        }
+        if (start > end) {
+            res.status(400).json({ success: false, message: 'startDate must be before endDate' });
+            return;
+        }
+        // Max range: 1 year
+        const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+        if (diffDays > 366) {
+            res.status(400).json({ success: false, message: 'Date range cannot exceed 1 year' });
+            return;
+        }
+        const user = await User_1.default.findById(vendorId).select('email firstName').lean();
+        if (!user?.email) {
+            res.status(404).json({ success: false, message: 'Vendor account not found' });
+            return;
+        }
+        // Respond immediately — PDF generation runs after
+        res.json({
+            success: true,
+            message: `Your statement is being prepared and will be sent to ${user.email} shortly.`,
+        });
+        // Generate + email asynchronously (don't await — response already sent)
+        (async () => {
+            try {
+                const data = await (0, statement_service_1.gatherStatementData)(vendorId, start, end);
+                const pdfBuf = await (0, statement_service_1.generateStatementPDF)(data);
+                const startLabel = start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                const endLabel = end.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                const filename = `Vendorspot_Statement_${startLabel.replace(/ /g, '-')}_to_${endLabel.replace(/ /g, '-')}.pdf`;
+                await (0, email_1.sendEmail)({
+                    to: user.email,
+                    subject: `Your Vendorspot Account Statement (${startLabel} – ${endLabel})`,
+                    html: `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="vertical-align:middle;padding-right:10px;">
+                    <img src="${LOGO_URL}" alt="Vendorspot" width="38" height="38" style="display:block;width:38px;height:38px;" />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">endorspot</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Title -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <h1 style="margin:0;font-size:22px;font-weight:700;color:#111111;line-height:1.3;">Your Account Statement is Ready</h1>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;">Hi ${user.firstName || 'there'},</p>
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+                Your account statement for <strong>${startLabel} – ${endLabel}</strong> is attached to this email as a PDF.
+              </p>
+            </td>
+          </tr>
+
+          <!-- What's inside box -->
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <div style="background:#fff0f5;border-radius:8px;padding:16px 20px;">
+                <p style="margin:0 0 10px 0;font-size:12px;font-weight:700;color:#CC3366;letter-spacing:0.5px;text-transform:uppercase;">What's inside the PDF</p>
+                ${[
+                        ['&#128722;', '<strong>All orders</strong> from your store in the period — every status (pending, processing, delivered, cancelled)'],
+                        ['&#128200;', '<strong>Revenue breakdown</strong> — gross sales from all orders + earned revenue from delivered orders only'],
+                        ['&#128179;', '<strong>Wallet summary</strong> — current balance, pending balance, and every credit & debit transaction'],
+                        ['&#9878;&#65039;', '<strong>Disputes</strong> — all disputes raised against your store and their resolutions'],
+                    ].map(([icon, text]) => `
+                <p style="margin:0 0 8px 0;font-size:13px;color:#7b3555;line-height:1.5;">
+                  <span style="margin-right:8px;">${icon}</span>${text}
+                </p>`).join('')}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Note -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.6;">
+                If you didn't request this statement or have questions about the data, contact us at
+                <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Support footer -->
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Legal footer -->
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you requested an account statement on Vendorspot.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+          `,
+                    attachments: [{ filename, content: pdfBuf }],
+                });
+                logger_1.logger.info(`Account statement emailed to ${user.email} for ${startLabel} – ${endLabel}`);
+            }
+            catch (err) {
+                logger_1.logger.error('Failed to generate/send vendor statement:', err);
+            }
+        })();
     }
 }
 exports.VendorController = VendorController;

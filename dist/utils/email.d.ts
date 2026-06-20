@@ -3,6 +3,10 @@ interface EmailOptions {
     subject: string;
     text?: string;
     html?: string;
+    attachments?: Array<{
+        filename: string;
+        content: Buffer;
+    }>;
 }
 export declare const sendEmail: (options: EmailOptions) => Promise<void>;
 export declare const sendOTPEmail: (email: string, otp: string, name?: string) => Promise<void>;

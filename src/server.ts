@@ -1,5 +1,6 @@
 import express, { Application } from 'express';
 import http from 'http';
+import path from 'path';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -121,6 +122,9 @@ app.use(mongoSanitize);
 
 // Compression
 app.use(compression());
+
+// Static assets — logo and other public files (logo.png served at /logo.png)
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Logging
 if (process.env.NODE_ENV === 'development') {

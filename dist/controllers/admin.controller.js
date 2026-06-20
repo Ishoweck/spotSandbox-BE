@@ -1988,6 +1988,15 @@ exports.updateOrderStatus = (0, ayncHandler_1.asyncHandler)(async (req, res) => 
     await order.save();
     // Notify customer
     await notification_service_1.notificationService.orderStatusUpdated(order._id.toString(), order.orderNumber, status, order.user.toString());
+    // Emit real-time socket event to customer + all vendors on this order
+    const vendorIds = [...new Set(order.items.map((item) => item.vendor?.toString()).filter(Boolean))];
+    (0, notification_service_1.emitOrderStatusUpdate)({
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber,
+        status: order.status,
+        customerId: order.user.toString(),
+        vendorIds,
+    });
     res.json({
         success: true,
         message: `Order status updated to ${status}`,

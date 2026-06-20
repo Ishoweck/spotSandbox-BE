@@ -143,5 +143,10 @@ router.put('/admin/toggle-status/:vendorId', (0, auth_1.authorize)(types_1.UserR
  * Vendor toggle their own store open/closed
  */
 router.patch('/me/toggle-status', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR), (0, error_1.asyncHandler)(vendor_controller_1.vendorController.toggleMyStoreStatus.bind(vendor_controller_1.vendorController)));
+/**
+ * POST /api/v1/vendor/statement
+ * Request account statement PDF — emailed to vendor's registered address
+ */
+router.post('/statement', auth_1.authenticate, (0, auth_1.authorize)(types_1.UserRole.VENDOR), (0, error_1.asyncHandler)(vendor_controller_1.vendorController.requestStatement.bind(vendor_controller_1.vendorController)));
 exports.default = router;
 //# sourceMappingURL=vendor.routes.js.map

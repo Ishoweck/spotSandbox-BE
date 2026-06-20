@@ -32,7 +32,7 @@ import {
   Notification,
   ChatMessage,
 } from '../models/Additional';
-import { notificationService } from '../services/notification.service';
+import { notificationService, emitOrderStatusUpdate } from '../services/notification.service';
 import { shipBubbleService } from '../services/shipbubble.service';
 import { sendEmail, sendActivationEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
 import { enqueueEmail, EmailJobType } from '../utils/email-queue';
@@ -2376,6 +2376,18 @@ export const updateOrderStatus = asyncHandler(
       status,
       order.user.toString()
     );
+
+    // Emit real-time socket event to customer + all vendors on this order
+    const vendorIds = [...new Set(
+      order.items.map((item: any) => item.vendor?.toString()).filter(Boolean)
+    )];
+    emitOrderStatusUpdate({
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+      status: order.status,
+      customerId: order.user.toString(),
+      vendorIds,
+    });
 
     res.json({
       success: true,

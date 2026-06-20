@@ -7,11 +7,28 @@ dotenv.config()
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// Vendorspot logo served from the backend's public/ folder
+const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
+
+// Shared logo HTML used in all email headers
+const emailLogo = `
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td style="vertical-align:middle;padding-right:10px;">
+        <img src="${LOGO_URL}" alt="Vendorspot" width="38" height="38" style="display:block;width:38px;height:38px;" />
+      </td>
+      <td style="vertical-align:middle;">
+        <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">endorspot</span>
+      </td>
+    </tr>
+  </table>`;
+
 interface EmailOptions {
   to: string;
   subject: string;
   text?: string;
   html?: string;
+  attachments?: Array<{ filename: string; content: Buffer }>;
 }
 
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
@@ -22,6 +39,7 @@ export const sendEmail = async (options: EmailOptions): Promise<void> => {
       subject: options.subject,
       text: options.text,
       html: options.html,
+      attachments: options.attachments,
     });
 
     if (error) {
@@ -56,9 +74,7 @@ export const sendOTPEmail = async (email: string, otp: string, name?: string): P
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -174,9 +190,7 @@ export const sendPasswordResetEmail = async (email: string, resetCode: string, n
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -351,9 +365,7 @@ export const sendOrderConfirmationEmail = async (
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -490,9 +502,7 @@ export const sendVendorWelcomeEmail = async (email: string, firstName?: string):
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -588,9 +598,7 @@ export const sendFounderWelcomeEmail = async (email: string, firstName?: string)
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -704,9 +712,7 @@ export const sendBuyerFounderWelcomeEmail = async (email: string, firstName: str
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -971,9 +977,7 @@ export const sendProductPostingGuideEmail = async (email: string): Promise<void>
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 
@@ -1099,9 +1103,7 @@ export const sendActivationEmail = async (email: string, name: string | undefine
           <!-- Logo -->
           <tr>
             <td style="padding:28px 32px 0 32px;">
-              <span style="font-size:22px;font-weight:800;color:#111111;letter-spacing:-0.5px;">
-                <span style="color:#CC3366;">V</span>endorspot
-              </span>
+              ${emailLogo}
             </td>
           </tr>
 

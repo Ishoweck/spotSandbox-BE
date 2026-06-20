@@ -240,4 +240,15 @@ router.patch(
   asyncHandler(vendorController.toggleMyStoreStatus.bind(vendorController))
 );
 
+/**
+ * POST /api/v1/vendor/statement
+ * Request account statement PDF — emailed to vendor's registered address
+ */
+router.post(
+  '/statement',
+  authenticate,
+  authorize(UserRole.VENDOR),
+  asyncHandler(vendorController.requestStatement.bind(vendorController))
+);
+
 export default router;
