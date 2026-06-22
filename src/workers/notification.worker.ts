@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import Handlebars from 'handlebars';
-import { getBullMQConnectionOptions } from '../config/redis';
+import { bullmqClient } from '../config/redis';
 import { claimIdempotencyKey, buildNotifKey } from '../utils/idempotency';
 import { sendPushNotification } from '../config/firebase';
 import { NotificationTemplate } from '../models/NotificationTemplate';
@@ -113,13 +113,11 @@ async function processBroadcastChunk(job: Job<BroadcastChunkData>): Promise<void
 // ─── Worker Registration ──────────────────────────────────────────────────────
 
 export function startNotificationWorkers(): void {
-  const conn = getBullMQConnectionOptions();
-
   const pushWorker = new Worker<PushJobData, any, string>(
     'push-notifications',
     processPushJob,
     {
-      connection: conn,
+      connection: bullmqClient as any,
       concurrency: 20,
       limiter: { max: 500, duration: 1_000 }, // 500 FCM sends/sec
     },
@@ -129,7 +127,7 @@ export function startNotificationWorkers(): void {
     'broadcast-notifications',
     processBroadcastChunk,
     {
-      connection: conn,
+      connection: bullmqClient as any,
       concurrency: 5,
     },
   );

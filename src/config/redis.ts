@@ -4,8 +4,6 @@ import { logger } from '../utils/logger';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 // General-purpose Redis client used for idempotency keys and misc caching.
-// This is NOT passed to BullMQ — BullMQ manages its own internal Redis connection
-// using the connection options returned by getBullMQConnectionOptions().
 export const redisClient = new Redis(REDIS_URL, {
   maxRetriesPerRequest: 3,
   enableReadyCheck: false,
@@ -15,26 +13,16 @@ export const redisClient = new Redis(REDIS_URL, {
 redisClient.on('connect', () => logger.info('[Redis] Client connected'));
 redisClient.on('error', (err) => logger.error('[Redis] Client error:', err.message));
 
-/**
- * Returns plain connection options for BullMQ Queues and Workers.
- * BullMQ bundles its own ioredis, so passing an external Redis instance causes
- * a type conflict. Passing options lets BullMQ create its own connection.
- */
-export function getBullMQConnectionOptions() {
-  try {
-    const url = new URL(REDIS_URL);
-    return {
-      host: url.hostname,
-      port: parseInt(url.port || '6379', 10),
-      ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
-      ...(url.username ? { username: decodeURIComponent(url.username) } : {}),
-      ...(url.protocol === 'rediss:' ? { tls: {} } : {}),
-    };
-  } catch {
-    // Fallback for non-URL formats like "localhost:6379"
-    return { host: 'localhost', port: 6379 };
-  }
-}
+// Shared connection for ALL BullMQ Queues and Workers.
+// Queues use this instance directly (no extra connections).
+// Workers call .duplicate() internally for their blocking pop — one extra per worker.
+// Total connections: 1 (redisClient) + 1 (bullmqClient) + N workers = 1+1+3 = 5.
+export const bullmqClient = new Redis(REDIS_URL, {
+  maxRetriesPerRequest: null, // required for BullMQ blocking commands
+  enableReadyCheck: false,
+});
+
+bullmqClient.on('error', (err) => logger.error('[Redis:BullMQ] Error:', err.message));
 
 export async function connectRedis(): Promise<void> {
   try {

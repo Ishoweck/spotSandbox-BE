@@ -101,14 +101,13 @@ async function processBroadcastChunk(job) {
 }
 // ─── Worker Registration ──────────────────────────────────────────────────────
 function startNotificationWorkers() {
-    const conn = (0, redis_1.getBullMQConnectionOptions)();
     const pushWorker = new bullmq_1.Worker('push-notifications', processPushJob, {
-        connection: conn,
+        connection: redis_1.bullmqClient,
         concurrency: 20,
         limiter: { max: 500, duration: 1000 }, // 500 FCM sends/sec
     });
     const broadcastWorker = new bullmq_1.Worker('broadcast-notifications', processBroadcastChunk, {
-        connection: conn,
+        connection: redis_1.bullmqClient,
         concurrency: 5,
     });
     pushWorker.on('failed', (job, err) => {

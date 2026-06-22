@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { getBullMQConnectionOptions } from '../config/redis';
+import { bullmqClient } from '../config/redis';
 
 // ─── Email Job Types ──────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ export interface EmailJobData {
 
 // Email queue — rate-limited to 10/sec to respect SMTP/Resend provider limits
 export const emailQueue = new Queue<EmailJobData, any, string>('transactional-emails', {
-  connection: getBullMQConnectionOptions(),
+  connection: bullmqClient as any,
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 120_000 }, // 2min → 4min → 8min

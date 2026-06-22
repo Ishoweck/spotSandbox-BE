@@ -4,6 +4,7 @@ import VendorProfile from '../models/VendorProfile';
 import { logger } from './logger';
 import { OrderStatus, PaymentStatus, TransactionType, WalletPurpose } from '../types';
 import { notificationService } from '../services/notification.service';
+import { rewardController } from '../controllers/reward.controller';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const CHECK_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
@@ -150,6 +151,31 @@ async function runAutoComplete(): Promise<void> {
           { upsert: true }
         );
         logger.info(`✅ Auto-credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+      }
+
+      // Award purchase points to customer and referral points to their referrer
+      try {
+        await rewardController.awardOrderPoints(order._id.toString());
+        await rewardController.awardCustomerReferralPoints(order.user.toString(), order._id.toString());
+
+        // Unlock vendor referral points for any vendor making their first sale
+        const uniqueVendorIds = [...new Set(order.items.map((item: any) => {
+          const v = item.vendor;
+          return typeof v === 'object' ? v._id?.toString() : v?.toString();
+        }).filter(Boolean))] as string[];
+
+        for (const vendorId of uniqueVendorIds) {
+          const vendorProfile = await VendorProfile.findOne({ user: vendorId });
+          if (vendorProfile && !vendorProfile.referralRewarded && vendorProfile.referredBy) {
+            await rewardController.unlockVendorReferralPoints(vendorId);
+            vendorProfile.referralRewarded = true;
+            await vendorProfile.save();
+          }
+        }
+
+        logger.info(`✅ Auto-complete: points awarded for order ${order.orderNumber}`);
+      } catch (pointsErr: any) {
+        logger.error(`❌ Auto-complete: points award failed for order ${order.orderNumber}: ${pointsErr.message}`);
       }
 
       logger.info(`✅ Auto-complete done: order ${order.orderNumber}`);

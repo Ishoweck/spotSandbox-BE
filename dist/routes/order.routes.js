@@ -126,6 +126,8 @@ router.get('/vendor/orders', (0, auth_1.authorize)(types_1.UserRole.VENDOR, type
 router.get('/:id/track', (0, error_1.asyncHandler)(order_controller_1.orderController.trackOrder.bind(order_controller_1.orderController)));
 // Download digital product
 router.get('/:id/download/:itemId', (0, error_1.asyncHandler)(order_controller_1.orderController.downloadDigitalProduct.bind(order_controller_1.orderController)));
+// Download order receipt PDF
+router.get('/:id/receipt', (0, error_1.asyncHandler)(order_controller_1.orderController.downloadReceipt.bind(order_controller_1.orderController)));
 // Generic get order - AFTER all specific routes
 router.get('/:id', (0, error_1.asyncHandler)(order_controller_1.orderController.getOrder.bind(order_controller_1.orderController)));
 // ============================================================

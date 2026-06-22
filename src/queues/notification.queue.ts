@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { getBullMQConnectionOptions } from '../config/redis';
+import { bullmqClient } from '../config/redis';
 import { NotificationType } from '../types';
 
 // ─── Job Data Types ───────────────────────────────────────────────────────────
@@ -25,13 +25,11 @@ export interface BroadcastChunkData {
   referenceId: string;
 }
 
-const conn = getBullMQConnectionOptions();
-
 // ─── Queue Definitions ────────────────────────────────────────────────────────
 
 // Push notification queue — max 500 FCM sends/sec (Firebase batch limit)
 export const pushQueue = new Queue<PushJobData, any, string>('push-notifications', {
-  connection: conn,
+  connection: bullmqClient as any,
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 60_000 }, // 1min → 2min → 4min
@@ -42,7 +40,7 @@ export const pushQueue = new Queue<PushJobData, any, string>('push-notifications
 
 // Broadcast fan-out queue — processes user chunks in parallel
 export const broadcastQueue = new Queue<BroadcastChunkData, any, string>('broadcast-notifications', {
-  connection: conn,
+  connection: bullmqClient as any,
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: 'fixed', delay: 30_000 },

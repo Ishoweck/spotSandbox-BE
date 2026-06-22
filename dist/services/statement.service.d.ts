@@ -3,6 +3,7 @@ export interface StatementData {
         name: string;
         email: string;
         storeName: string;
+        location: string;
     };
     period: {
         start: Date;

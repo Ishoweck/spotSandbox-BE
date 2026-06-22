@@ -49,6 +49,8 @@ export declare class RewardController {
     unlockVendorReferralPoints(vendorId: string): Promise<void>;
     /**
      * Award points after order completion — 1 pt per ₦100 spent
+     * Guard: only runs once funds have been released to the vendor (fundsReleased=true),
+     * so points are never given for cancelled or still-in-escrow orders.
      */
     awardOrderPoints(orderId: string): Promise<void>;
     /**

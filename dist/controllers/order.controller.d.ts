@@ -152,6 +152,7 @@ export declare class OrderController {
     adminRetryShipment(orderId: string, force?: boolean): Promise<{
         retried: number;
     }>;
+    downloadReceipt(req: AuthRequest, res: Response): Promise<void>;
 }
 export declare const orderController: OrderController;
 //# sourceMappingURL=order.controller.d.ts.map

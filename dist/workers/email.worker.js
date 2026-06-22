@@ -28,7 +28,7 @@ async function processEmailJob(job) {
 }
 function startEmailWorker() {
     const worker = new bullmq_1.Worker('transactional-emails', processEmailJob, {
-        connection: (0, redis_1.getBullMQConnectionOptions)(),
+        connection: redis_1.bullmqClient,
         concurrency: 5,
         limiter: { max: 10, duration: 1000 }, // 10 emails/sec
     });

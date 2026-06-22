@@ -285,7 +285,7 @@ const sendWelcomeEmail = async (email, name) => {
     });
 };
 exports.sendWelcomeEmail = sendWelcomeEmail;
-const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items) => {
+const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items, receiptPdf) => {
     const displayName = name || 'there';
     const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
     const orderUrl = `${frontendUrl}/orders/${orderNumber}`;
@@ -446,6 +446,9 @@ const sendOrderConfirmationEmail = async (email, orderNumber, total, name, items
         to: email,
         subject: `Order Confirmed - #${orderNumber}`,
         html,
+        ...(receiptPdf ? {
+            attachments: [{ filename: `receipt-${orderNumber}.pdf`, content: receiptPdf }],
+        } : {}),
     });
 };
 exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;

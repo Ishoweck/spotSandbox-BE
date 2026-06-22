@@ -9,31 +9,30 @@ import VendorProfile from '../models/VendorProfile';
 import User from '../models/User';
 import { logger } from '../utils/logger';
 
-// Load logo once at module level (png file in public/ at repo root)
+// Load logo once at module level
 let LOGO_BYTES: Buffer | null = null;
 try {
   LOGO_BYTES = fs.readFileSync(path.join(__dirname, '../../public/logo.png'));
 } catch {
-  // logo file not found — PDF will fall back to text mark
+  // logo not found — fallback to text mark
 }
 
 // ─── Layout Constants ────────────────────────────────────────────────────────
-const PW = 595;          // A4 width (points)
-const PH = 842;          // A4 height (points)
-const M  = 40;           // margin
-const CW = PW - M * 2;  // content width = 515
+const PW = 595;
+const PH = 842;
+const M  = 40;
+const CW = PW - M * 2;
 
-// ─── Brand Colours ───────────────────────────────────────────────────────────
-const PINK     = rgb(0.800, 0.200, 0.400);
-const DARK     = rgb(0.067, 0.094, 0.153);
-const GRAY     = rgb(0.420, 0.447, 0.502);
-const LT_GRAY  = rgb(0.953, 0.957, 0.965);
-const WHITE    = rgb(1,     1,     1    );
-const GREEN    = rgb(0.063, 0.725, 0.506);
-const RED      = rgb(0.937, 0.267, 0.267);
-const AMBER    = rgb(0.961, 0.620, 0.043);
-const PINK_LT  = rgb(1.000, 0.941, 0.961);
-const PINK_MID = rgb(0.950, 0.870, 0.910);
+// ─── Colours ─────────────────────────────────────────────────────────────────
+const PINK    = rgb(0.843, 0.000, 0.294);  // brand #d7004b
+const DARK    = rgb(0.067, 0.094, 0.153);
+const GRAY    = rgb(0.500, 0.500, 0.500);
+const LT_GRAY = rgb(0.965, 0.965, 0.965);
+const WHITE   = rgb(1, 1, 1);
+const GREEN   = rgb(0.063, 0.725, 0.506);
+const RED     = rgb(0.937, 0.267, 0.267);
+const AMBER   = rgb(0.900, 0.550, 0.050);
+const BORDER  = rgb(0.870, 0.870, 0.870);
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 const trunc = (s: any, n: number): string => {
@@ -51,24 +50,24 @@ const cap = (s: string) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.
 
 function statusColour(status: string): Color {
   const s = (status || '').toLowerCase();
-  if (['delivered', 'completed', 'resolved_full_refund', 'resolved_partial_refund', 'credit'].includes(s)) return GREEN;
-  if (['cancelled', 'rejected', 'failed', 'debit'].includes(s)) return RED;
-  if (['pending', 'open', 'under_review', 'processing'].includes(s)) return AMBER;
+  if (['delivered', 'completed', 'resolved_full_refund', 'resolved_partial_refund', 'credit', 'close'].includes(s)) return GREEN;
+  if (['cancelled', 'rejected', 'failed', 'debit', 'canceled'].includes(s)) return RED;
+  if (['pending', 'open', 'under_review', 'processing', 'confirmed'].includes(s)) return AMBER;
   return GRAY;
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export interface StatementData {
-  vendor: { name: string; email: string; storeName: string };
+  vendor: { name: string; email: string; storeName: string; location: string };
   period: { start: Date; end: Date };
   summary: {
-    totalRevenue:    number; // gross sales from ALL orders in period
-    earnedRevenue:   number; // from delivered/completed orders only
+    totalRevenue:    number;
+    earnedRevenue:   number;
     totalOrders:     number;
-    totalItems:      number; // items across ALL orders in period
-    walletBalance:   number; // current available balance
-    pendingBalance:  number; // earnings pending release
-    totalWithdrawn:  number; // total ever withdrawn (lifetime)
+    totalItems:      number;
+    walletBalance:   number;
+    pendingBalance:  number;
+    totalWithdrawn:  number;
   };
   orders: {
     orderNumber:  string;
@@ -108,7 +107,7 @@ export async function gatherStatementData(
 
   const [vendorUser, vendorProfile, rawOrders, wallet, disputes] = await Promise.all([
     User.findById(vid).select('firstName lastName email').lean(),
-    VendorProfile.findOne({ user: vid }).select('storeName').lean(),
+    VendorProfile.findOne({ user: vid }).select('storeName businessAddress').lean(),
     Order.find({
       'vendorShipments.vendor': vid,
       createdAt: { $gte: startDate, $lte: end },
@@ -117,16 +116,9 @@ export async function gatherStatementData(
     Dispute.find({ vendor: vid, createdAt: { $gte: startDate, $lte: end } }).lean(),
   ]);
 
-  // Build order rows — items have { _id: false } in schema so we match by the
-  // vendor field that each order item carries directly (not by _id).
-  // ALL orders are listed regardless of status (it's a full statement).
-  // Revenue totals:
-  //   totalRevenue  = gross sales from ALL orders in period
-  //   earnedRevenue = only delivered/completed orders (money actually earned)
   let totalRevenue  = 0;
   let earnedRevenue = 0;
   let totalItems    = 0;
-
   const FULFILLED = new Set(['delivered', 'completed']);
 
   const orders = (rawOrders as any[]).map(o => {
@@ -140,9 +132,7 @@ export async function gatherStatementData(
 
     totalRevenue += vendorAmount;
     totalItems   += qtyCount;
-    if (FULFILLED.has((o.status || '').toLowerCase())) {
-      earnedRevenue += vendorAmount;
-    }
+    if (FULFILLED.has((o.status || '').toLowerCase())) earnedRevenue += vendorAmount;
 
     const customer = o.user
       ? `${(o.user as any).firstName || ''} ${(o.user as any).lastName || ''}`.trim()
@@ -158,7 +148,6 @@ export async function gatherStatementData(
     };
   });
 
-  // Wallet transactions filtered by date
   const txns = ((wallet as any)?.transactions || [])
     .filter((t: any) => {
       const ts = new Date(t.timestamp || t.createdAt);
@@ -176,11 +165,17 @@ export async function gatherStatementData(
     ? `${(vendorUser as any).firstName || ''} ${(vendorUser as any).lastName || ''}`.trim()
     : 'Vendor';
 
+  const addr = (vendorProfile as any)?.businessAddress;
+  const location = addr
+    ? [addr.city, addr.state].filter(Boolean).join(', ')
+    : '';
+
   return {
     vendor: {
       name,
       email:     (vendorUser as any)?.email || '',
       storeName: (vendorProfile as any)?.storeName || name,
+      location,
     },
     period:  { start: startDate, end },
     summary: {
@@ -211,123 +206,185 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  // Embed real logo PNG if available
   let logoImg: PDFImage | null = null;
   if (LOGO_BYTES) {
     try { logoImg = await pdf.embedPng(LOGO_BYTES); } catch {}
   }
 
-  // Mutable page cursor
   const cur: { pg: PDFPage; y: number } = { pg: null as any, y: 0 };
 
   function newPage(continuation = false) {
     cur.pg = pdf.addPage([PW, PH]);
     if (continuation) {
-      cur.pg.drawRectangle({ x: 0, y: PH - 28, width: PW, height: 28, color: PINK });
-      cur.pg.drawText('Vendorspot  |  Account Statement (continued)', {
-        x: M, y: PH - 19, size: 8, font, color: WHITE,
+      // Minimal header bar on continuation pages
+      cur.pg.drawLine({
+        start: { x: M, y: PH - 30 },
+        end:   { x: PW - M, y: PH - 30 },
+        thickness: 1,
+        color: PINK,
       });
-      cur.y = PH - 50;
+      cur.pg.drawText('Vendorspot  ·  Account Statement (continued)', {
+        x: M, y: PH - 22, size: 7.5, font, color: GRAY,
+      });
+      cur.y = PH - 55;
     } else {
       cur.y = PH;
     }
   }
 
   function need(h: number) {
-    if (cur.y - h < M + 30) newPage(true);
+    if (cur.y - h < M + 40) newPage(true);
   }
 
-  // ── Page 1 Header ────────────────────────────────────────────────────────
+  // ── Page 1 ───────────────────────────────────────────────────────────────
   newPage(false);
 
-  // Pink header band
-  cur.pg.drawRectangle({ x: 0, y: PH - 152, width: PW, height: 152, color: PINK });
-
-  // ── Logo area ──
-  // White square backdrop so the pink logo is visible on the pink header
-  const LOGO_SZ = 48;
-  const LOGO_X  = M;
-  const LOGO_Y  = PH - 66; // bottom-left y of logo box
-
-  cur.pg.drawRectangle({ x: LOGO_X, y: LOGO_Y, width: LOGO_SZ, height: LOGO_SZ, color: WHITE });
-
+  // ── Logo — top right ─────────────────────────────────────────────────────
+  const logoTop = PH - M;
   if (logoImg) {
-    // Real PNG logo — draw inside the white box with 4pt padding
-    cur.pg.drawImage(logoImg, { x: LOGO_X + 4, y: LOGO_Y + 4, width: LOGO_SZ - 8, height: LOGO_SZ - 8 });
+    const LH = 30;
+    const LW = Math.round(LH * (logoImg.width / logoImg.height));
+    cur.pg.drawImage(logoImg, { x: PW - M - LW, y: logoTop - LH, width: LW, height: LH });
+    const tagline = 'Confidence in every click';
+    cur.pg.drawText(tagline, {
+      x: PW - M - font.widthOfTextAtSize(tagline, 6.5),
+      y: logoTop - LH - 10,
+      size: 6.5, font, color: GRAY,
+    });
   } else {
-    // Text fallback: pink "V" on white box
-    cur.pg.drawText('V', { x: LOGO_X + 14, y: LOGO_Y + 14, size: 26, font: bold, color: PINK });
+    // Inline "V" pink + "endorspot" dark
+    const V_SIZE = 17;
+    const VW = bold.widthOfTextAtSize('V', V_SIZE);
+    const REST = 'endorspot';
+    const restW = bold.widthOfTextAtSize(REST, V_SIZE);
+    const totalW = VW + restW;
+    const lx = PW - M - totalW;
+    cur.pg.drawText('V',    { x: lx,      y: logoTop - V_SIZE, size: V_SIZE, font: bold, color: PINK });
+    cur.pg.drawText(REST,   { x: lx + VW, y: logoTop - V_SIZE, size: V_SIZE, font: bold, color: DARK });
+    const tagline = 'Confidence in every click';
+    cur.pg.drawText(tagline, {
+      x: PW - M - font.widthOfTextAtSize(tagline, 6.5),
+      y: logoTop - V_SIZE - 11,
+      size: 6.5, font, color: GRAY,
+    });
   }
 
-  // Brand wordmark: "endorspot" in white next to logo
-  const BRAND_X = LOGO_X + LOGO_SZ + 12;
-  const BRAND_Y = LOGO_Y + LOGO_SZ - 20;
-  cur.pg.drawText('Vendorspot', { x: BRAND_X, y: BRAND_Y, size: 18, font: bold, color: WHITE });
-  cur.pg.drawText('Confidence in every click', { x: BRAND_X, y: BRAND_Y - 14, size: 7.5, font, color: PINK_MID });
+  // ── "Account Statement" title ─────────────────────────────────────────────
+  cur.y = logoTop - 14;
+  cur.pg.drawText('Account Statement', { x: M, y: cur.y - 22, size: 22, font: bold, color: DARK });
+  cur.y -= 38;
 
-  // "ACCOUNT STATEMENT" label right-aligned, same vertical centre as logo
-  cur.pg.drawText('ACCOUNT STATEMENT', { x: PW - M - 118, y: BRAND_Y, size: 10, font: bold, color: WHITE });
+  // Thin separator
+  cur.pg.drawLine({
+    start: { x: M, y: cur.y },
+    end:   { x: PW - M, y: cur.y },
+    thickness: 0.5, color: BORDER,
+  });
+  cur.y -= 18;
 
-  // Horizontal divider below logo band
-  cur.pg.drawLine({ start: { x: M, y: PH - 76 }, end: { x: PW - M, y: PH - 76 }, thickness: 0.5, color: PINK_MID });
-
-  // Store info
-  cur.pg.drawText(trunc(data.vendor.storeName, 44), { x: M, y: PH - 94,  size: 12, font: bold, color: WHITE });
-  cur.pg.drawText(data.vendor.name,                  { x: M, y: PH - 110, size: 9,  font,       color: PINK_MID });
-  cur.pg.drawText(data.vendor.email,                 { x: M, y: PH - 123, size: 9,  font,       color: PINK_MID });
-
-  // Period + generated date
-  cur.pg.drawText(`Period: ${fmtDate(data.period.start)} – ${fmtDate(data.period.end)}`,
-    { x: M, y: PH - 140, size: 8.5, font, color: PINK_MID });
-  cur.pg.drawText(`Generated: ${fmtDate(new Date())}`,
-    { x: PW - M - 150, y: PH - 140, size: 8.5, font, color: PINK_MID });
-
-  cur.y = PH - 152 - 18;
-
-  // ── Summary Cards (2 rows × 3 columns) ──────────────────────────────────
-  const row1Cards = [
-    { label: 'Gross Sales (Period)',  value: fmtMoney(data.summary.totalRevenue),   note: 'all orders'        },
-    { label: 'Earned Revenue',        value: fmtMoney(data.summary.earnedRevenue),  note: 'delivered only'    },
-    { label: 'Total Orders',          value: String(data.summary.totalOrders),       note: 'in period'         },
-  ];
-  const row2Cards = [
-    { label: 'Wallet Balance',        value: fmtMoney(data.summary.walletBalance),  note: 'available now'     },
-    { label: 'Pending Balance',       value: fmtMoney(data.summary.pendingBalance), note: 'pending release'   },
-    { label: 'Items (All Orders)',     value: String(data.summary.totalItems),        note: 'units in period'   },
+  // ── Info section ──────────────────────────────────────────────────────────
+  const infoStartY = cur.y;
+  const labelX = M;
+  const valueX = M + 95;
+  const infoRows = [
+    ['Business Name:', trunc(data.vendor.storeName, 30)],
+    ['Holder Name:',   data.vendor.name],
+    ['Location:',      data.vendor.location || '—'],
+    ['Email:',         data.vendor.email],
   ];
 
-  const cW3 = (CW - 6) / 3;
-  const cH  = 62;
+  infoRows.forEach(([label, value], i) => {
+    const rowY = infoStartY - i * 15;
+    cur.pg.drawText(label, { x: labelX, y: rowY, size: 8, font: bold, color: DARK });
+    cur.pg.drawText(value, { x: valueX, y: rowY, size: 8, font,       color: DARK });
+  });
 
-  const drawCardRow = (cards: typeof row1Cards, rowY: number) => {
+  // Right side: store name in pink + period
+  const storeName = trunc(data.vendor.storeName, 28);
+  const storeW = bold.widthOfTextAtSize(storeName, 13);
+  cur.pg.drawText(storeName, {
+    x: PW - M - storeW,
+    y: infoStartY,
+    size: 13, font: bold, color: PINK,
+  });
+  const periodStr = `Period: ${fmtDate(data.period.start)} - ${fmtDate(data.period.end)}`;
+  cur.pg.drawText(periodStr, {
+    x: PW - M - font.widthOfTextAtSize(periodStr, 7.5),
+    y: infoStartY - 17,
+    size: 7.5, font, color: GRAY,
+  });
+
+  cur.y = infoStartY - infoRows.length * 15 - 20;
+
+  // ── Summary Box ───────────────────────────────────────────────────────────
+  const cW3   = CW / 3;
+  const rowH  = 62;
+  const boxH  = rowH * 2;
+
+  cur.pg.drawRectangle({
+    x: M, y: cur.y - boxH,
+    width: CW, height: boxH,
+    color: LT_GRAY,
+    borderColor: BORDER,
+    borderWidth: 0.75,
+  });
+
+  type SummaryCard = { label: string; sub: string; value: string; color: Color };
+  const row1: SummaryCard[] = [
+    { label: 'Gross Sales (Period)', sub: 'all orders',      value: fmtMoney(data.summary.totalRevenue),   color: DARK  },
+    { label: 'Earned Revenue',       sub: 'delivered only',  value: fmtMoney(data.summary.earnedRevenue),  color: DARK  },
+    { label: 'Total Orders',         sub: 'in period',       value: String(data.summary.totalOrders),       color: DARK  },
+  ];
+  const row2: SummaryCard[] = [
+    { label: 'Wallet Balance',       sub: 'available now',   value: fmtMoney(data.summary.walletBalance),  color: GREEN },
+    { label: 'Pending Balance',      sub: 'pending release', value: fmtMoney(data.summary.pendingBalance), color: AMBER },
+    { label: 'Items (All Orders)',   sub: 'units in period', value: String(data.summary.totalItems),        color: DARK  },
+  ];
+
+  const drawSummaryRow = (cards: SummaryCard[], rowTopY: number, drawDivider: boolean) => {
     cards.forEach((card, i) => {
-      const cx = M + i * (cW3 + 3);
-      cur.pg.drawRectangle({ x: cx, y: rowY, width: cW3, height: cH, color: LT_GRAY, borderColor: PINK_MID, borderWidth: 0.5 });
-      cur.pg.drawRectangle({ x: cx, y: rowY + cH - 4, width: cW3, height: 4, color: PINK });
-      cur.pg.drawText(card.label, { x: cx + 7, y: rowY + cH - 16, size: 6.5, font: bold, color: DARK });
-      cur.pg.drawText(card.note,  { x: cx + 7, y: rowY + cH - 26, size: 6,   font,       color: GRAY });
-      cur.pg.drawText(trunc(card.value, 18), { x: cx + 7, y: rowY + 12, size: 10.5, font: bold, color: PINK });
+      const cx = M + i * cW3;
+      if (i > 0) {
+        cur.pg.drawLine({
+          start: { x: cx, y: rowTopY },
+          end:   { x: cx, y: rowTopY - rowH },
+          thickness: 0.5, color: BORDER,
+        });
+      }
+      cur.pg.drawText(card.label, { x: cx + 10, y: rowTopY - 16, size: 7,    font: bold, color: DARK });
+      cur.pg.drawText(card.sub,   { x: cx + 10, y: rowTopY - 27, size: 6.5,  font,       color: GRAY });
+      cur.pg.drawText(trunc(card.value, 20), { x: cx + 10, y: rowTopY - 50, size: 11, font: bold, color: card.color });
     });
+    if (drawDivider) {
+      cur.pg.drawLine({
+        start: { x: M, y: rowTopY - rowH },
+        end:   { x: PW - M, y: rowTopY - rowH },
+        thickness: 0.5, color: BORDER,
+      });
+    }
   };
 
-  const row1Top = cur.y - cH;
-  drawCardRow(row1Cards, row1Top);
-  const row2Top = row1Top - 8 - cH;
-  need(cH + 8);
-  drawCardRow(row2Cards, row2Top);
+  const row1Top = cur.y - 0;
+  drawSummaryRow(row1, row1Top, true);
+  drawSummaryRow(row2, row1Top - rowH, false);
 
-  cur.y = row2Top - 24;
+  cur.y -= boxH + 28;
 
-  // ── Table helper ──────────────────────────────────────────────────────────
+  // ── Table helpers ─────────────────────────────────────────────────────────
   type Col = { h: string; w: number; right?: boolean };
 
   function sectionTitle(title: string, count: number) {
-    need(26);
-    cur.pg.drawRectangle({ x: M, y: cur.y - 22, width: CW, height: 22, color: PINK_LT });
-    cur.pg.drawText(title, { x: M + 10, y: cur.y - 15, size: 9, font: bold, color: PINK });
-    const tw = bold.widthOfTextAtSize(title, 9);
-    cur.pg.drawText(`(${count})`, { x: M + 10 + tw + 5, y: cur.y - 15, size: 9, font, color: GRAY });
-    cur.y -= 22;
+    need(28);
+    cur.pg.drawText(`${title} - ${count}`, {
+      x: M, y: cur.y - 16, size: 9.5, font: bold, color: DARK,
+    });
+    cur.y -= 18;
+    cur.pg.drawLine({
+      start: { x: M, y: cur.y },
+      end:   { x: PW - M, y: cur.y },
+      thickness: 0.5, color: BORDER,
+    });
+    cur.y -= 4;
   }
 
   function tableHeader(cols: Col[]) {
@@ -348,11 +405,11 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
     let cx = M;
     cols.forEach((col, i) => {
       const raw = trunc(vals[i] ?? '', Math.floor(col.w / 5.2));
-      const col_color = colours?.[i] ?? DARK;
+      const colColor = colours?.[i] ?? DARK;
       const tx = col.right
         ? cx + col.w - 6 - font.widthOfTextAtSize(raw, 7.5)
         : cx + 5;
-      cur.pg.drawText(raw, { x: tx, y: cur.y - 11, size: 7.5, font, color: col_color });
+      cur.pg.drawText(raw, { x: tx, y: cur.y - 11, size: 7.5, font, color: colColor });
       cx += col.w;
     });
     cur.y -= 15;
@@ -360,13 +417,12 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
 
   function noData(msg: string) {
     need(24);
-    cur.pg.drawRectangle({ x: M, y: cur.y - 22, width: CW, height: 22, color: LT_GRAY });
-    cur.pg.drawText(msg, { x: M + 10, y: cur.y - 15, size: 8, font, color: GRAY });
-    cur.y -= 22;
+    cur.pg.drawRectangle({ x: M, y: cur.y - 20, width: CW, height: 20, color: LT_GRAY });
+    cur.pg.drawText(msg, { x: M + 10, y: cur.y - 14, size: 8, font, color: GRAY });
+    cur.y -= 20;
   }
 
-  // ── Orders Section (ALL orders regardless of status) ─────────────────────
-  cur.y -= 4;
+  // ── Orders ───────────────────────────────────────────────────────────────
   sectionTitle('ALL ORDERS IN PERIOD', data.orders.length);
 
   const orderCols: Col[] = [
@@ -394,15 +450,15 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
     });
   }
 
-  // ── Wallet Transactions Section ───────────────────────────────────────────
-  cur.y -= 18;
+  // ── Wallet Transactions ───────────────────────────────────────────────────
+  cur.y -= 20;
   sectionTitle('WALLET TRANSACTIONS (CREDITS & DEBITS)', data.txns.length);
 
   const txnCols: Col[] = [
-    { h: 'S/N',         w: 28 },
-    { h: 'DATE',        w: 66 },
-    { h: 'TYPE',        w: 56 },
-    { h: 'PURPOSE',     w: 88 },
+    { h: 'S/N',         w: 28  },
+    { h: 'Date',        w: 66  },
+    { h: 'TYPE',        w: 56  },
+    { h: 'PURPOSE',     w: 88  },
     { h: 'AMOUNT',      w: 95, right: true },
     { h: 'DESCRIPTION', w: 182 },
   ];
@@ -412,26 +468,28 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
   } else {
     tableHeader(txnCols);
     data.txns.forEach((t, i) => {
-      const tc = statusColour(t.type);
-      const sign = t.type.toLowerCase() === 'credit' ? '+' : '-';
+      const isCredit = t.type.toLowerCase() === 'credit';
+      const typeColor = isCredit ? GREEN : RED;
+      const amtColor  = isCredit ? GREEN : RED;
+      const sign      = isCredit ? '+' : '-';
       tableRow(
         txnCols,
         [String(i + 1), fmtDate(t.date), cap(t.type), cap(t.purpose), `${sign} ${fmtMoney(t.amount)}`, t.description],
         i,
-        [GRAY, DARK, tc, DARK, tc, GRAY],
+        [GRAY, DARK, typeColor, DARK, amtColor, GRAY],
       );
     });
   }
 
-  // ── Disputes Section ───────────────────────────────────────────────────────
-  cur.y -= 18;
-  sectionTitle('DISPUTES', data.disputes.length);
+  // ── Disputes ──────────────────────────────────────────────────────────────
+  cur.y -= 20;
+  sectionTitle('DISPUTE', data.disputes.length);
 
   const dispCols: Col[] = [
-    { h: 'S/N',       w: 28 },
-    { h: 'DISPUTE #', w: 82 },
-    { h: 'DATE',      w: 66 },
-    { h: 'ORDER #',   w: 82 },
+    { h: 'S/N',       w: 28  },
+    { h: 'DISPUTE #', w: 82  },
+    { h: 'DATE',      w: 66  },
+    { h: 'ORDER #',   w: 82  },
     { h: 'REASON',    w: 140 },
     { h: 'STATUS',    w: 117 },
   ];
@@ -451,10 +509,14 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
     });
   }
 
-  // ── Footer ─────────────────────────────────────────────────────────────────
+  // ── Footer ────────────────────────────────────────────────────────────────
   need(36);
   cur.y -= 20;
-  cur.pg.drawLine({ start: { x: M, y: cur.y }, end: { x: PW - M, y: cur.y }, thickness: 1, color: PINK });
+  cur.pg.drawLine({
+    start: { x: M, y: cur.y },
+    end:   { x: PW - M, y: cur.y },
+    thickness: 0.75, color: PINK,
+  });
   cur.y -= 14;
   cur.pg.drawText(
     `This statement was automatically generated by Vendorspot on ${fmtDate(new Date())}. For queries, contact support@vendorspotng.com`,
@@ -464,12 +526,10 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
   // Page numbers
   const pageCount = pdf.getPageCount();
   for (let p = 0; p < pageCount; p++) {
-    const pg = pdf.getPage(p);
-    pg.drawText(`Page ${p + 1} of ${pageCount}`, {
+    pdf.getPage(p).drawText(`Page ${p + 1} of ${pageCount}`, {
       x: PW - M - 55, y: 22, size: 7, font, color: GRAY,
     });
   }
 
-  const bytes = await pdf.save();
-  return Buffer.from(bytes);
+  return Buffer.from(await pdf.save());
 }

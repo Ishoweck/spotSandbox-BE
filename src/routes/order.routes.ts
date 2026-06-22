@@ -164,6 +164,9 @@ router.get('/:id/track', asyncHandler(orderController.trackOrder.bind(orderContr
 // Download digital product
 router.get('/:id/download/:itemId', asyncHandler(orderController.downloadDigitalProduct.bind(orderController)));
 
+// Download order receipt PDF
+router.get('/:id/receipt', asyncHandler(orderController.downloadReceipt.bind(orderController)));
+
 // Generic get order - AFTER all specific routes
 router.get('/:id', asyncHandler(orderController.getOrder.bind(orderController)));
 

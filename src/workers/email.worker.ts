@@ -1,5 +1,5 @@
 import { Worker, Job } from 'bullmq';
-import { getBullMQConnectionOptions } from '../config/redis';
+import { bullmqClient } from '../config/redis';
 import {
   sendBuyerFounderWelcomeEmail,
   sendVendorWelcomeEmail,
@@ -41,7 +41,7 @@ export function startEmailWorker(): void {
     'transactional-emails',
     processEmailJob,
     {
-      connection: getBullMQConnectionOptions(),
+      connection: bullmqClient as any,
       concurrency: 5,
       limiter: { max: 10, duration: 1_000 }, // 10 emails/sec
     },

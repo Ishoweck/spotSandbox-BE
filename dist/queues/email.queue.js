@@ -15,7 +15,7 @@ var EmailJobType;
 // ─── Queue Definition ─────────────────────────────────────────────────────────
 // Email queue — rate-limited to 10/sec to respect SMTP/Resend provider limits
 exports.emailQueue = new bullmq_1.Queue('transactional-emails', {
-    connection: (0, redis_1.getBullMQConnectionOptions)(),
+    connection: redis_1.bullmqClient,
     defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 120000 }, // 2min → 4min → 8min

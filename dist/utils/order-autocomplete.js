@@ -10,6 +10,7 @@ const VendorProfile_1 = __importDefault(require("../models/VendorProfile"));
 const logger_1 = require("./logger");
 const types_1 = require("../types");
 const notification_service_1 = require("../services/notification.service");
+const reward_controller_1 = require("../controllers/reward.controller");
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const CHECK_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
 async function getCommissionRate(vendorId) {
@@ -131,6 +132,28 @@ async function runAutoComplete() {
                     },
                 }, { upsert: true });
                 logger_1.logger.info(`✅ Auto-credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+            }
+            // Award purchase points to customer and referral points to their referrer
+            try {
+                await reward_controller_1.rewardController.awardOrderPoints(order._id.toString());
+                await reward_controller_1.rewardController.awardCustomerReferralPoints(order.user.toString(), order._id.toString());
+                // Unlock vendor referral points for any vendor making their first sale
+                const uniqueVendorIds = [...new Set(order.items.map((item) => {
+                        const v = item.vendor;
+                        return typeof v === 'object' ? v._id?.toString() : v?.toString();
+                    }).filter(Boolean))];
+                for (const vendorId of uniqueVendorIds) {
+                    const vendorProfile = await VendorProfile_1.default.findOne({ user: vendorId });
+                    if (vendorProfile && !vendorProfile.referralRewarded && vendorProfile.referredBy) {
+                        await reward_controller_1.rewardController.unlockVendorReferralPoints(vendorId);
+                        vendorProfile.referralRewarded = true;
+                        await vendorProfile.save();
+                    }
+                }
+                logger_1.logger.info(`✅ Auto-complete: points awarded for order ${order.orderNumber}`);
+            }
+            catch (pointsErr) {
+                logger_1.logger.error(`❌ Auto-complete: points award failed for order ${order.orderNumber}: ${pointsErr.message}`);
             }
             logger_1.logger.info(`✅ Auto-complete done: order ${order.orderNumber}`);
         }

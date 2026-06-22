@@ -19,7 +19,7 @@ interface OrderEmailItem {
     price: number;
     vendorName?: string;
 }
-export declare const sendOrderConfirmationEmail: (email: string, orderNumber: string, total: number, name?: string, items?: OrderEmailItem[]) => Promise<void>;
+export declare const sendOrderConfirmationEmail: (email: string, orderNumber: string, total: number, name?: string, items?: OrderEmailItem[], receiptPdf?: Buffer) => Promise<void>;
 export declare const sendVendorWelcomeEmail: (email: string, firstName?: string) => Promise<void>;
 export declare const sendFounderWelcomeEmail: (email: string, firstName?: string) => Promise<void>;
 export declare const sendBuyerFounderWelcomeEmail: (email: string, firstName: string) => Promise<void>;

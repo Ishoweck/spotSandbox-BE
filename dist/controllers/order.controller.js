@@ -51,6 +51,7 @@ const paystack_service_1 = require("../services/paystack.service");
 const flutterwave_service_1 = require("../services/flutterwave.service");
 const shipbubble_service_1 = require("../services/shipbubble.service");
 const email_1 = require("../utils/email");
+const receipt_service_1 = require("../services/receipt.service");
 const notification_service_1 = require("../services/notification.service");
 const logger_1 = require("../utils/logger");
 const Conversation_1 = __importDefault(require("../models/Conversation"));
@@ -1035,7 +1036,7 @@ class OrderController {
             }
         }
         logger_1.logger.info('📊 Product sales & stock updated');
-        // Send confirmation email
+        // Send confirmation email + receipt PDF
         try {
             const vendorNameMap = new Map((order.vendorShipments || []).map((s) => [s.vendor.toString(), s.vendorName]));
             const emailItems = order.items.map((item) => ({
@@ -1045,7 +1046,32 @@ class OrderController {
                 price: item.price,
                 vendorName: vendorNameMap.get(item.vendor.toString()),
             }));
-            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems);
+            let receiptPdf;
+            try {
+                receiptPdf = await (0, receipt_service_1.generateReceiptPDF)({
+                    orderNumber: order.orderNumber,
+                    date: order.createdAt,
+                    paymentMethod: order.paymentMethod,
+                    paymentReference: order.paymentReference,
+                    customer: { name: `${user.firstName} ${user.lastName || ''}`.trim(), email: user.email },
+                    deliveryAddress: order.shippingAddress,
+                    items: order.items.map((item) => ({
+                        productName: item.productName,
+                        vendorName: vendorNameMap.get(item.vendor.toString()),
+                        quantity: item.quantity,
+                        price: item.price,
+                    })),
+                    subtotal: order.subtotal || 0,
+                    discount: order.discount || 0,
+                    shippingCost: order.shippingCost || 0,
+                    serviceCharge: order.serviceCharge || 0,
+                    total: order.total,
+                });
+            }
+            catch (pdfErr) {
+                logger_1.logger.error('Receipt PDF generation failed:', pdfErr.message);
+            }
+            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems, receiptPdf);
         }
         catch (error) {
             logger_1.logger.error('Error sending confirmation email:', error);
@@ -1200,6 +1226,7 @@ class OrderController {
             paymentReference,
             cartId: cart._id.toString(),
             affiliateCode: affiliateCode || undefined,
+            provider: paymentMethod === types_1.PaymentMethod.PAYSTACK ? 'paystack' : 'flutterwave',
             createdAt: new Date().toISOString(),
         };
         let paymentData = null;
@@ -1321,13 +1348,18 @@ class OrderController {
         logger_1.logger.info('✅ ============================================');
         logger_1.logger.info('✅ CONFIRM PAYMENT & CREATE ORDER');
         logger_1.logger.info('✅ ============================================');
-        logger_1.logger.info('🔍 Reference:', reference);
-        logger_1.logger.info('🔍 Provider:', provider || 'paystack');
+        // Step 0: Look up the server-stored PendingPayment to get the correct gateway.
+        // This is the authoritative source — the client-supplied `provider` can be wrong
+        // (e.g. app sends "paystack" even when Flutterwave was used).
+        const { PendingPayment } = await Promise.resolve().then(() => __importStar(require('../models/PendingPayment')));
+        const pendingRecord = await PendingPayment.findOne({ reference });
+        const paymentProvider = pendingRecord?.gateway || snapshotFromClient?.provider || provider || 'paystack';
+        logger_1.logger.info('🔍 Reference:', { reference });
+        logger_1.logger.info('🔍 Provider (resolved):', { paymentProvider, clientProvider: provider, pendingGateway: pendingRecord?.gateway });
         // Step 1: Verify payment with the gateway
         let paymentSuccess = false;
         let snapshotFromGateway = null;
         let paidAmountNaira = null;
-        const paymentProvider = provider || 'paystack';
         try {
             if (paymentProvider === 'flutterwave') {
                 logger_1.logger.info('🔍 Verifying with Flutterwave...');
@@ -1342,6 +1374,18 @@ class OrderController {
                     paymentSuccess = true;
                     paidAmountNaira = verification.data.amount;
                     logger_1.logger.info('✅ Flutterwave payment verified:', { amount: verification.data.amount });
+                    // Extract snapshot stored in Flutterwave meta during initializePayment
+                    const meta = verification.data.meta;
+                    if (meta?.checkoutSnapshot) {
+                        try {
+                            snapshotFromGateway = typeof meta.checkoutSnapshot === 'string'
+                                ? JSON.parse(meta.checkoutSnapshot)
+                                : meta.checkoutSnapshot;
+                        }
+                        catch {
+                            logger_1.logger.warn('⚠️ Could not parse checkoutSnapshot from Flutterwave meta');
+                        }
+                    }
                 }
             }
             else {
@@ -1373,8 +1417,20 @@ class OrderController {
         if (!paymentSuccess) {
             throw new error_1.AppError('Payment was not successful', 400);
         }
-        // Step 2: Parse the checkout snapshot (client-provided takes priority, else use gateway metadata)
-        const snapshot = snapshotFromClient || snapshotFromGateway;
+        // Step 2: Parse the checkout snapshot
+        // Priority: client body → gateway metadata → PendingPayment.snapshotJson (server-stored, most reliable)
+        let snapshotFromPending = null;
+        if (pendingRecord?.snapshotJson) {
+            try {
+                snapshotFromPending = typeof pendingRecord.snapshotJson === 'string'
+                    ? JSON.parse(pendingRecord.snapshotJson)
+                    : pendingRecord.snapshotJson;
+            }
+            catch {
+                logger_1.logger.warn('⚠️ Could not parse snapshotJson from PendingPayment');
+            }
+        }
+        const snapshot = snapshotFromClient || snapshotFromGateway || snapshotFromPending;
         if (!snapshot || snapshot.userId !== req.user?.id) {
             throw new error_1.AppError('Invalid checkout data', 400);
         }
@@ -1626,7 +1682,6 @@ class OrderController {
         logger_1.logger.info(`✅ Order created with verified payment: ${order._id}`);
         // Mark the pending payment record as done
         try {
-            const { PendingPayment } = await Promise.resolve().then(() => __importStar(require('../models/PendingPayment')));
             await PendingPayment.findOneAndUpdate({ reference }, { status: 'completed', completedAt: new Date() });
         }
         catch { /* non-critical */ }
@@ -1713,7 +1768,7 @@ class OrderController {
             }
         }
         // Points and affiliate commission credited on delivery — see completeOrder
-        // Step 12: Send confirmation email
+        // Step 12: Send confirmation email + receipt PDF
         try {
             const vendorNameMap = new Map((order.vendorShipments || []).map((s) => [s.vendor.toString(), s.vendorName]));
             const emailItems = order.items.map((item) => ({
@@ -1723,7 +1778,32 @@ class OrderController {
                 price: item.price,
                 vendorName: vendorNameMap.get(item.vendor.toString()),
             }));
-            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems);
+            let receiptPdf;
+            try {
+                receiptPdf = await (0, receipt_service_1.generateReceiptPDF)({
+                    orderNumber: order.orderNumber,
+                    date: order.createdAt,
+                    paymentMethod: order.paymentMethod,
+                    paymentReference: order.paymentReference,
+                    customer: { name: `${user.firstName} ${user.lastName || ''}`.trim(), email: user.email },
+                    deliveryAddress: order.shippingAddress,
+                    items: order.items.map((item) => ({
+                        productName: item.productName,
+                        vendorName: vendorNameMap.get(item.vendor.toString()),
+                        quantity: item.quantity,
+                        price: item.price,
+                    })),
+                    subtotal: order.subtotal || 0,
+                    discount: order.discount || 0,
+                    shippingCost: order.shippingCost || 0,
+                    serviceCharge: order.serviceCharge || 0,
+                    total: order.total,
+                });
+            }
+            catch (pdfErr) {
+                logger_1.logger.error('Receipt PDF generation failed:', pdfErr.message);
+            }
+            await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems, receiptPdf);
             logger_1.logger.info('✅ Confirmation email sent');
         }
         catch (error) {
@@ -2273,7 +2353,7 @@ class OrderController {
                 // ✅ Shipment will be created when vendor updates order status
                 logger_1.logger.info('📦 Shipment will be created when vendor confirms/processes order');
                 // Points credited on delivery — see completeOrder
-                // Send confirmation email
+                // Send confirmation email + receipt PDF
                 const user = await User_1.default.findById(order.user);
                 if (user) {
                     try {
@@ -2285,7 +2365,32 @@ class OrderController {
                             price: item.price,
                             vendorName: vendorNameMap.get(item.vendor.toString()),
                         }));
-                        await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems);
+                        let receiptPdf;
+                        try {
+                            receiptPdf = await (0, receipt_service_1.generateReceiptPDF)({
+                                orderNumber: order.orderNumber,
+                                date: order.createdAt,
+                                paymentMethod: order.paymentMethod,
+                                paymentReference: order.paymentReference,
+                                customer: { name: `${user.firstName} ${user.lastName || ''}`.trim(), email: user.email },
+                                deliveryAddress: order.shippingAddress,
+                                items: order.items.map((item) => ({
+                                    productName: item.productName,
+                                    vendorName: vendorNameMap.get(item.vendor.toString()),
+                                    quantity: item.quantity,
+                                    price: item.price,
+                                })),
+                                subtotal: order.subtotal || 0,
+                                discount: order.discount || 0,
+                                shippingCost: order.shippingCost || 0,
+                                serviceCharge: order.serviceCharge || 0,
+                                total: order.total,
+                            });
+                        }
+                        catch (pdfErr) {
+                            logger_1.logger.error('Receipt PDF generation failed:', pdfErr.message);
+                        }
+                        await (0, email_1.sendOrderConfirmationEmail)(user.email, order.orderNumber, order.total, user.firstName, emailItems, receiptPdf);
                         logger_1.logger.info('✅ Confirmation email sent');
                     }
                     catch (error) {
@@ -3877,6 +3982,54 @@ class OrderController {
         await order.save();
         await this.createVendorShipments(order, order.user, vendorGroups, order.deliveryType || 'standard');
         return { retried: vendorGroups.length };
+    }
+    async downloadReceipt(req, res) {
+        const { id } = req.params;
+        const order = await Order_1.default.findById(id)
+            .populate('user', 'firstName lastName email')
+            .lean();
+        if (!order) {
+            res.status(404).json({ success: false, message: 'Order not found' });
+            return;
+        }
+        const userId = req.user.id;
+        const isAdmin = [types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN].includes(req.user.role);
+        if (!isAdmin) {
+            const isCustomer = order.user?._id?.toString() === userId;
+            const isVendor = (order.items || []).some((item) => (item.vendor?._id || item.vendor)?.toString() === userId);
+            if (!isCustomer && !isVendor) {
+                res.status(403).json({ success: false, message: 'Not authorized to access this receipt' });
+                return;
+            }
+        }
+        const user = order.user;
+        const vendorNameMap = new Map((order.vendorShipments || []).map((s) => [s.vendor.toString(), s.vendorName]));
+        const pdfBuffer = await (0, receipt_service_1.generateReceiptPDF)({
+            orderNumber: order.orderNumber,
+            date: order.createdAt,
+            paymentMethod: order.paymentMethod,
+            paymentReference: order.paymentReference,
+            customer: {
+                name: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Customer',
+                email: user?.email || '',
+            },
+            deliveryAddress: order.shippingAddress,
+            items: (order.items || []).map((item) => ({
+                productName: item.productName,
+                vendorName: vendorNameMap.get((item.vendor?._id || item.vendor)?.toString()),
+                quantity: item.quantity,
+                price: item.price,
+            })),
+            subtotal: order.subtotal || 0,
+            discount: order.discount || 0,
+            shippingCost: order.shippingCost || 0,
+            serviceCharge: order.serviceCharge || 0,
+            total: order.total || 0,
+        });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="Vendorspot-Receipt-${order.orderNumber}.pdf"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+        res.send(pdfBuffer);
     }
 } // end OrderController
 exports.OrderController = OrderController;

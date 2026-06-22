@@ -312,7 +312,8 @@ export const sendOrderConfirmationEmail = async (
   orderNumber: string,
   total: number,
   name?: string,
-  items?: OrderEmailItem[]
+  items?: OrderEmailItem[],
+  receiptPdf?: Buffer,
 ): Promise<void> => {
   const displayName = name || 'there';
   const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
@@ -478,6 +479,9 @@ export const sendOrderConfirmationEmail = async (
     to: email,
     subject: `Order Confirmed - #${orderNumber}`,
     html,
+    ...(receiptPdf ? {
+      attachments: [{ filename: `receipt-${orderNumber}.pdf`, content: receiptPdf }],
+    } : {}),
   });
 };
 

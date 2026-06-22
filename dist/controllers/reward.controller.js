@@ -605,10 +605,12 @@ class RewardController {
     }
     /**
      * Award points after order completion — 1 pt per ₦100 spent
+     * Guard: only runs once funds have been released to the vendor (fundsReleased=true),
+     * so points are never given for cancelled or still-in-escrow orders.
      */
     async awardOrderPoints(orderId) {
         const order = await Order_1.default.findById(orderId);
-        if (!order || order.paymentStatus !== 'completed')
+        if (!order || order.paymentStatus !== 'completed' || !order.fundsReleased)
             return;
         // Idempotency: bail if points were already awarded for this order
         const alreadyAwarded = await PointsTransaction_1.default.findOne({
