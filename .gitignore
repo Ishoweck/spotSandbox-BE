@@ -16,7 +16,10 @@ src/scripts/
 .env.development
 .env.production
 .env.test
-.claude
+
+# Claude Code
+.claude/
+
 # Logs
 logs/
 *.log
