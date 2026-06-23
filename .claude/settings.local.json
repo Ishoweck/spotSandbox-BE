@@ -87,7 +87,8 @@
       "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\YungFlash\\\\Desktop\\\\vspotApp\\\\vspotApp\" -Directory | ForEach-Object { $_.Name })",
       "Bash(echo \"EXIT:$?\")",
       "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
-      "Bash(findstr /i \"datetimepicker\\\\|date-time\\\\|moment\\\\|dayjs\")"
+      "Bash(findstr /i \"datetimepicker\\\\|date-time\\\\|moment\\\\|dayjs\")",
+      "Bash(Select-Object Name, PSIsContainer)"
     ]
   }
 }

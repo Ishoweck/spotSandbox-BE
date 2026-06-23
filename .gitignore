@@ -16,7 +16,7 @@ src/scripts/
 .env.development
 .env.production
 .env.test
-
+.claude
 # Logs
 logs/
 *.log
