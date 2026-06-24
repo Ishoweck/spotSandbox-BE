@@ -140,6 +140,15 @@ const userSchema = new Schema<IUserDocument>(
       bankCode: String,
     },
 
+    transactionPin: {
+      type: String,
+      select: false,
+    },
+    hasTransactionPin: {
+      type: Boolean,
+      default: false,
+    },
+
     outreach: {
       status: {
         type: String,

@@ -47,6 +47,16 @@ export interface IVendorProfile extends Document {
     twitter?: string;
     tiktok?: string;
   };
+  businessSurvey?: {
+    salesChannel?: string;
+    weeklyOrders?: string;
+    stockModel?: string;
+    registered?: string;
+    kycDoc?: string;
+    goal?: string;
+    dispatchTime?: string;
+    submittedAt?: Date;
+  };
   referredBy?: Types.ObjectId;
   referralRewarded: boolean;
   responseRate: number;
@@ -191,6 +201,16 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     instagram: String,
     twitter: String,
     tiktok: String,
+  },
+  businessSurvey: {
+    salesChannel: String,
+    weeklyOrders: String,
+    stockModel: String,
+    registered: String,
+    kycDoc: String,
+    goal: String,
+    dispatchTime: String,
+    submittedAt: { type: Date, default: Date.now },
   },
   referredBy: {
     type: Schema.Types.ObjectId,

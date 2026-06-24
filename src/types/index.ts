@@ -383,6 +383,9 @@ export interface IUserDocument extends Document {
     bankCode?: string;
   };
 
+  transactionPin?: string;
+  hasTransactionPin?: boolean;
+
   // Notification preferences
   notificationPreferences?: {
     pushEnabled: boolean;

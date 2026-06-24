@@ -67,6 +67,7 @@ export declare const sanitizeInput: (input: string) => string;
  */
 export declare const generateConversationId: (userId1: string, userId2: string) => string;
 export declare const escapeRegex: (str: string) => string;
+export declare const stripEmojis: (str: string) => string;
 /**
  * Calculate average rating
  */

@@ -34,6 +34,10 @@ export declare class VendorController {
      */
     uploadKYCDocuments(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
+     * Submit business survey answers
+     */
+    submitBusinessSurvey(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
      * Update payout details
      */
     updatePayoutDetails(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
@@ -48,6 +52,10 @@ export declare class VendorController {
      * Get sales analytics
      */
     getSalesAnalytics(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Get vendor earnings leaderboard
+     */
+    getVendorLeaderboard(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
      * Get all vendors (Admin only)
      */

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest, ApiResponse, UserRole, UserStatus } from '../types';
 import User from '../models/User';
+import bcrypt from 'bcryptjs';
 import Ambassador from '../models/Ambassador';
 import { Wallet } from '../models/Additional';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt';
@@ -743,6 +744,90 @@ async updateAvatar(req: AuthRequest, res: Response<ApiResponse>): Promise<void> 
       success: true,
       message: 'Password changed successfully',
     });
+  }
+
+  /**
+   * Verify transaction PIN
+   */
+  async verifyTransactionPin(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { pin } = req.body;
+
+    if (!pin || !/^\d{4}$/.test(pin)) {
+      throw new AppError('PIN must be 4 digits', 400);
+    }
+
+    const user = await User.findById(req.user?.id).select('+transactionPin');
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (!(user as any).transactionPin) {
+      throw new AppError('No transaction PIN set. Please set a PIN first.', 400);
+    }
+
+    const isMatch = await bcrypt.compare(pin, (user as any).transactionPin);
+    if (!isMatch) {
+      throw new AppError('Incorrect PIN', 400);
+    }
+
+    res.json({ success: true, message: 'PIN verified' });
+  }
+
+  /**
+   * Verify current password (used before sensitive operations like PIN setup)
+   */
+  async verifyPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { password } = req.body;
+
+    if (!password) {
+      throw new AppError('Password is required', 400);
+    }
+
+    const user = await User.findById(req.user?.id).select('+password');
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      throw new AppError('Incorrect password', 400);
+    }
+
+    res.json({ success: true, message: 'Password verified' });
+  }
+
+  /**
+   * Set transaction PIN
+   */
+  async setTransactionPin(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { currentPassword, pin } = req.body;
+
+    if (!pin || !/^\d{4}$/.test(pin)) {
+      throw new AppError('PIN must be exactly 4 digits', 400);
+    }
+
+    const user = await User.findById(req.user?.id).select('+password +transactionPin');
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    // OAuth users have no password — skip password check if they have none
+    if (user.password) {
+      if (!currentPassword) {
+        throw new AppError('Current password is required', 400);
+      }
+      const isMatch = await user.comparePassword(currentPassword);
+      if (!isMatch) {
+        throw new AppError('Incorrect password', 400);
+      }
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    (user as any).transactionPin = await bcrypt.hash(pin, salt);
+    (user as any).hasTransactionPin = true;
+    await user.save();
+
+    res.json({ success: true, message: 'Transaction PIN set successfully' });
   }
 
   /**

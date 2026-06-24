@@ -123,6 +123,15 @@ router.post(
 );
 
 /**
+ * POST /api/v1/vendor/profile/survey
+ * Submit business onboarding survey
+ */
+router.post(
+  '/profile/survey',
+  asyncHandler(vendorController.submitBusinessSurvey.bind(vendorController))
+);
+
+/**
  * PUT /api/v1/vendor/profile
  * Update vendor profile
  */
@@ -189,6 +198,17 @@ router.get(
   '/analytics',
   authorize(UserRole.VENDOR, UserRole.ADMIN, UserRole.SUPER_ADMIN),
   asyncHandler(vendorController.getSalesAnalytics.bind(vendorController))
+);
+
+/**
+ * GET /api/v1/vendor/leaderboard
+ * Get vendor earnings leaderboard
+ * Query: ?period=month|alltime&metric=revenue|orders&limit=20
+ */
+router.get(
+  '/leaderboard',
+  authorize(UserRole.VENDOR, UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  asyncHandler(vendorController.getVendorLeaderboard.bind(vendorController))
 );
 
 // ============================================================

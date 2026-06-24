@@ -45,6 +45,16 @@ export interface IVendorProfile extends Document {
         twitter?: string;
         tiktok?: string;
     };
+    businessSurvey?: {
+        salesChannel?: string;
+        weeklyOrders?: string;
+        stockModel?: string;
+        registered?: string;
+        kycDoc?: string;
+        goal?: string;
+        dispatchTime?: string;
+        submittedAt?: Date;
+    };
     referredBy?: Types.ObjectId;
     referralRewarded: boolean;
     responseRate: number;

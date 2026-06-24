@@ -80,5 +80,8 @@ router.get('/me', authenticate, asyncHandler(authController.getMe.bind(authContr
 router.put('/profile', authenticate, asyncHandler(authController.updateProfile.bind(authController)));
 router.put('/avatar', authenticate, asyncHandler(authController.updateAvatar.bind(authController)));
 router.put('/change-password', authenticate, asyncHandler(authController.changePassword.bind(authController)));
+router.post('/verify-password', authenticate, asyncHandler(authController.verifyPassword.bind(authController)));
+router.post('/verify-transaction-pin', authenticate, asyncHandler(authController.verifyTransactionPin.bind(authController)));
+router.post('/set-transaction-pin', authenticate, asyncHandler(authController.setTransactionPin.bind(authController)));
 
 export default router;

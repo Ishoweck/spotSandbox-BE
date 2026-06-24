@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authController = exports.AuthController = void 0;
 const types_1 = require("../types");
 const User_1 = __importDefault(require("../models/User"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const Ambassador_1 = __importDefault(require("../models/Ambassador"));
 const Additional_1 = require("../models/Additional");
 const jwt_1 = require("../utils/jwt");
@@ -670,6 +671,73 @@ class AuthController {
             success: true,
             message: 'Password changed successfully',
         });
+    }
+    /**
+     * Verify transaction PIN
+     */
+    async verifyTransactionPin(req, res) {
+        const { pin } = req.body;
+        if (!pin || !/^\d{4}$/.test(pin)) {
+            throw new error_1.AppError('PIN must be 4 digits', 400);
+        }
+        const user = await User_1.default.findById(req.user?.id).select('+transactionPin');
+        if (!user) {
+            throw new error_1.AppError('User not found', 404);
+        }
+        if (!user.transactionPin) {
+            throw new error_1.AppError('No transaction PIN set. Please set a PIN first.', 400);
+        }
+        const isMatch = await bcryptjs_1.default.compare(pin, user.transactionPin);
+        if (!isMatch) {
+            throw new error_1.AppError('Incorrect PIN', 400);
+        }
+        res.json({ success: true, message: 'PIN verified' });
+    }
+    /**
+     * Verify current password (used before sensitive operations like PIN setup)
+     */
+    async verifyPassword(req, res) {
+        const { password } = req.body;
+        if (!password) {
+            throw new error_1.AppError('Password is required', 400);
+        }
+        const user = await User_1.default.findById(req.user?.id).select('+password');
+        if (!user) {
+            throw new error_1.AppError('User not found', 404);
+        }
+        const isMatch = await user.comparePassword(password);
+        if (!isMatch) {
+            throw new error_1.AppError('Incorrect password', 400);
+        }
+        res.json({ success: true, message: 'Password verified' });
+    }
+    /**
+     * Set transaction PIN
+     */
+    async setTransactionPin(req, res) {
+        const { currentPassword, pin } = req.body;
+        if (!pin || !/^\d{4}$/.test(pin)) {
+            throw new error_1.AppError('PIN must be exactly 4 digits', 400);
+        }
+        const user = await User_1.default.findById(req.user?.id).select('+password +transactionPin');
+        if (!user) {
+            throw new error_1.AppError('User not found', 404);
+        }
+        // OAuth users have no password — skip password check if they have none
+        if (user.password) {
+            if (!currentPassword) {
+                throw new error_1.AppError('Current password is required', 400);
+            }
+            const isMatch = await user.comparePassword(currentPassword);
+            if (!isMatch) {
+                throw new error_1.AppError('Incorrect password', 400);
+            }
+        }
+        const salt = await bcryptjs_1.default.genSalt(10);
+        user.transactionPin = await bcryptjs_1.default.hash(pin, salt);
+        user.hasTransactionPin = true;
+        await user.save();
+        res.json({ success: true, message: 'Transaction PIN set successfully' });
     }
     /**
      * Ambassador registration — validates invite token, creates user, activates affiliate

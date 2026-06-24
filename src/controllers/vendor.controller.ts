@@ -573,6 +573,34 @@ export class VendorController {
   }
 
   /**
+   * Submit business survey answers
+   */
+  async submitBusinessSurvey(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id });
+
+    if (!vendorProfile) {
+      throw new AppError('Vendor profile not found', 404);
+    }
+
+    const { salesChannel, weeklyOrders, stockModel, registered, kycDoc, goal, dispatchTime } = req.body;
+
+    vendorProfile.businessSurvey = {
+      salesChannel,
+      weeklyOrders,
+      stockModel,
+      registered,
+      kycDoc,
+      goal,
+      dispatchTime,
+      submittedAt: new Date(),
+    };
+
+    await vendorProfile.save();
+
+    res.status(200).json({ success: true, message: 'Survey submitted successfully' });
+  }
+
+  /**
    * Update payout details
    */
   async updatePayoutDetails(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
@@ -952,6 +980,144 @@ export class VendorController {
         salesByDate: salesData,
         topSellingProducts,
       },
+    });
+  }
+
+  /**
+   * Get vendor earnings leaderboard
+   */
+  async getVendorLeaderboard(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const period = (req.query.period as string) || 'month'; // 'month' | 'alltime'
+    const metric = (req.query.metric as string) || 'revenue'; // 'revenue' | 'orders'
+    const limit = Math.min(50, Math.max(5, parseInt(req.query.limit as string) || 20));
+
+    const dateFilter: any = {};
+    if (period === 'month') {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      dateFilter.createdAt = { $gte: thirtyDaysAgo };
+    }
+
+    const sortField = metric === 'orders' ? 'totalOrders' : 'totalRevenue';
+
+    const pipeline: any[] = [
+      { $match: { paymentStatus: 'completed', ...dateFilter } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.vendor',
+          totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          totalOrders: { $addToSet: '$_id' },
+        },
+      },
+      {
+        $addFields: { totalOrders: { $size: '$totalOrders' } },
+      },
+      { $sort: { [sortField]: -1 } },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'vendorprofiles',
+          localField: '_id',
+          foreignField: 'user',
+          as: 'profile',
+        },
+      },
+      { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'userDoc',
+        },
+      },
+      { $unwind: { path: '$userDoc', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          vendorId: '$_id',
+          totalRevenue: 1,
+          totalOrders: 1,
+          businessName: '$profile.businessName',
+          businessLogo: '$profile.businessLogo',
+          verificationStatus: '$profile.verificationStatus',
+          isPremium: '$profile.isPremium',
+          averageRating: '$profile.averageRating',
+          firstName: '$userDoc.firstName',
+          lastName: '$userDoc.lastName',
+        },
+      },
+    ];
+
+    const results = await Order.aggregate(pipeline);
+
+    const leaderboard = results.map((v, index) => ({
+      rank: index + 1,
+      vendorId: v.vendorId?.toString(),
+      businessName: v.businessName || 'Unknown Vendor',
+      businessLogo: v.businessLogo || '',
+      firstName: v.firstName || '',
+      lastName: v.lastName || '',
+      totalRevenue: v.totalRevenue || 0,
+      totalOrders: v.totalOrders || 0,
+      averageRating: v.averageRating || 0,
+      verified: v.verificationStatus === VendorVerificationStatus.VERIFIED,
+      isPremium: v.isPremium || false,
+    }));
+
+    // Find calling vendor's rank and stats
+    let myRank: number | null = null;
+    let myStats: any = null;
+
+    if (req.user?.id) {
+      const myPosition = leaderboard.findIndex(v => v.vendorId === req.user?.id);
+      if (myPosition !== -1) {
+        myRank = myPosition + 1;
+        myStats = leaderboard[myPosition];
+      } else {
+        const currentVendorId = new Types.ObjectId(req.user.id);
+        const [myRevResult] = await Order.aggregate([
+          { $match: { 'items.vendor': currentVendorId, paymentStatus: 'completed', ...dateFilter } },
+          { $unwind: '$items' },
+          { $match: { 'items.vendor': currentVendorId } },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+              orderIds: { $addToSet: '$_id' },
+            },
+          },
+          { $addFields: { totalOrders: { $size: '$orderIds' } } },
+        ]);
+
+        if (myRevResult) {
+          const [rankResult] = await Order.aggregate([
+            { $match: { paymentStatus: 'completed', ...dateFilter } },
+            { $unwind: '$items' },
+            {
+              $group: {
+                _id: '$items.vendor',
+                totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+              },
+            },
+            { $match: { totalRevenue: { $gt: myRevResult.totalRevenue } } },
+            { $count: 'ahead' },
+          ]);
+          myRank = (rankResult?.ahead || 0) + 1;
+          myStats = {
+            rank: myRank,
+            vendorId: req.user.id,
+            totalRevenue: myRevResult.totalRevenue,
+            totalOrders: myRevResult.totalOrders,
+          };
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Leaderboard fetched successfully',
+      data: { leaderboard, myRank, myStats, period, metric },
     });
   }
 

@@ -74,5 +74,8 @@ router.get('/me', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller
 router.put('/profile', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.updateProfile.bind(auth_controller_1.authController)));
 router.put('/avatar', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.updateAvatar.bind(auth_controller_1.authController)));
 router.put('/change-password', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.changePassword.bind(auth_controller_1.authController)));
+router.post('/verify-password', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.verifyPassword.bind(auth_controller_1.authController)));
+router.post('/verify-transaction-pin', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.verifyTransactionPin.bind(auth_controller_1.authController)));
+router.post('/set-transaction-pin', auth_1.authenticate, (0, error_1.asyncHandler)(auth_controller_1.authController.setTransactionPin.bind(auth_controller_1.authController)));
 exports.default = router;
 //# sourceMappingURL=auth.routes.js.map

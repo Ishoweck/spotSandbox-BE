@@ -7,7 +7,7 @@ import VendorProfile from '../models/VendorProfile';
 import User from '../models/User';
 import Groq from 'groq-sdk';
 import { AppError } from '../middleware/error';
-import { getPaginationMeta, generateSlug, generateSKU, escapeRegex } from '../utils/helpers';
+import { getPaginationMeta, generateSlug, generateSKU, escapeRegex, stripEmojis } from '../utils/helpers';
 import { uploadMultipleToCloudinary, uploadDigitalFileToCloudinary, uploadToCloudinary } from '../utils/cloudinary';
 import { notificationService } from '../services/notification.service';
 
@@ -59,6 +59,10 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
     if (productData.quantity !== undefined && productData.quantity < 0) {
       throw new AppError('Quantity cannot be negative', 400);
     }
+
+    // Strip emojis from text fields
+    if (productData.name) productData.name = stripEmojis(productData.name);
+    if (productData.description) productData.description = stripEmojis(productData.description);
 
     // Generate slug and SKU
     productData.slug = generateSlug(productData.name);
@@ -1018,6 +1022,9 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
         ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
         : undefined;
     }
+
+    if (req.body.name) req.body.name = stripEmojis(req.body.name);
+    if (req.body.description) req.body.description = stripEmojis(req.body.description);
 
     Object.assign(product, req.body);
     await product.save();

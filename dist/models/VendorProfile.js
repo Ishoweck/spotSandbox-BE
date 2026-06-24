@@ -153,6 +153,16 @@ const vendorProfileSchema = new mongoose_1.Schema({
         twitter: String,
         tiktok: String,
     },
+    businessSurvey: {
+        salesChannel: String,
+        weeklyOrders: String,
+        stockModel: String,
+        registered: String,
+        kycDoc: String,
+        goal: String,
+        dispatchTime: String,
+        submittedAt: { type: Date, default: Date.now },
+    },
     referredBy: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'User',

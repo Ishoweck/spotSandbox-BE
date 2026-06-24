@@ -134,6 +134,14 @@ const userSchema = new mongoose_1.Schema({
         accountName: String,
         bankCode: String,
     },
+    transactionPin: {
+        type: String,
+        select: false,
+    },
+    hasTransactionPin: {
+        type: Boolean,
+        default: false,
+    },
     outreach: {
         status: {
             type: String,

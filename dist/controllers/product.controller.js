@@ -83,6 +83,11 @@ class ProductController {
             if (productData.quantity !== undefined && productData.quantity < 0) {
                 throw new error_1.AppError('Quantity cannot be negative', 400);
             }
+            // Strip emojis from text fields
+            if (productData.name)
+                productData.name = (0, helpers_1.stripEmojis)(productData.name);
+            if (productData.description)
+                productData.description = (0, helpers_1.stripEmojis)(productData.description);
             // Generate slug and SKU
             productData.slug = (0, helpers_1.generateSlug)(productData.name);
             if (!productData.sku) {
@@ -901,6 +906,10 @@ class ProductController {
                 ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
                 : undefined;
         }
+        if (req.body.name)
+            req.body.name = (0, helpers_1.stripEmojis)(req.body.name);
+        if (req.body.description)
+            req.body.description = (0, helpers_1.stripEmojis)(req.body.description);
         Object.assign(product, req.body);
         await product.save();
         // Notify wishlisted users about price drop

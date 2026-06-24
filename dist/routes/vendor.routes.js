@@ -78,6 +78,11 @@ router.get('/profile', (0, error_1.asyncHandler)(vendor_controller_1.vendorContr
  */
 router.post('/profile/set-referrer', (0, error_1.asyncHandler)(vendor_controller_1.setVendorReferrer));
 /**
+ * POST /api/v1/vendor/profile/survey
+ * Submit business onboarding survey
+ */
+router.post('/profile/survey', (0, error_1.asyncHandler)(vendor_controller_1.vendorController.submitBusinessSurvey.bind(vendor_controller_1.vendorController)));
+/**
  * PUT /api/v1/vendor/profile
  * Update vendor profile
  */
@@ -118,6 +123,12 @@ router.get('/dashboard', (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.
  * Query: ?period=7days|30days|90days|1year
  */
 router.get('/analytics', (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(vendor_controller_1.vendorController.getSalesAnalytics.bind(vendor_controller_1.vendorController)));
+/**
+ * GET /api/v1/vendor/leaderboard
+ * Get vendor earnings leaderboard
+ * Query: ?period=month|alltime&metric=revenue|orders&limit=20
+ */
+router.get('/leaderboard', (0, auth_1.authorize)(types_1.UserRole.VENDOR, types_1.UserRole.ADMIN, types_1.UserRole.SUPER_ADMIN), (0, error_1.asyncHandler)(vendor_controller_1.vendorController.getVendorLeaderboard.bind(vendor_controller_1.vendorController)));
 // ============================================================
 // ADMIN ROUTES
 // ============================================================

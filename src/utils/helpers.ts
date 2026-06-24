@@ -158,6 +158,13 @@ export const generateConversationId = (userId1: string, userId2: string): string
 export const escapeRegex = (str: string): string =>
   str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+export const stripEmojis = (str: string): string =>
+  str
+    .replace(/\p{Emoji_Presentation}/gu, '')
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 /**
  * Calculate average rating
  */

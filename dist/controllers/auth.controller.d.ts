@@ -63,6 +63,18 @@ export declare class AuthController {
      */
     changePassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
     /**
+     * Verify transaction PIN
+     */
+    verifyTransactionPin(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Verify current password (used before sensitive operations like PIN setup)
+     */
+    verifyPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
+     * Set transaction PIN
+     */
+    setTransactionPin(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
+    /**
      * Ambassador registration — validates invite token, creates user, activates affiliate
      */
     ambassadorRegister(req: AuthRequest, res: Response<ApiResponse>): Promise<void>;
