@@ -22,6 +22,7 @@
     "migrate": "npx ts-node src/scripts/migrate-from-old-db.ts",
     "patch:pending": "npx ts-node src/scripts/patch-migrated-to-pending.ts",
     "seed:vendors": "npx ts-node src/scripts/seedVendors.ts",
+    "seed:all-states": "npx ts-node src/scripts/seedAllStates.ts",
     "backfill:ratings": "npx ts-node src/scripts/backfillVendorRatings.ts",
     "backfill:addresses": "npx ts-node src/scripts/backfillVendorAddresses.ts",
     "seed:notif-templates": "npx ts-node scripts/seed-notification-templates.ts"

@@ -378,4 +378,27 @@ router.put('/app-version', authorize(SA), updateAppVersionConfig);
 // ================================================================
 router.post('/ai/suggest', authorize(...supportAdmins), asyncHandler(aiChatController.adminSuggest.bind(aiChatController)));
 
+// ================================================================
+// PLANS & SUBSCRIPTIONS — super admin + admin + financial
+// ================================================================
+import {
+  getPlansSettings,
+  getPlansImpact,
+  activatePlans,
+  deactivatePlans,
+  getSubscriptions as getPlanSubscriptions,
+  assignVendorPlan,
+  syncSubscriptions,
+  getVendorSubscription,
+} from '../controllers/adminPlan.controller';
+
+router.get('/plans/settings',               authorize(SA, A, FA),         getPlansSettings);
+router.get('/plans/impact',                  authorize(SA, A),              getPlansImpact);
+router.post('/plans/activate',               authorize(SA),                 activatePlans);
+router.post('/plans/deactivate',             authorize(SA),                 deactivatePlans);
+router.post('/plans/sync',                   authorize(SA, A),              syncSubscriptions);
+router.get('/plans/subscriptions',           authorize(SA, A, FA),         getPlanSubscriptions);
+router.get('/plans/vendors/:vendorId',       authorize(SA, A, FA),         getVendorSubscription);
+router.put('/plans/vendors/:vendorId',       authorize(SA, A),              assignVendorPlan);
+
 export default router;

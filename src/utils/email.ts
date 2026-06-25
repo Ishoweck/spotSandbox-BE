@@ -1359,3 +1359,179 @@ export const sendAmbassadorApprovalEmail = async (
     html,
   });
 };
+
+// ─── Plan Activation Email ────────────────────────────────────────────────────
+// Sent to free-plan vendors whose products were deactivated when plans went live
+
+export const sendPlanActivationEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+  deactivatedProducts: Array<{ name: string; id: string }>,
+  freeLimit: number
+): Promise<void> => {
+  const APP_URL = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const productRows = deactivatedProducts
+    .map(
+      p => `<tr>
+              <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#374151;">${p.name}</td>
+              <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;text-align:right;">
+                <span style="font-size:12px;background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:12px;font-weight:600;">Inactive</span>
+              </td>
+            </tr>`
+    )
+    .join('');
+
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <body style="margin:0;padding:0;background:#F9FAFB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;padding:40px 20px;">
+      <tr><td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr><td style="background:linear-gradient(135deg,#CC3366,#F97316);padding:32px 40px;">
+            ${emailLogo}
+            <h1 style="margin:20px 0 0;font-size:22px;font-weight:800;color:#ffffff;">Important Update About Your Store</h1>
+          </td></tr>
+
+          <!-- Body -->
+          <tr><td style="padding:36px 40px;">
+            <p style="font-size:15px;color:#374151;margin:0 0 20px;">Hi <strong>${firstName}</strong>,</p>
+            <p style="font-size:15px;color:#374151;margin:0 0 20px;">
+              We've introduced <strong>subscription plans</strong> on VendorSpot to give vendors more tools, visibility, and features as you grow.
+            </p>
+            <p style="font-size:15px;color:#374151;margin:0 0 20px;">
+              As part of the <strong>Free Plan</strong>, you can keep up to <strong>${freeLimit} active product listings</strong>.
+              Because your store (<strong>${businessName}</strong>) had more than ${freeLimit} active products,
+              we've temporarily set the following ${deactivatedProducts.length} product${deactivatedProducts.length !== 1 ? 's' : ''} to <em>inactive</em>:
+            </p>
+
+            <!-- Products table -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+              <thead>
+                <tr>
+                  <th style="text-align:left;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:8px;border-bottom:2px solid #E5E7EB;">Product Name</th>
+                  <th style="text-align:right;font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:8px;border-bottom:2px solid #E5E7EB;">Status</th>
+                </tr>
+              </thead>
+              <tbody>${productRows}</tbody>
+            </table>
+
+            <p style="font-size:14px;color:#374151;margin:0 0 28px;">
+              Your top ${freeLimit} products (by sales) remain active. To reactivate all your products and unlock unlimited listings,
+              upgrade to the <strong>Growth</strong> or <strong>Pro</strong> plan.
+            </p>
+
+            <!-- CTA Buttons -->
+            <table cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+              <tr>
+                <td style="padding-right:12px;">
+                  <a href="${APP_URL}/vendor/upgrade" style="display:inline-block;background:#CC3366;color:#ffffff;font-weight:700;font-size:14px;padding:14px 28px;border-radius:10px;text-decoration:none;">Upgrade My Plan</a>
+                </td>
+                <td>
+                  <a href="${APP_URL}/vendor/products" style="display:inline-block;background:#F3F4F6;color:#374151;font-weight:600;font-size:14px;padding:14px 28px;border-radius:10px;text-decoration:none;">Manage Products</a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="font-size:13px;color:#6B7280;margin:0;">
+              If you have questions, reply to this email or contact us at
+              <a href="mailto:support@vendorspotng.com" style="color:#CC3366;">support@vendorspotng.com</a>.
+            </p>
+          </td></tr>
+
+          <!-- Footer -->
+          <tr><td style="background:#F9FAFB;padding:24px 40px;text-align:center;border-top:1px solid #E5E7EB;">
+            <p style="font-size:12px;color:#9CA3AF;margin:0;">© ${new Date().getFullYear()} VendorSpot. All rights reserved.</p>
+          </td></tr>
+
+        </table>
+      </td></tr>
+    </table>
+  </body>
+  </html>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Action Required: Your VendorSpot plan limits are now active`,
+    html,
+  });
+};
+
+// ─── Plan Assigned Email ──────────────────────────────────────────────────────
+// Sent when an admin manually upgrades or changes a vendor's plan
+
+export const sendPlanAssignedEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+  newPlan: string,
+  previousPlan: string,
+  reason?: string
+): Promise<void> => {
+  const APP_URL = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+
+  const planLabels: Record<string, { name: string; color: string }> = {
+    free:   { name: 'Free Plan',   color: '#F59E0B' },
+    growth: { name: 'Growth Plan', color: '#3B82F6' },
+    pro:    { name: 'Pro Plan',    color: '#10B981' },
+  };
+
+  const { name: planName, color: planColor } = planLabels[newPlan] || { name: newPlan, color: '#CC3366' };
+  const isUpgrade = newPlan !== 'free' && previousPlan === 'free';
+
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <body style="margin:0;padding:0;background:#F9FAFB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;padding:40px 20px;">
+      <tr><td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <tr><td style="background:linear-gradient(135deg,${planColor},#CC3366);padding:32px 40px;">
+            ${emailLogo}
+            <h1 style="margin:20px 0 0;font-size:22px;font-weight:800;color:#ffffff;">
+              ${isUpgrade ? '🚀 Your Plan Has Been Upgraded!' : 'Your VendorSpot Plan Has Changed'}
+            </h1>
+          </td></tr>
+
+          <tr><td style="padding:36px 40px;">
+            <p style="font-size:15px;color:#374151;margin:0 0 20px;">Hi <strong>${firstName}</strong>,</p>
+            <p style="font-size:15px;color:#374151;margin:0 0 20px;">
+              Your store <strong>${businessName}</strong> has been moved to the
+              <span style="background:${planColor}22;color:${planColor};font-weight:700;padding:3px 10px;border-radius:12px;">${planName}</span>.
+            </p>
+            ${reason ? `<p style="font-size:14px;color:#6B7280;background:#F9FAFB;border-left:3px solid ${planColor};padding:12px 16px;border-radius:4px;margin:0 0 24px;">Note: ${reason}</p>` : ''}
+            ${isUpgrade ? `
+            <p style="font-size:15px;color:#374151;margin:0 0 24px;">
+              You now have access to all <strong>${planName}</strong> features — including unlimited product listings,
+              a reduced commission rate, and more. Log in to explore your new capabilities.
+            </p>` : ''}
+
+            <a href="${APP_URL}/vendor/dashboard" style="display:inline-block;background:${planColor};color:#ffffff;font-weight:700;font-size:14px;padding:14px 32px;border-radius:10px;text-decoration:none;margin-bottom:28px;">
+              Go to My Dashboard
+            </a>
+
+            <p style="font-size:13px;color:#6B7280;margin:0;">
+              Questions? Email us at <a href="mailto:support@vendorspotng.com" style="color:#CC3366;">support@vendorspotng.com</a>.
+            </p>
+          </td></tr>
+
+          <tr><td style="background:#F9FAFB;padding:24px 40px;text-align:center;border-top:1px solid #E5E7EB;">
+            <p style="font-size:12px;color:#9CA3AF;margin:0;">© ${new Date().getFullYear()} VendorSpot. All rights reserved.</p>
+          </td></tr>
+
+        </table>
+      </td></tr>
+    </table>
+  </body>
+  </html>`;
+
+  await sendEmail({
+    to: email,
+    subject: isUpgrade ? `🚀 Your ${planName} is now active on VendorSpot` : `Your VendorSpot plan has been updated`,
+    html,
+  });
+};

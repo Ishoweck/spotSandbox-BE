@@ -11,6 +11,7 @@ import { asyncHandler } from '../middleware/error';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validation';
 import { UserRole } from '../types';
+import planService from '../services/plan.service';
 
 const router = Router();
 
@@ -178,6 +179,20 @@ router.put(
 // ============================================================
 // ⭐ DASHBOARD AND ANALYTICS (Vendor only)
 // ============================================================
+
+/**
+ * GET /api/v1/vendor/plan
+ * Get current vendor's plan info + enforcement status (for mobile app)
+ */
+router.get(
+  '/plan',
+  authorize(UserRole.VENDOR, UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).user?.id;
+    const data = await planService.getVendorPlanForUser(userId);
+    res.json({ success: true, data });
+  })
+);
 
 /**
  * GET /api/v1/vendor/dashboard
