@@ -152,6 +152,29 @@ import {
   updateApplication as updateAmbassador,
   deleteApplication as deleteAmbassador,
 } from '../controllers/ambassador.controller';
+import {
+  getExpenseSummary,
+  listExpenses,
+  getExpense,
+  createExpense,
+  updateExpense,
+  updateExpenseStatus,
+  deleteExpense,
+  exportExpensesPDF,
+  exportExpensesCSV,
+  uploadExpenseEvidence,
+  deleteExpenseEvidence,
+} from '../controllers/expense.controller';
+import multer from 'multer';
+
+const evidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only images and PDFs are allowed'));
+  },
+});
 
 const router = Router();
 
@@ -256,6 +279,21 @@ router.get('/finance/transactions', authorize(SA, A, FA), getAllTransactions);
 router.get('/finance/transactions/:transactionId', authorize(SA, A, FA), getTransactionById);
 router.get('/finance/withdrawals', authorize(SA, A, FA), getPendingWithdrawals);
 router.post('/finance/withdrawals/:walletId/:transactionId/process', authorize(SA, FA), processWithdrawal);
+
+// ================================================================
+// COMPANY EXPENSE TRACKING — financial + super admin
+// ================================================================
+router.get('/expenses/summary',    authorize(SA, FA),        asyncHandler(getExpenseSummary));
+router.get('/expenses/export/pdf', authorize(SA, FA),        asyncHandler(exportExpensesPDF));
+router.get('/expenses/export/csv', authorize(SA, FA),        asyncHandler(exportExpensesCSV));
+router.get('/expenses',            authorize(SA, FA),        asyncHandler(listExpenses));
+router.post('/expenses',           authorize(SA, FA),        asyncHandler(createExpense));
+router.get('/expenses/:id',        authorize(SA, FA),        asyncHandler(getExpense));
+router.put('/expenses/:id',        authorize(SA, FA),        asyncHandler(updateExpense));
+router.patch('/expenses/:id/status',   authorize(SA, FA),   asyncHandler(updateExpenseStatus));
+router.post('/expenses/:id/evidence',  authorize(SA, FA),   evidenceUpload.single('file'), asyncHandler(uploadExpenseEvidence));
+router.delete('/expenses/:id/evidence', authorize(SA, FA),  asyncHandler(deleteExpenseEvidence));
+router.delete('/expenses/:id',         authorize(SA),        asyncHandler(deleteExpense));
 
 // ================================================================
 // REVIEW MANAGEMENT — general + content

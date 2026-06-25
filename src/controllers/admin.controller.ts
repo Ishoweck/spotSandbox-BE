@@ -44,6 +44,7 @@ import { logger } from '../utils/logger';
 import bcrypt from 'bcryptjs';
 import AppVersion from '../models/AppVersion';
 import { orderController } from './order.controller';
+import CompanyExpense, { ExpenseStatus } from '../models/CompanyExpense';
 
 // ================================================================
 // DASHBOARD & ANALYTICS
@@ -2552,6 +2553,8 @@ export const getFinancialOverview = asyncHandler(
       vCreditsCirculation,
       thisMonthRevenue,
       lastMonthRevenue,
+      buyerProtectionFeeResult,
+      expensesFacet,
     ] = await Promise.all([
       Order.aggregate([
         { $match: { paymentStatus: PaymentStatus.COMPLETED, total: { $gte: 0 } } },
@@ -2613,6 +2616,20 @@ export const getFinancialOverview = asyncHandler(
         { $match: { paymentStatus: PaymentStatus.COMPLETED, createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth }, total: { $gte: 0 } } },
         { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
       ]),
+      // Buyer protection fees (service charges collected from buyers)
+      Order.aggregate([
+        { $match: { paymentStatus: PaymentStatus.COMPLETED, serviceCharge: { $gt: 0 } } },
+        { $group: { _id: null, total: { $sum: '$serviceCharge' } } },
+      ]),
+      // Company expense summary
+      CompanyExpense.aggregate([
+        { $facet: {
+          totalPaid:     [{ $match: { status: ExpenseStatus.PAID } }, { $group: { _id: null, total: { $sum: '$amount' } } }],
+          thisMonthPaid: [{ $match: { status: ExpenseStatus.PAID, paidAt: { $gte: startOfThisMonth } } }, { $group: { _id: null, total: { $sum: '$amount' } } }],
+          pending:       [{ $match: { status: ExpenseStatus.PENDING } }, { $count: 'count' }],
+          overdue:       [{ $match: { status: ExpenseStatus.OVERDUE } }, { $count: 'count' }],
+        }},
+      ]),
     ]);
 
     const totalRev = totalRevenue[0]?.total || 0;
@@ -2625,12 +2642,15 @@ export const getFinancialOverview = asyncHandler(
     const lastMonthRev = lastMonthRevenue[0]?.total || 0;
     const monthGrowth = lastMonthRev > 0 ? +((( thisMonthRev - lastMonthRev) / lastMonthRev) * 100).toFixed(1) : null;
 
+    const expFacet = expensesFacet[0] || {};
+
     res.json({
       success: true,
       data: {
         totalRevenue: totalRev,
         netRevenue,
         totalCommissions: totalComm,
+        buyerProtectionFees: buyerProtectionFeeResult[0]?.total || 0,
         totalWithdrawals: totalWithdrawals[0]?.total || 0,
         pendingWithdrawals: {
           amount: pendingWithdrawals[0]?.total || 0,
@@ -2654,6 +2674,12 @@ export const getFinancialOverview = asyncHandler(
         thisMonth: { revenue: thisMonthRev, orders: thisMonthRevenue[0]?.count || 0 },
         lastMonth: { revenue: lastMonthRev, orders: lastMonthRevenue[0]?.count || 0 },
         monthGrowth,
+        expenses: {
+          totalPaid:     expFacet.totalPaid?.[0]?.total    || 0,
+          thisMonthPaid: expFacet.thisMonthPaid?.[0]?.total || 0,
+          pendingCount:  expFacet.pending?.[0]?.count       || 0,
+          overdueCount:  expFacet.overdue?.[0]?.count       || 0,
+        },
       },
     });
   }
@@ -4994,11 +5020,17 @@ export const getSalesReport = asyncHandler(
         { $sort: { count: -1 } },
       ]),
       Order.aggregate([
-        { $match: { ...allOrdersFilter, status: OrderStatus.REFUNDED } },
+        {
+          $match: {
+            status: OrderStatus.REFUNDED,
+            refundAmount: { $gt: 0 },
+            updatedAt: { $gte: startDateVal, $lte: endDateVal },
+          },
+        },
         {
           $group: {
             _id: null,
-            totalRefunds: { $sum: '$total' },
+            totalRefunds: { $sum: '$refundAmount' },
             refundCount: { $sum: 1 },
           },
         },

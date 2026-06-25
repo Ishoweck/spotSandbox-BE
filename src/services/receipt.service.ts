@@ -111,11 +111,7 @@ export async function generateReceiptPDF(data: ReceiptData): Promise<Buffer> {
   ];
 
   const metaRight: [string, string][] = [
-    ['Customer:',  data.customer.name],
-    ['Email:',     trunc(data.customer.email, 32)],
-    ...(data.deliveryAddress?.street ? [
-      ['Delivery:', [data.deliveryAddress.street, data.deliveryAddress.city, data.deliveryAddress.state].filter(Boolean).join(', ')] as [string, string],
-    ] : []),
+    ['Customer:',  data.customer.name.split(' ')[0]],
   ];
 
   const metaStartY = y;
@@ -170,7 +166,7 @@ export async function generateReceiptPDF(data: ReceiptData): Promise<Buffer> {
       { t: trunc(item.productName, 36),          w: colW.item,   right: false, color: DARK },
       { t: trunc(item.vendorName || '—', 20),    w: colW.vendor, right: false, color: GRAY },
       { t: String(item.quantity),                w: colW.qty,    right: true,  color: DARK },
-      { t: fmtMoney(item.price),                 w: colW.unit,   right: true,  color: PINK },
+      { t: fmtMoney(item.price),                 w: colW.unit,   right: true,  color: DARK },
       { t: fmtMoney(item.price * item.quantity), w: colW.total,  right: true,  color: DARK },
     ];
 
@@ -210,12 +206,12 @@ export async function generateReceiptPDF(data: ReceiptData): Promise<Buffer> {
   const totalLabel = 'Total';
   const totalValue = fmtMoney(data.total);
   page.drawText(totalLabel, { x: totX, y: y + 7, size: 9, font: bold, color: DARK });
-  page.drawText(totalValue, { x: valXEnd - bold.widthOfTextAtSize(totalValue, 11), y: y + 5, size: 11, font: bold, color: PINK });
+  page.drawText(totalValue, { x: valXEnd - bold.widthOfTextAtSize(totalValue, 11), y: y + 5, size: 11, font: bold, color: DARK });
   y -= 24;
 
   // ── Footer ────────────────────────────────────────────────────────────────
   y -= 20;
-  page.drawLine({ start: { x: M, y }, end: { x: PW - M, y }, thickness: 1, color: PINK });
+  page.drawLine({ start: { x: M, y }, end: { x: PW - M, y }, thickness: 1, color: rgb(0.4, 0.4, 0.4) });
   y -= 13;
   page.drawText('Thank you for shopping with Vendorspot!', { x: M, y, size: 8, font: bold, color: DARK });
   y -= 11;
