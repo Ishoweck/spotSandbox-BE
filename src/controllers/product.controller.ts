@@ -196,6 +196,18 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     if (req.query.category) filter.category = req.query.category;
     if (req.query.vendor) filter.vendor = req.query.vendor;
     if (req.query.productType) filter.productType = req.query.productType;
+    if (req.query.state) {
+      const stateRegex = new RegExp(req.query.state as string, 'i');
+      const vendorsInState = await VendorProfile.find({
+        user: { $in: activeVendorIds },
+        'businessAddress.state': stateRegex,
+      }).select('user').lean();
+      const vendorIdsInState = vendorsInState.map((v: any) => v.user);
+      filter.$or = [
+        { 'pickupAddress.state': stateRegex },
+        { vendor: { $in: vendorIdsInState } },
+      ];
+    }
     if (req.query.inStock !== undefined) {
       filter.quantity = req.query.inStock === 'true' ? { $gt: 0 } : 0;
     }
@@ -1140,6 +1152,7 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       specifications: specifications,
       requiresLicense: product.requiresLicense || false,
       licenseType: product.licenseType,
+      pickupAddress: product.pickupAddress || null,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt
     };
