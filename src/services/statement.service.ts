@@ -50,9 +50,9 @@ const cap = (s: string) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.
 
 function statusColour(status: string): Color {
   const s = (status || '').toLowerCase();
-  if (['delivered', 'completed', 'resolved_full_refund', 'resolved_partial_refund', 'credit', 'close'].includes(s)) return GREEN;
-  if (['cancelled', 'rejected', 'failed', 'debit', 'canceled'].includes(s)) return RED;
-  if (['pending', 'open', 'under_review', 'processing', 'confirmed'].includes(s)) return AMBER;
+  if (['delivered', 'completed', 'resolved_full_refund', 'resolved_partial_refund', 'credit', 'close', 'confirmed'].includes(s)) return GREEN;
+  if (['cancelled', 'rejected', 'failed', 'debit', 'canceled', 'open'].includes(s)) return RED;
+  if (['pending', 'under_review', 'processing'].includes(s)) return AMBER;
   return GRAY;
 }
 
@@ -107,7 +107,7 @@ export async function gatherStatementData(
 
   const [vendorUser, vendorProfile, rawOrders, wallet, disputes] = await Promise.all([
     User.findById(vid).select('firstName lastName email').lean(),
-    VendorProfile.findOne({ user: vid }).select('storeName businessAddress').lean(),
+    VendorProfile.findOne({ user: vid }).select('businessName businessAddress').lean(),
     Order.find({
       'vendorShipments.vendor': vid,
       createdAt: { $gte: startDate, $lte: end },
@@ -174,7 +174,7 @@ export async function gatherStatementData(
     vendor: {
       name,
       email:     (vendorUser as any)?.email || '',
-      storeName: (vendorProfile as any)?.storeName || name,
+      storeName: (vendorProfile as any)?.businessName || name,
       location,
     },
     period:  { start: startDate, end },
@@ -421,6 +421,57 @@ export async function generateStatementPDF(data: StatementData): Promise<Buffer>
     cur.pg.drawText(msg, { x: M + 10, y: cur.y - 14, size: 8, font, color: GRAY });
     cur.y -= 20;
   }
+
+  // ── Status / Transaction tab pills (single side-by-side row) ────────────
+  const PILL_H   = 14;
+  const PILL_PAD = 5;
+  const PILL_GAP = 4;
+  const PILL_FS  = 6.5;
+
+  function drawTabPill(label: string, count: number, px: number, py: number, col: Color): number {
+    const txt = `${label} (${count})`;
+    const tw  = font.widthOfTextAtSize(txt, PILL_FS);
+    const pw  = tw + PILL_PAD * 2;
+    cur.pg.drawRectangle({ x: px, y: py - PILL_H, width: pw, height: PILL_H, color: LT_GRAY, borderColor: BORDER, borderWidth: 0.5 });
+    cur.pg.drawText(txt, { x: px + PILL_PAD, y: py - 10, size: PILL_FS, font, color: col });
+    return pw + PILL_GAP;
+  }
+
+  // Count orders by status
+  const oCount: Record<string, number> = {};
+  data.orders.forEach(o => {
+    const s = (o.status || 'pending').toLowerCase();
+    oCount[s] = (oCount[s] || 0) + 1;
+  });
+
+  // Count transactions by purpose
+  const tCount: Record<string, number> = {};
+  data.txns.forEach(t => {
+    const p = (t.purpose || t.type || '').toLowerCase();
+    tCount[p] = (tCount[p] || 0) + 1;
+  });
+
+  // Single row: Orders group on the left, Transactions group immediately after
+  need(PILL_H + 4);
+  const tabRowY = cur.y;
+
+  cur.pg.drawText('Orders', { x: M, y: tabRowY - 10, size: PILL_FS, font: bold, color: GRAY });
+  let pillX = M + font.widthOfTextAtSize('Orders', PILL_FS) + 6;
+  pillX += drawTabPill('Pending',   oCount['pending']   || 0, pillX, tabRowY, AMBER);
+  pillX += drawTabPill('Confirmed', oCount['confirmed'] || 0, pillX, tabRowY, GREEN);
+  pillX += drawTabPill('Cancelled', (oCount['cancelled'] || 0) + (oCount['canceled'] || 0), pillX, tabRowY, RED);
+
+  pillX += 16;
+
+  cur.pg.drawText('Transactions', { x: pillX, y: tabRowY - 10, size: PILL_FS, font: bold, color: GRAY });
+  pillX += font.widthOfTextAtSize('Transactions', PILL_FS) + 6;
+  pillX += drawTabPill('Affiliate',  (tCount['commission'] || 0) + (tCount['affiliate'] || 0), pillX, tabRowY, PINK);
+  pillX += drawTabPill('Withdrawal', tCount['withdrawal'] || 0, pillX, tabRowY, RED);
+  pillX += drawTabPill('Refund',     tCount['refund']     || 0, pillX, tabRowY, AMBER);
+  pillX += drawTabPill('VCredit',    (tCount['reward'] || 0) + (tCount['vcredit'] || 0), pillX, tabRowY, GREEN);
+  void drawTabPill('Dispute',        data.disputes.length,     pillX, tabRowY, GRAY);
+
+  cur.y -= PILL_H + 20;
 
   // ── Orders ───────────────────────────────────────────────────────────────
   sectionTitle('ALL ORDERS IN PERIOD', data.orders.length);
