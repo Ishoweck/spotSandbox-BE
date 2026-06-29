@@ -16,16 +16,19 @@ export class WebhookController {
     logger.info('📨 SHIPBUBBLE WEBHOOK RECEIVED');
     logger.info('📨 ============================================');
 
-    // Verify webhook authenticity using shared secret
+    // Verify webhook authenticity — fail-closed: reject if secret not configured
     const webhookSecret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
-    if (webhookSecret) {
-      const incoming = req.headers['x-shipbubble-signature'] || req.headers['authorization'];
-      const expected = `Bearer ${webhookSecret}`;
-      if (!incoming || incoming !== expected) {
-        logger.warn('🚫 ShipBubble webhook rejected — invalid signature');
-        res.status(401).json({ success: false, message: 'Unauthorized' });
-        return;
-      }
+    if (!webhookSecret) {
+      logger.error('🚫 SHIPBUBBLE_WEBHOOK_SECRET not configured — rejecting webhook');
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+    const incoming = req.headers['x-shipbubble-signature'] || req.headers['authorization'];
+    const expected = `Bearer ${webhookSecret}`;
+    if (!incoming || !crypto.timingSafeEqual(Buffer.from(String(incoming)), Buffer.from(expected))) {
+      logger.warn('🚫 ShipBubble webhook rejected — invalid signature');
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
     }
 
     const webhookData = req.body;
@@ -371,14 +374,22 @@ export class WebhookController {
   /**
    * Get webhook history for an order
    */
-  async getWebhookHistory(req: Request, res: Response<ApiResponse>): Promise<void> {
+  async getWebhookHistory(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const { orderId } = req.params;
 
     const order = await Order.findById(orderId)
-      .select('orderNumber vendorShipments.packageStatus vendorShipments.events');
+      .select('orderNumber user vendorShipments.packageStatus vendorShipments.events');
 
     if (!order) {
       throw new AppError('Order not found', 404);
+    }
+
+    // Only the order owner or an admin can view webhook history
+    const callerId = req.user?.id;
+    const isOwner = order.user?.toString() === callerId;
+    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'super_admin';
+    if (!isOwner && !isAdmin) {
+      throw new AppError('Not authorized to view this order', 403);
     }
 
     const webhookHistory = (order as any).vendorShipments?.map((shipment: any) => ({
@@ -580,21 +591,32 @@ import { PaymentStatus } from '../types';
 import crypto from 'crypto';
 
 export async function handlePaystackWebhook(req: Request, res: Response): Promise<void> {
-  // 1. Verify HMAC-SHA512 signature — Paystack signs with your secret key
+  // 1. Verify HMAC-SHA512 signature — fail-closed: reject if secret not configured
   const rawBody: Buffer | undefined = (req as any).rawBody;
   const signature = req.headers['x-paystack-signature'] as string | undefined;
-  const secret = process.env.PAYSTACK_SECRET_KEY || '';
+  const secret = process.env.PAYSTACK_SECRET_KEY;
 
-  if (signature && secret) {
-    const expected = crypto
-      .createHmac('sha512', secret)
-      .update(rawBody || Buffer.from(JSON.stringify(req.body)))
-      .digest('hex');
-    if (expected !== signature) {
-      logger.warn('[Paystack Webhook] Invalid signature — request rejected');
-      res.status(401).json({ success: false, message: 'Unauthorized' });
-      return;
-    }
+  if (!secret) {
+    logger.error('[Paystack Webhook] PAYSTACK_SECRET_KEY not configured — rejecting request');
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+
+  if (!signature) {
+    logger.warn('[Paystack Webhook] Missing x-paystack-signature header');
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+
+  const expected = crypto
+    .createHmac('sha512', secret)
+    .update(rawBody || Buffer.from(JSON.stringify(req.body)))
+    .digest('hex');
+
+  if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+    logger.warn('[Paystack Webhook] Invalid signature — request rejected');
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
   }
 
   // Acknowledge immediately so Paystack doesn't retry due to timeout
@@ -642,6 +664,12 @@ async function _fulfillOrder(reference: string, paidAmountNaira: number, metadat
 
   if (!snapshot?.userId) {
     logger.error(`[Paystack Webhook] No snapshot/userId in metadata for ${reference}`);
+    return;
+  }
+
+  // Guard: actual amount paid must match what the client said they'd pay (tolerance ₦2 for rounding)
+  if (snapshot.total && Math.abs(paidAmountNaira - snapshot.total) > 2) {
+    logger.error(`[Paystack Webhook] Amount mismatch for ${reference}: paid ₦${paidAmountNaira}, snapshot total ₦${snapshot.total} — rejecting`);
     return;
   }
 
@@ -849,12 +877,17 @@ async function _fulfillWalletTopUp(reference: string, userId: string, amountNair
 import { flutterwaveService } from '../services/flutterwave.service';
 
 export async function handleFlutterwaveWebhook(req: Request, res: Response): Promise<void> {
-  // Flutterwave signs with a secret hash you configure in the dashboard
-  // Set FLW_SECRET_HASH in your env to match what you set in Flutterwave → Webhooks
+  // Flutterwave signs with a secret hash — fail-closed: reject if secret not configured
   const secretHash = process.env.FLW_SECRET_HASH;
   const signature = req.headers['verif-hash'] as string | undefined;
 
-  if (secretHash && signature !== secretHash) {
+  if (!secretHash) {
+    logger.error('[Flutterwave Webhook] FLW_SECRET_HASH not configured — rejecting request');
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+
+  if (!signature || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(secretHash))) {
     logger.warn('[Flutterwave Webhook] Invalid verif-hash — request rejected');
     res.status(401).json({ success: false, message: 'Unauthorized' });
     return;
@@ -922,7 +955,10 @@ export async function handleResendWebhook(req: Request, res: Response): Promise<
       return;
     }
 
-    const toSign = `${msgId}.${timestamp}.${JSON.stringify(req.body)}`;
+    // Svix computes the signature over the raw request bytes — must NOT use re-serialized JSON
+    const rawResendBody = (req as any).rawBody as Buffer | undefined;
+    const bodyStr = rawResendBody ? rawResendBody.toString('utf8') : JSON.stringify(req.body);
+    const toSign = `${msgId}.${timestamp}.${bodyStr}`;
     const expected = crypto.createHmac('sha256', secret).update(toSign).digest('base64');
     const signatures = signature.split(' ').map((s) => s.split(',')[1]);
     const valid = signatures.some((s) => s === expected);

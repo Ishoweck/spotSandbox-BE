@@ -140,6 +140,13 @@ const userSchema = new Schema<IUserDocument>(
       bankCode: String,
     },
 
+    // Incremented on logout/password-change to invalidate all existing tokens
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      select: true,
+    },
+
     transactionPin: {
       type: String,
       select: false,

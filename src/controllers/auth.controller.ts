@@ -84,10 +84,6 @@ export class AuthController {
       }
     }
 
-    // Send OTP email
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`\n🔑 [DEV] Registration OTP for ${email}: ${otpCode}\n`);
-    }
     await sendOTPEmail(email, otpCode, firstName);
 
     res.status(201).json({
@@ -175,15 +171,16 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     throw new AppError('Email already verified', 400);
   }
 
-  const otpMatch = user.otp &&
+  // Check expiry BEFORE match to avoid leaking whether the code was correct
+  if (!user.otp || (user.otp.expiresAt && user.otp.expiresAt < new Date())) {
+    throw new AppError('OTP expired. Please request a new one.', 400);
+  }
+
+  const otpMatch =
     user.otp.code.length === String(otp).length &&
     crypto.timingSafeEqual(Buffer.from(user.otp.code), Buffer.from(String(otp)));
   if (!otpMatch) {
     throw new AppError('Invalid OTP', 400);
-  }
-
-  if (user.otp.expiresAt && user.otp.expiresAt < new Date()) {
-    throw new AppError('OTP expired', 400);
   }
 
   // Update user
@@ -220,7 +217,7 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   }
 
   // Generate tokens
-  const tokens = generateTokens(user._id, user.email, user.role);
+  const tokens = generateTokens(user._id, user.email, user.role, (user as any).tokenVersion ?? 0);
 
   res.json({
     success: true,
@@ -263,10 +260,6 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     };
     await user.save();
 
-    // Send OTP email
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`\n🔑 [DEV] Resend OTP for ${email}: ${otpCode}\n`);
-    }
     await sendOTPEmail(email, otpCode, user.firstName);
 
     res.json({
@@ -372,8 +365,8 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   user.lastLogin = new Date();
   await user.save();
 
-  // Generate tokens
-  const tokens = generateTokens(user._id, user.email, user.role);
+  // Generate tokens — embed tokenVersion so logout can invalidate this session
+  const tokens = generateTokens(user._id, user.email, user.role, (user as any).tokenVersion ?? 0);
 
   res.json({
     success: true,
@@ -408,20 +401,24 @@ private async awardDailyLoginPoints(user: any): Promise<void> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Use loginStreak.lastLoginDate as the source of truth — it's what this method updates,
-  // so the guard stays consistent whether called from login() or getMe().
+  // Atomic claim: only one concurrent request wins — prevents double-awarding on parallel login/getMe calls
+  const claimed = await User.findOneAndUpdate(
+    {
+      _id: user._id,
+      $or: [
+        { 'loginStreak.lastLoginDate': null },
+        { 'loginStreak.lastLoginDate': { $lt: today } },
+      ],
+    },
+    { $set: { 'loginStreak.lastLoginDate': today } },
+    { new: false },
+  );
+  if (!claimed) return; // Another request already awarded points today
+
   const lastAwardDate = user.loginStreak?.lastLoginDate
     ? new Date(user.loginStreak.lastLoginDate)
     : null;
-
-  if (lastAwardDate) {
-    lastAwardDate.setHours(0, 0, 0, 0);
-  }
-
-  // Already awarded points today — nothing to do
-  if (lastAwardDate && lastAwardDate.getTime() === today.getTime()) {
-    return;
-  }
+  if (lastAwardDate) lastAwardDate.setHours(0, 0, 0, 0);
 
   // Initialize login streak tracking if it doesn't exist
   if (!user.loginStreak) {
@@ -504,10 +501,7 @@ private async awardDailyLoginPoints(user: any): Promise<void> {
     // Non-critical — don't block login
   }
 
-  console.log(`✅ Daily login points awarded: ${pointsAwarded} to user ${user.email} (Streak: ${newStreak})`);
-  if (streakBonus > 0) {
-    console.log(`🎉 Streak bonus: ${streakBonus} points for ${newStreak}-day streak!`);
-  }
+  logger.info('Daily login points awarded', { points: pointsAwarded, streak: newStreak, bonus: streakBonus });
 }
 
  /**
@@ -536,10 +530,6 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
 
     // Send reset email with OTP
     await sendPasswordResetEmail(email, otpCode, user.firstName);
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`\n🔐 [DEV] Password reset OTP for ${email}: ${otpCode}\n`);
-    }
 
     res.json({
       success: true,
@@ -606,7 +596,7 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
     }
 
     // Generate new tokens
-    const tokens = generateTokens(user._id, user.email, user.role);
+    const tokens = generateTokens(user._id, user.email, user.role, (user as any).tokenVersion ?? 0);
 
     res.json({
       success: true,
@@ -625,8 +615,15 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
       throw new AppError('User not found', 404);
     }
 
-    // Award daily points when the app loads with an existing session (user didn't log out/in)
-    await this.awardDailyLoginPoints(user);
+    // Award daily points when the app loads with an existing session (user didn't log out/in).
+    // Fast-path: skip the call entirely if we already awarded points today — avoids extra DB work.
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    const lastAward = user.loginStreak?.lastLoginDate ? new Date(user.loginStreak.lastLoginDate) : null;
+    if (lastAward) lastAward.setHours(0, 0, 0, 0);
+    if (!lastAward || lastAward.getTime() !== todayMidnight.getTime()) {
+      await this.awardDailyLoginPoints(user);
+    }
 
     res.json({
       success: true,
@@ -697,7 +694,18 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      data: { user },
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          avatar: user.avatar,
+          status: user.status,
+        },
+      },
     });
   }
 
@@ -708,10 +716,15 @@ async updateAvatar(req: AuthRequest, res: Response<ApiResponse>): Promise<void> 
   const user = await User.findById(req.user?.id);
   if (!user) throw new AppError('User not found', 404);
 
-  // Delete old avatar if exists
-  if (user.avatar) {
-    const oldPublicId = user.avatar.split('/').slice(-2).join('/').split('.')[0];
-    await deleteFromCloudinary(oldPublicId).catch(() => {});
+  // Delete old avatar from Cloudinary if it was hosted there
+  if (user.avatar && user.avatar.includes('cloudinary.com')) {
+    // Extract public_id: everything after /upload/(v\d+/)? up to the file extension
+    const match = user.avatar.match(/\/upload\/(?:v\d+\/)?(.+)\.[^.]+$/);
+    if (match) {
+      await deleteFromCloudinary(match[1]).catch((err: any) => {
+        logger.warn('Failed to delete old avatar from Cloudinary:', err?.message);
+      });
+    }
   }
 
   const { url } = await uploadToCloudinary(base64Image, 'avatars');
@@ -738,6 +751,7 @@ async updateAvatar(req: AuthRequest, res: Response<ApiResponse>): Promise<void> 
     }
 
     user.password = newPassword;
+    (user as any).tokenVersion = ((user as any).tokenVersion ?? 0) + 1; // invalidate all existing tokens
     await user.save();
 
     res.json({
@@ -794,6 +808,14 @@ async updateAvatar(req: AuthRequest, res: Response<ApiResponse>): Promise<void> 
     }
 
     res.json({ success: true, message: 'Password verified' });
+  }
+
+  /**
+   * Logout — increments tokenVersion to invalidate all tokens issued before this call
+   */
+  async logout(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    await User.findByIdAndUpdate(req.user?.id, { $inc: { tokenVersion: 1 } });
+    res.json({ success: true, message: 'Logged out successfully' });
   }
 
   /**

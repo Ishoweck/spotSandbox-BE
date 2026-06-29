@@ -383,6 +383,7 @@ export interface IUserDocument extends Document {
     bankCode?: string;
   };
 
+  tokenVersion?: number;
   transactionPin?: string;
   hasTransactionPin?: boolean;
 

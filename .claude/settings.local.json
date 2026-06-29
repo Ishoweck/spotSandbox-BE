@@ -89,7 +89,9 @@
       "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
       "Bash(findstr /i \"datetimepicker\\\\|date-time\\\\|moment\\\\|dayjs\")",
       "Bash(Select-Object Name, PSIsContainer)",
-      "Bash(dir \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\src\\\\components\\\\ui\")"
+      "Bash(dir \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\src\\\\components\\\\ui\")",
+      "PowerShell(git *)",
+      "Bash(Sort-Object FullName)"
     ]
   }
 }

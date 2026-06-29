@@ -24,7 +24,7 @@ export const authenticate = async (
     const decoded = verifyAccessToken(token);
 
     // Check the user is still active in the DB — catches deleted/suspended accounts
-    const user = await User.findById(decoded.id).select('status role').lean();
+    const user = await User.findById(decoded.id).select('status role tokenVersion').lean();
     if (!user) {
       res.status(401).json({
         success: false,
@@ -35,6 +35,20 @@ export const authenticate = async (
     }
 
     const { status, role } = user as any;
+
+    // Reject tokens issued before the last logout/password-change
+    // Old tokens without tokenVersion default to 0, matching new users' default — no disruption
+    const storedVersion = (user as any).tokenVersion ?? 0;
+    const tokenVersion = decoded.tokenVersion ?? 0;
+    if (tokenVersion !== storedVersion) {
+      res.status(401).json({
+        success: false,
+        message: 'Session expired. Please log in again.',
+        error: 'token_revoked',
+      });
+      return;
+    }
+
     if (status === 'inactive' || status === 'deleted') {
       res.status(401).json({
         success: false,

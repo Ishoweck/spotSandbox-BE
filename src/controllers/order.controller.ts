@@ -17,6 +17,7 @@
   import { flutterwaveService } from '../services/flutterwave.service';
   import { shipBubbleService } from '../services/shipbubble.service';
   import { sendOrderConfirmationEmail } from '../utils/email';
+  import { enqueueEmail, EmailJobType } from '../utils/email-queue';
   import { generateReceiptPDF } from '../services/receipt.service';
   import { notificationService, emitOrderStatusUpdate, emitNewOrder } from '../services/notification.service';
   import { logger } from '../utils/logger';
@@ -3471,6 +3472,37 @@
         } catch (error) {
           logger.error('Error sending refund notification:', error);
         }
+
+        // Email: refund + cancellation (with refund amount)
+        try {
+          const customerUser = await User.findById(req.user!.id).select('email firstName');
+          if (customerUser) {
+            enqueueEmail(EmailJobType.ORDER_CANCELLED, customerUser.email, customerUser.firstName, 0, {
+              orderNumber: order.orderNumber,
+              cancelReason,
+              refundAmount,
+            }).catch(() => {});
+            enqueueEmail(EmailJobType.REFUND_PROCESSED, customerUser.email, customerUser.firstName, 0, {
+              orderNumber: order.orderNumber,
+              refundAmount,
+            }).catch(() => {});
+          }
+        } catch (error) {
+          logger.error('Error enqueueing cancellation/refund emails:', error);
+        }
+      } else {
+        // Cancelled without refund — still email the customer
+        try {
+          const customerUser = await User.findById(req.user!.id).select('email firstName');
+          if (customerUser) {
+            enqueueEmail(EmailJobType.ORDER_CANCELLED, customerUser.email, customerUser.firstName, 0, {
+              orderNumber: order.orderNumber,
+              cancelReason,
+            }).catch(() => {});
+          }
+        } catch (error) {
+          logger.error('Error enqueueing cancellation email:', error);
+        }
       }
 
       // Notify vendors about cancellation
@@ -3882,6 +3914,34 @@
           customerId,
           vendorIds,
         });
+
+        // Transactional emails based on new order status
+        const customerUser = order.user as any;
+        if (customerUser?.email) {
+          if (order.status === OrderStatus.SHIPPED || order.status === OrderStatus.IN_TRANSIT) {
+            const shipment = (order as any).vendorShipments?.find((s: any) => {
+              const vid = typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString();
+              return vid === req.user?.id;
+            });
+            enqueueEmail(EmailJobType.ORDER_SHIPPED, customerUser.email, customerUser.firstName, 0, {
+              orderNumber: order.orderNumber,
+              courier: shipment?.courier,
+              trackingNumber: shipment?.trackingNumber,
+              trackingUrl: shipment?.trackingUrl,
+              estimatedDelivery: shipment?.estimatedDelivery
+                ? new Date(shipment.estimatedDelivery).toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })
+                : undefined,
+            }).catch(() => {});
+          } else if (order.status === OrderStatus.DELIVERED) {
+            enqueueEmail(EmailJobType.ORDER_DELIVERED, customerUser.email, customerUser.firstName, 0, {
+              orderNumber: order.orderNumber,
+            }).catch(() => {});
+            // Review request after 24 hours
+            enqueueEmail(EmailJobType.REVIEW_REQUEST, customerUser.email, customerUser.firstName, 24 * 60 * 60 * 1000, {
+              orderNumber: order.orderNumber,
+            }).catch(() => {});
+          }
+        }
       } catch (error) {
         logger.error('Error sending status update notification:', error);
       }

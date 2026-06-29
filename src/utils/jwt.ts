@@ -19,6 +19,7 @@ export interface TokenPayload {
   id: string;
   email: string;
   role: UserRole;
+  tokenVersion?: number;
 }
 
 export const generateAccessToken = (payload: TokenPayload): string => {
@@ -49,11 +50,12 @@ export const verifyRefreshToken = (token: string): TokenPayload => {
   }
 };
 
-export const generateTokens = (userId: Types.ObjectId, email: string, role: UserRole) => {
+export const generateTokens = (userId: Types.ObjectId, email: string, role: UserRole, tokenVersion = 0) => {
   const payload: TokenPayload = {
     id: userId.toString(),
     email,
     role,
+    tokenVersion,
   };
 
   return {

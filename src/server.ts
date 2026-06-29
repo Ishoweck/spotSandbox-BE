@@ -21,6 +21,7 @@ import { setupDailyBackup } from './utils/backup';
 import { setupOrderAutoComplete } from './utils/order-autocomplete';
 import { setupPointsExpiryReminders } from './utils/points-expiry-reminder';
 import { setupVCreditsExpiry } from './utils/vcredits-expiry';
+import { setupVendorReminders } from './utils/vendor-reminders';
 
 // Load environment variables
 dotenv.config();
@@ -94,7 +95,8 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, Postman, server-to-server)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    // Fail-closed: if ALLOWED_ORIGINS is not configured, deny all browser cross-origin requests
+    if (allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     callback(new Error(`CORS: origin ${origin} not allowed`));
@@ -201,6 +203,8 @@ server.listen(PORT, () => {
   setupPointsExpiryReminders();
   // VCredits expiry — reminders + zero-out after 60 days of inactivity
   setupVCreditsExpiry();
+  // Vendor lifecycle reminder emails (KYC, products, profile, payouts, sales, subscriptions)
+  setupVendorReminders();
 });
 
 // SET SERVER TIMEOUT

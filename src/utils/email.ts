@@ -23,6 +23,77 @@ const emailLogo = `
     </tr>
   </table>`;
 
+function wrapEmail(titleText: string, bodyHtml: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              ${emailLogo}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <h1 style="margin:0;font-size:24px;font-weight:700;color:#111111;line-height:1.3;">${titleText}</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              ${bodyHtml}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;">
+                <strong>Vendorspot</strong> — Confidence in every click.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because you're a vendor on Vendorspot.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 interface EmailOptions {
   to: string;
   subject: string;
@@ -1533,5 +1604,683 @@ export const sendPlanAssignedEmail = async (
     to: email,
     subject: isUpgrade ? `🚀 Your ${planName} is now active on VendorSpot` : `Your VendorSpot plan has been updated`,
     html,
+  });
+};
+
+// ─── Vendor Reminder Emails ───────────────────────────────────────────────────
+
+export const sendVendorKycReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const kycLink = `${frontendUrl}/vendor/kyc`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your store <strong>${businessName}</strong> is active, but you haven't uploaded your KYC documents yet.
+      Completing KYC builds buyer trust and unlocks higher selling limits.
+    </p>
+    <p style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#111111;">Accepted documents:</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+      ${['National Identity Number (NIN)', 'CAC Certificate', 'Government-issued ID Card', 'International Passport', 'Driver\'s Licence', 'Utility Bill'].map(doc => `
+      <tr>
+        <td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <span style="color:#CC3366;margin-right:8px;">&#10003;</span>${doc}
+        </td>
+      </tr>`).join('')}
+    </table>
+    <a href="${kycLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Upload KYC Documents
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Complete your KYC to build buyer trust on Vendorspot',
+    html: wrapEmail('Complete your KYC verification', body),
+  });
+};
+
+export const sendVendorKycPendingReminderEmail = async (
+  email: string,
+  firstName: string,
+): Promise<void> => {
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      We have received your KYC documents and they are currently under review. Thank you for submitting them.
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Our team typically completes KYC reviews within <strong>2–5 business days</strong>. You'll receive an email
+      as soon as your verification is approved.
+    </p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+      In the meantime, you can continue setting up your store and adding products.
+    </p>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Your KYC is under review — we\'ll update you soon',
+    html: wrapEmail('Your KYC is being reviewed', body),
+  });
+};
+
+export const sendVendorFirstProductReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const addProductLink = `${frontendUrl}/vendor/products/new`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your store <strong>${businessName}</strong> has been open for over 24 hours but you haven't added any products yet.
+    </p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Buyers can't find you until you have at least one product live. Add your first product now and start selling today.
+    </p>
+    <a href="${addProductLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Add Your First Product
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Your store is empty — add your first product now',
+    html: wrapEmail('Add your first product', body),
+  });
+};
+
+export const sendVendorFirstProductFollowupEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const addProductLink = `${frontendUrl}/vendor/products/new`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      It's been 3 days since <strong>${businessName}</strong> opened on Vendorspot and your store still has no products.
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Every day without a product is a day without sales. Even a single listing gets you in front of buyers
+      actively shopping on Vendorspot right now.
+    </p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Take 5 minutes to add your first product — we'll walk you through every step.
+    </p>
+    <a href="${addProductLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      List a Product Now
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: '3 days in — your store still has no products',
+    html: wrapEmail('Your store needs products', body),
+  });
+};
+
+export const sendVendorCompleteProfileReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+  missing: string[],
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const profileLink = `${frontendUrl}/vendor/settings`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your store <strong>${businessName}</strong> is missing a few details that buyers look for before they trust a vendor.
+    </p>
+    <p style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#111111;">Still missing:</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+      ${missing.map(item => `
+      <tr>
+        <td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <span style="color:#CC3366;margin-right:8px;">&#8594;</span>${item}
+        </td>
+      </tr>`).join('')}
+    </table>
+    <p style="margin:0 0 20px 0;font-size:14px;color:#374151;line-height:1.6;">
+      A complete profile increases buyer confidence and improves your visibility in search results.
+    </p>
+    <a href="${profileLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Complete My Profile
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Complete your store profile to attract more buyers',
+    html: wrapEmail('Your store profile is incomplete', body),
+  });
+};
+
+export const sendVendorPayoutDetailsReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const payoutLink = `${frontendUrl}/vendor/settings/payout`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your store <strong>${businessName}</strong> doesn't have a bank account linked yet.
+      Without payout details, we cannot transfer your earnings to you when you make a sale.
+    </p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+      It takes less than 2 minutes to add your account number. Do it now so your next payout goes through without delay.
+    </p>
+    <a href="${payoutLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Add Bank Account
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Add your bank account to receive payouts',
+    html: wrapEmail('You haven\'t linked a bank account yet', body),
+  });
+};
+
+export const sendVendorNoSalesReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const dashboardLink = `${frontendUrl}/vendor/dashboard`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      <strong>${businessName}</strong> has products listed but no orders yet. Here are 3 things you can do today to get your first sale:
+    </p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+      <tr>
+        <td style="padding:8px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <strong style="color:#CC3366;">1. Share your store link</strong> — post it on WhatsApp, Instagram, and Twitter to reach people who already know you.
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <strong style="color:#CC3366;">2. Enable affiliate selling</strong> — let others promote your products and earn a commission only when they make a sale for you.
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <strong style="color:#CC3366;">3. Improve your product descriptions</strong> — clear photos, detailed descriptions, and fair prices convert more browsers into buyers.
+        </td>
+      </tr>
+    </table>
+    <a href="${dashboardLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Go to My Dashboard
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'You have products but no sales yet — here\'s what to do',
+    html: wrapEmail('Let\'s get you your first order', body),
+  });
+};
+
+export const sendVendorPendingOrderReminderEmail = async (
+  email: string,
+  firstName: string,
+  orderNumber: string,
+  itemCount: number,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const ordersLink = `${frontendUrl}/vendor/orders`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Order <strong>#${orderNumber}</strong> (${itemCount} item${itemCount !== 1 ? 's' : ''}) has been waiting for over 24 hours without being processed.
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Slow fulfilment affects your trust score and can lead to buyer cancellations. Please confirm and process this order as soon as possible.
+    </p>
+    <div style="background:#fff3f6;border-left:4px solid #CC3366;padding:12px 16px;border-radius:4px;margin-bottom:20px;">
+      <p style="margin:0;font-size:13px;color:#CC3366;font-weight:600;">
+        Unprocessed orders for more than 48 hours may result in automatic cancellation and a negative impact on your store rating.
+      </p>
+    </div>
+    <a href="${ordersLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Process Order Now
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Urgent: Order #${orderNumber} has been waiting 24+ hours`,
+    html: wrapEmail('You have a pending order', body),
+  });
+};
+
+export const sendVendorEnableAffiliateReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const productsLink = `${frontendUrl}/vendor/products`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Did you know that Vendorspot affiliates can promote <strong>${businessName}'s</strong> products and drive sales for you?
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Here's how it works: when you enable affiliate selling on a product, affiliates share your product links
+      with their audience. You only pay a commission when they actually make a sale — no upfront cost, no risk.
+    </p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+      ${['Affiliates bring you customers you\'d never reach on your own', 'You set the commission percentage — you stay in control', 'More promoters means more visibility and more orders'].map(item => `
+      <tr>
+        <td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <span style="color:#CC3366;margin-right:8px;">&#10003;</span>${item}
+        </td>
+      </tr>`).join('')}
+    </table>
+    <a href="${productsLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Enable Affiliate Selling
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Let affiliates sell your products for you',
+    html: wrapEmail('Grow your sales with affiliate selling', body),
+  });
+};
+
+export const sendVendorShareStoreReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+  storeLink: string,
+): Promise<void> => {
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      <strong>${businessName}</strong> has products live on Vendorspot but hasn't made a sale yet.
+      The fastest way to get your first order is to share your store link with people who already trust you.
+    </p>
+    <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+      <p style="margin:0 0 8px 0;font-size:12px;font-weight:700;color:#111111;letter-spacing:0.5px;text-transform:uppercase;">Your Store Link</p>
+      <a href="${storeLink}" style="font-size:14px;color:#CC3366;word-break:break-all;text-decoration:none;font-weight:600;">${storeLink}</a>
+    </div>
+    <p style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#111111;">Share on:</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+      ${['WhatsApp — send it to your contacts and groups', 'Instagram — add it to your bio or share as a story', 'Twitter/X — post it with a photo of your product'].map(platform => `
+      <tr>
+        <td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <span style="color:#CC3366;margin-right:8px;">&#8594;</span>${platform}
+        </td>
+      </tr>`).join('')}
+    </table>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Your store is live — start sharing it to get orders',
+    html: wrapEmail('Share your store and get your first sale', body),
+  });
+};
+
+export const sendVendorInactiveReminderEmail = async (
+  email: string,
+  firstName: string,
+  businessName: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const addProductLink = `${frontendUrl}/vendor/products/new`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      We've missed you! <strong>${businessName}</strong> hasn't added any new products in the last 30 days.
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Stores that stay active with fresh listings get more visibility in search results and recommendations.
+      Even adding one new product can reignite buyer interest in your store.
+    </p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+      We'd love to see you back. Your store is still live — come add something new today.
+    </p>
+    <a href="${addProductLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Add a New Product
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'We\'ve missed you — your store needs new products',
+    html: wrapEmail('Welcome back to Vendorspot', body),
+  });
+};
+
+export const sendVendorSubscriptionExpiryEmail = async (
+  email: string,
+  firstName: string,
+  planName: string,
+  daysLeft: number,
+  expiryDate: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const renewLink = `${frontendUrl}/vendor/upgrade`;
+
+  const urgencyColor = daysLeft === 1 ? '#DC2626' : '#CC3366';
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your <strong>${planName}</strong> subscription expires in <strong style="color:${urgencyColor};">${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> on <strong>${expiryDate}</strong>.
+    </p>
+    <p style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#111111;">What you'll lose if you don't renew:</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+      ${['Unlimited product listings (excess products go inactive)', 'Lower commission rates on your sales', 'Priority visibility in search and recommendations', 'Access to advanced store analytics'].map(item => `
+      <tr>
+        <td style="padding:3px 0;font-size:14px;color:#374151;line-height:1.6;">
+          <span style="color:${urgencyColor};margin-right:8px;">&#8594;</span>${item}
+        </td>
+      </tr>`).join('')}
+    </table>
+    <a href="${renewLink}" style="display:inline-block;background-color:${urgencyColor};color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Renew My Subscription
+    </a>`;
+
+  const urgencyLabel = daysLeft === 1 ? 'expires tomorrow' : `expires in ${daysLeft} days`;
+
+  await sendEmail({
+    to: email,
+    subject: `Your ${planName} ${urgencyLabel} — renew now`,
+    html: wrapEmail(`Your ${planName} is expiring soon`, body),
+  });
+};
+
+export const sendVendorLowStockAlertEmail = async (
+  email: string,
+  firstName: string,
+  productName: string,
+  remainingStock: number,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const productsLink = `${frontendUrl}/vendor/products`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your product <strong>${productName}</strong> is running low on stock — only <strong style="color:#CC3366;">${remainingStock} unit${remainingStock !== 1 ? 's' : ''} remaining</strong>.
+    </p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Products that go out of stock automatically become unavailable to buyers. Restock now to keep your sales going without interruption.
+    </p>
+    <a href="${productsLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:20px;">
+      Update Stock
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Low stock alert: ${productName} is running out`,
+    html: wrapEmail('Low stock alert', body),
+  });
+};
+
+// ─── Customer Transactional Emails ────────────────────────────────────────────
+
+export const sendOrderShippedEmail = async (
+  email: string,
+  firstName: string,
+  orderNumber: string,
+  courier?: string,
+  trackingNumber?: string,
+  estimatedDelivery?: string,
+  trackingUrl?: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const orderUrl = `${frontendUrl}/orders/${orderNumber}`;
+
+  const trackingBlock = trackingNumber ? `
+    <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+      <p style="margin:0 0 8px 0;font-size:12px;font-weight:700;color:#111111;letter-spacing:0.5px;text-transform:uppercase;">Shipment Details</p>
+      ${courier ? `<p style="margin:0 0 6px 0;font-size:14px;color:#374151;"><span style="color:#6b7280;">Courier:</span>&nbsp;&nbsp;<strong>${courier}</strong></p>` : ''}
+      <p style="margin:0 0 6px 0;font-size:14px;color:#374151;"><span style="color:#6b7280;">Tracking no:</span>&nbsp;&nbsp;<strong>${trackingNumber}</strong></p>
+      ${estimatedDelivery ? `<p style="margin:0;font-size:14px;color:#374151;"><span style="color:#6b7280;">Est. delivery:</span>&nbsp;&nbsp;<strong>${estimatedDelivery}</strong></p>` : ''}
+    </div>` : '';
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Great news — your order <strong>#${orderNumber}</strong> is on its way!
+    </p>
+    ${trackingBlock}
+    <p style="margin:0 0 20px 0;font-size:14px;color:#374151;line-height:1.6;">
+      Once your items arrive, confirm delivery in the app to complete your order and release payment to the vendor.
+    </p>
+    ${trackingUrl ? `<a href="${trackingUrl}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:12px;">Track Shipment</a><br/>` : ''}
+    <a href="${orderUrl}" style="display:inline-block;background:#f3f4f6;color:#374151;font-size:13px;font-weight:600;text-decoration:none;padding:10px 24px;border-radius:6px;margin-top:8px;">
+      View Order
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Your order #${orderNumber} is on its way`,
+    html: wrapEmail('Your order has been shipped', body),
+  });
+};
+
+export const sendOrderDeliveredEmail = async (
+  email: string,
+  firstName: string,
+  orderNumber: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const orderUrl = `${frontendUrl}/orders/${orderNumber}`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your order <strong>#${orderNumber}</strong> has been marked as delivered. We hope everything arrived in perfect condition!
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Payment will be automatically released to the vendor in <strong>24 hours</strong>. If you have any issues, please raise a dispute before then.
+    </p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:20px;">
+      <tr>
+        <td style="padding-right:12px;">
+          <a href="${orderUrl}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;">Confirm Delivery</a>
+        </td>
+        <td>
+          <a href="${orderUrl}" style="display:inline-block;background:#f3f4f6;color:#374151;font-size:13px;font-weight:600;text-decoration:none;padding:11px 24px;border-radius:6px;">Raise a Dispute</a>
+        </td>
+      </tr>
+    </table>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Order #${orderNumber} delivered — please confirm receipt`,
+    html: wrapEmail('Your order has been delivered', body),
+  });
+};
+
+export const sendOrderCancelledEmail = async (
+  email: string,
+  firstName: string,
+  orderNumber: string,
+  cancelReason?: string,
+  refundAmount?: number,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const shopLink = `${frontendUrl}/products`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your order <strong>#${orderNumber}</strong> has been cancelled.
+    </p>
+    ${cancelReason ? `
+    <div style="background:#f9fafb;border-left:3px solid #e5e7eb;padding:12px 16px;border-radius:4px;margin-bottom:16px;">
+      <p style="margin:0;font-size:14px;color:#6b7280;">Reason: <span style="color:#374151;">${cancelReason}</span></p>
+    </div>` : ''}
+    ${refundAmount && refundAmount > 0 ? `
+    <div style="background:#f0fdf4;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+      <p style="margin:0 0 4px 0;font-size:12px;color:#16a34a;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Refund Issued</p>
+      <p style="margin:0;font-size:24px;font-weight:800;color:#111111;">₦${refundAmount.toLocaleString()}</p>
+      <p style="margin:4px 0 0 0;font-size:13px;color:#6b7280;">Credited to your Vendorspot wallet</p>
+    </div>` : ''}
+    <a href="${shopLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;margin-bottom:16px;">
+      Continue Shopping
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Your order #${orderNumber} has been cancelled`,
+    html: wrapEmail('Order cancelled', body),
+  });
+};
+
+export const sendRefundProcessedEmail = async (
+  email: string,
+  firstName: string,
+  orderNumber: string,
+  refundAmount: number,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const walletLink = `${frontendUrl}/wallet`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your refund for order <strong>#${orderNumber}</strong> has been processed.
+    </p>
+    <div style="background:#f0fdf4;border-radius:8px;padding:20px 24px;margin-bottom:20px;text-align:center;">
+      <p style="margin:0 0 4px 0;font-size:12px;color:#16a34a;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Amount Refunded</p>
+      <p style="margin:0;font-size:36px;font-weight:800;color:#111111;">₦${refundAmount.toLocaleString()}</p>
+      <p style="margin:6px 0 0 0;font-size:13px;color:#6b7280;">Available in your Vendorspot wallet immediately</p>
+    </div>
+    <p style="margin:0 0 20px 0;font-size:14px;color:#374151;line-height:1.6;">
+      You can use this balance on your next purchase or withdraw it to your bank account.
+    </p>
+    <a href="${walletLink}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;">
+      View My Wallet
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Refund of ₦${refundAmount.toLocaleString()} processed for order #${orderNumber}`,
+    html: wrapEmail('Refund processed', body),
+  });
+};
+
+export const sendDisputeOpenedEmail = async (
+  email: string,
+  firstName: string,
+  disputeNumber: string,
+  orderNumber: string,
+): Promise<void> => {
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your dispute <strong>${disputeNumber}</strong> for order <strong>#${orderNumber}</strong> has been opened. Our team will review it within 2–5 business days.
+    </p>
+    <div style="background:#fef9c3;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+      <p style="margin:0 0 8px 0;font-size:13px;font-weight:700;color:#92400e;">What happens next:</p>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        ${[
+          'The vendor will be notified and given a chance to respond.',
+          'Our team will review all evidence submitted.',
+          'You will be notified once a resolution is reached.',
+          'Any refund due will be credited directly to your wallet.',
+        ].map(t => `<tr><td style="padding:3px 0;font-size:13px;color:#374151;line-height:1.6;"><span style="color:#CC3366;margin-right:8px;">&#10003;</span>${t}</td></tr>`).join('')}
+      </table>
+    </div>
+    <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">
+      Your funds remain securely held by Vendorspot until the dispute is resolved. You don't need to do anything right now.
+    </p>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Dispute ${disputeNumber} opened — we're reviewing it`,
+    html: wrapEmail('Dispute opened successfully', body),
+  });
+};
+
+export const sendDisputeResolvedEmail = async (
+  email: string,
+  firstName: string,
+  disputeNumber: string,
+  orderNumber: string,
+  resolution: string,
+  refundAmount?: number,
+): Promise<void> => {
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your dispute <strong>${disputeNumber}</strong> for order <strong>#${orderNumber}</strong> has been resolved.
+    </p>
+    ${refundAmount && refundAmount > 0 ? `
+    <div style="background:#f0fdf4;border-radius:8px;padding:20px 24px;margin-bottom:20px;text-align:center;">
+      <p style="margin:0 0 4px 0;font-size:12px;color:#16a34a;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Refund Issued</p>
+      <p style="margin:0;font-size:36px;font-weight:800;color:#111111;">₦${refundAmount.toLocaleString()}</p>
+      <p style="margin:6px 0 0 0;font-size:13px;color:#6b7280;">Credited to your Vendorspot wallet</p>
+    </div>` : `
+    <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+      <p style="margin:0;font-size:14px;color:#374151;"><strong>Outcome:</strong> No refund was issued for this dispute.</p>
+    </div>`}
+    ${resolution ? `
+    <div style="background:#f9fafb;border-left:3px solid #e5e7eb;padding:12px 16px;border-radius:4px;margin-bottom:20px;">
+      <p style="margin:0 0 4px 0;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Resolution note</p>
+      <p style="margin:0;font-size:14px;color:#374151;">${resolution}</p>
+    </div>` : ''}
+    <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">
+      If you have further questions, contact us at <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>.
+    </p>`;
+
+  await sendEmail({
+    to: email,
+    subject: `Dispute ${disputeNumber} resolved`,
+    html: wrapEmail('Your dispute has been resolved', body),
+  });
+};
+
+export const sendReviewRequestEmail = async (
+  email: string,
+  firstName: string,
+  orderNumber: string,
+  vendorName?: string,
+): Promise<void> => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const orderUrl = `${frontendUrl}/orders/${orderNumber}`;
+
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      We hope you're enjoying your recent purchase${vendorName ? ` from <strong>${vendorName}</strong>` : ''}!
+    </p>
+    <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+      Your review helps other shoppers make confident decisions and helps honest vendors grow. It only takes a minute.
+    </p>
+    <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        ${[
+          'Helps other buyers shop with confidence',
+          "Boosts the vendor's Trust Score",
+          'Earns you bonus points for every review you leave',
+        ].map(t => `<tr><td style="padding:3px 0;font-size:13px;color:#374151;line-height:1.6;"><span style="color:#CC3366;margin-right:8px;">&#10003;</span>${t}</td></tr>`).join('')}
+      </table>
+    </div>
+    <a href="${orderUrl}" style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 28px;border-radius:6px;">
+      Write a Review
+    </a>`;
+
+  await sendEmail({
+    to: email,
+    subject: `How was your order #${orderNumber}? Leave a review`,
+    html: wrapEmail('How was your order?', body),
   });
 };

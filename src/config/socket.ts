@@ -18,7 +18,10 @@ export const isUserOnline = (userId: string): boolean => {
 export const initializeSocket = (server: http.Server): SocketServer => {
   const io = new SocketServer(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || '*',
+      // Fail-closed: no wildcard fallback — mobile apps bypass CORS entirely, only browser clients need this
+      origin: process.env.FRONTEND_URL
+        ? process.env.FRONTEND_URL.split(',').map((o) => o.trim())
+        : false,
       methods: ['GET', 'POST'],
       credentials: true,
     },

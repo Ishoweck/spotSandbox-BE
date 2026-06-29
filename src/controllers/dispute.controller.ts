@@ -1,6 +1,6 @@
 // controllers/dispute.controller.ts
 import { Response } from 'express';
-import mongoose from 'mongoose';
+import mongoose, { startSession } from 'mongoose';
 import { AuthRequest, ApiResponse, PaymentStatus, TransactionType, WalletPurpose, OrderStatus } from '../types';
 import Dispute, { DisputeStatus, DisputeReason } from '../models/Dispute';
 import Order from '../models/Order';
@@ -9,6 +9,7 @@ import { Wallet } from '../models/Additional';
 import { AppError } from '../middleware/error';
 import { notificationService } from '../services/notification.service';
 import { logger } from '../utils/logger';
+import { enqueueEmail, EmailJobType } from '../utils/email-queue';
 
 // Generate dispute number (e.g., DSP-20260225-XXXX)
 function generateDisputeNumber(): string {
@@ -155,6 +156,19 @@ export class DisputeController {
       logger.error('Error sending dispute notification:', error);
     }
 
+    // Email the customer confirming the dispute was opened
+    try {
+      const customerUser = await User.findById(req.user!.id).select('email firstName');
+      if (customerUser) {
+        enqueueEmail(EmailJobType.DISPUTE_OPENED, customerUser.email, customerUser.firstName, 0, {
+          disputeNumber: dispute.disputeNumber,
+          orderNumber: order.orderNumber,
+        }).catch(() => {});
+      }
+    } catch (error) {
+      logger.error('Error enqueueing dispute opened email:', error);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Dispute opened successfully. The vendor will be notified.',
@@ -167,7 +181,7 @@ export class DisputeController {
    */
   async getMyDisputes(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const skip = (page - 1) * limit;
 
     const filter: any = { user: req.user?.id };
@@ -232,7 +246,7 @@ export class DisputeController {
    */
   async getVendorDisputes(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const skip = (page - 1) * limit;
 
     const filter: any = { vendor: req.user?.id };
@@ -349,7 +363,7 @@ export class DisputeController {
    */
   async getAllDisputes(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const skip = (page - 1) * limit;
 
     const filter: any = {};
@@ -368,17 +382,18 @@ export class DisputeController {
       .populate('user', 'firstName lastName email')
       .populate('vendor', 'firstName lastName email');
 
-    const total = await Dispute.countDocuments(filter);
+    const [total, rawStats] = await Promise.all([
+      Dispute.countDocuments(filter),
+      Dispute.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+    ]);
 
-    // Stats for admin dashboard
+    const statMap = Object.fromEntries(rawStats.map((s: any) => [s._id, s.count]));
     const stats = {
-      open: await Dispute.countDocuments({ status: DisputeStatus.OPEN }),
-      vendorResponded: await Dispute.countDocuments({ status: DisputeStatus.VENDOR_RESPONDED }),
-      underReview: await Dispute.countDocuments({ status: DisputeStatus.UNDER_REVIEW }),
-      resolved: await Dispute.countDocuments({
-        status: { $in: [DisputeStatus.RESOLVED_FULL_REFUND, DisputeStatus.RESOLVED_PARTIAL_REFUND] },
-      }),
-      rejected: await Dispute.countDocuments({ status: DisputeStatus.REJECTED }),
+      open: statMap[DisputeStatus.OPEN] ?? 0,
+      vendorResponded: statMap[DisputeStatus.VENDOR_RESPONDED] ?? 0,
+      underReview: statMap[DisputeStatus.UNDER_REVIEW] ?? 0,
+      resolved: (statMap[DisputeStatus.RESOLVED_FULL_REFUND] ?? 0) + (statMap[DisputeStatus.RESOLVED_PARTIAL_REFUND] ?? 0),
+      rejected: statMap[DisputeStatus.REJECTED] ?? 0,
     };
 
     res.json({
@@ -492,56 +507,56 @@ export class DisputeController {
 
     await dispute.save();
 
-    // Process refund to customer's wallet
-    if (finalRefundAmount > 0) {
-      logger.info(`💰 Processing refund of ₦${finalRefundAmount} to customer wallet...`);
+    // Process refund inside a transaction so wallet + order updates are atomic
+    const session = await startSession();
+    try {
+      await session.withTransaction(async () => {
+        if (finalRefundAmount > 0) {
+          logger.info(`💰 Processing refund of ₦${finalRefundAmount} to customer wallet...`);
 
-      let wallet = await Wallet.findOne({ user: dispute.user });
+          let wallet = await Wallet.findOne({ user: dispute.user }).session(session);
 
-      if (!wallet) {
-        // Create wallet if it doesn't exist
-        wallet = await Wallet.create({
-          user: dispute.user,
-          balance: 0,
-          totalSpent: 0,
-          transactions: [],
-        });
-      }
+          if (!wallet) {
+            [wallet] = await Wallet.create(
+              [{ user: dispute.user, balance: 0, totalSpent: 0, transactions: [] }],
+              { session },
+            );
+          }
 
-      wallet.balance += finalRefundAmount;
-      wallet.transactions.push({
-        type: TransactionType.CREDIT,
-        amount: finalRefundAmount,
-        purpose: WalletPurpose.REFUND,
-        reference: `DSP-REF-${dispute.disputeNumber}`,
-        description: `Dispute refund (${refundType}) for order ${dispute.orderNumber}`,
-        relatedOrder: order._id,
-        status: 'completed',
-        timestamp: new Date(),
-      } as any);
-      await wallet.save();
+          wallet.balance += finalRefundAmount;
+          wallet.transactions.push({
+            type: TransactionType.CREDIT,
+            amount: finalRefundAmount,
+            purpose: WalletPurpose.REFUND,
+            reference: `DSP-REF-${dispute.disputeNumber}`,
+            description: `Dispute refund (${refundType}) for order ${dispute.orderNumber}`,
+            relatedOrder: order._id,
+            status: 'completed',
+            timestamp: new Date(),
+          } as any);
+          await wallet.save({ session });
 
-      logger.info('✅ Refund credited to wallet');
+          logger.info('✅ Refund credited to wallet');
 
-      // Update order payment status
-      if (refundType === 'full') {
-        order.paymentStatus = PaymentStatus.REFUNDED;
-        order.refundAmount = finalRefundAmount;
-        order.refundReason = `Dispute: ${dispute.reason} — ${resolution || 'Full refund approved'}`;
-      } else {
-        // Partial refund — keep payment as completed but record the partial refund
-        order.refundAmount = (order.refundAmount || 0) + finalRefundAmount;
-        order.refundReason = `Dispute: ${dispute.reason} — Partial refund of ₦${finalRefundAmount}`;
-      }
-      order.status = OrderStatus.CANCELLED;
-      await order.save();
-    } else {
-      // Rejected — restore order to previous status if it was disputed
-      if (order.status === 'disputed') {
-        // Restore to delivered since dispute was rejected
-        order.status = OrderStatus.DELIVERED;
-        await order.save();
-      }
+          if (refundType === 'full') {
+            order.paymentStatus = PaymentStatus.REFUNDED;
+            order.refundAmount = finalRefundAmount;
+            order.refundReason = `Dispute: ${dispute.reason} — ${resolution || 'Full refund approved'}`;
+          } else {
+            order.refundAmount = (order.refundAmount || 0) + finalRefundAmount;
+            order.refundReason = `Dispute: ${dispute.reason} — Partial refund of ₦${finalRefundAmount}`;
+          }
+          order.status = OrderStatus.CANCELLED;
+          await order.save({ session });
+        } else {
+          if (order.status === 'disputed') {
+            order.status = OrderStatus.DELIVERED;
+            await order.save({ session });
+          }
+        }
+      });
+    } finally {
+      session.endSession();
     }
 
     // Notify both parties about resolution
@@ -559,6 +574,21 @@ export class DisputeController {
       );
     } catch (error) {
       logger.error('Error sending dispute resolution notification:', error);
+    }
+
+    // Email the customer with the dispute outcome
+    try {
+      const customerUser = await User.findById(dispute.user).select('email firstName');
+      if (customerUser) {
+        enqueueEmail(EmailJobType.DISPUTE_RESOLVED, customerUser.email, customerUser.firstName, 0, {
+          disputeNumber: dispute.disputeNumber,
+          orderNumber: dispute.orderNumber,
+          resolution: resolution || '',
+          refundAmount: finalRefundAmount > 0 ? finalRefundAmount : undefined,
+        }).catch(() => {});
+      }
+    } catch (error) {
+      logger.error('Error enqueueing dispute resolved email:', error);
     }
 
     logger.info('⚖️ ============================================');

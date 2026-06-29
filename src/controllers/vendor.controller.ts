@@ -473,6 +473,8 @@ export class VendorController {
       'socialMedia',
     ];
 
+    const wasVerified = vendorProfile.verificationStatus === VendorVerificationStatus.VERIFIED;
+
     Object.keys(req.body).forEach((key) => {
       if (allowedUpdates.includes(key)) {
         if (key === 'businessAddress') {
@@ -484,6 +486,11 @@ export class VendorController {
         }
       }
     });
+
+    // Reset verification if a verified vendor edits their profile — requires admin re-review
+    if (wasVerified) {
+      vendorProfile.verificationStatus = VendorVerificationStatus.PENDING;
+    }
 
     await vendorProfile.save();
 
@@ -519,6 +526,22 @@ export class VendorController {
             });
           }
         }
+      }
+    }
+
+    // Notify vendor that their profile edit triggered a re-verification
+    if (wasVerified) {
+      try {
+        await notificationService.send({
+          userId: req.user!.id,
+          type: NotificationType.ACCOUNT,
+          title: 'Profile Updated – Re-verification Required',
+          message: 'Your business profile was updated. Our team will review your store again before restoring your verified status.',
+          link: '/vendor/profile',
+          referenceId: `profile_reverify:${req.user!.id}`,
+        });
+      } catch (_) {
+        // Non-critical — don't fail the update if notification fails
       }
     }
 
