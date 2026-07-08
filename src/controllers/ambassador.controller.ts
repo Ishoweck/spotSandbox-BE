@@ -7,6 +7,7 @@ import User from '../models/User';
 import { Wallet } from '../models/Additional';
 import { AppError, asyncHandler } from '../middleware/error';
 import { sendAmbassadorApprovalEmail } from '../utils/email';
+import { uploadToCloudinary } from '../utils/cloudinary';
 import { logger } from '../utils/logger';
 
 // ─── Tier rate lookup ──────────────────────────────────────────────────────────
@@ -15,6 +16,25 @@ export function getTierRate(ordinalPosition: number): number {
   if (ordinalPosition <= 50) return 150;
   if (ordinalPosition <= 100) return 250;
   return 300;
+}
+
+// ─── Vendor referral milestones (partial-count sum → cash reward) ─────────────
+const VENDOR_MILESTONES = [
+  { count: 20, reward: 3000 },
+  { count: 50, reward: 7500 },
+  { count: 100, reward: 20000 },
+  { count: 150, reward: 37500 },
+  { count: 200, reward: 50000 },
+];
+
+function getVendorMilestone(vendorPartialSum: number) {
+  const next = VENDOR_MILESTONES.find((m) => vendorPartialSum < m.count) || null;
+  return {
+    current: Math.round(vendorPartialSum * 10) / 10,
+    next: next?.count ?? null,
+    reward: next?.reward ?? null,
+    targets: VENDOR_MILESTONES,
+  };
 }
 
 // ─── Generate unique ambassador code (AMB-XXXX) ───────────────────────────────
@@ -29,10 +49,32 @@ async function generateAmbassadorCode(): Promise<string> {
 
 // ─── Public: Submit application from website ──────────────────────────────────
 export const submitApplication = asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
-  const { name, email, phone, role, location, social, why } = req.body;
+  const {
+    name, email, phone, role, location, social, why,
+    homeAddress, idType, idNumber, idImage,
+    nextOfKinName, nextOfKinAddress, nextOfKinPhone,
+    agreedToTerms,
+  } = req.body;
 
   if (!name || !email || !role || !location || !why) {
     throw new AppError('Missing required fields', 400);
+  }
+
+  const validIdTypes = ['nin', 'drivers_license', 'international_passport', 'student_id'];
+  if (!homeAddress?.trim() || !idType || !idNumber?.trim()) {
+    throw new AppError('Home address and means of ID are required', 400);
+  }
+  if (!validIdTypes.includes(idType)) {
+    throw new AppError('Invalid ID type', 400);
+  }
+  if (!idImage) {
+    throw new AppError('Please upload a photo of your ID', 400);
+  }
+  if (!nextOfKinName?.trim() || !nextOfKinAddress?.trim() || !nextOfKinPhone?.trim()) {
+    throw new AppError('Next of kin name, address, and phone are required', 400);
+  }
+  if (!agreedToTerms) {
+    throw new AppError('You must accept the Terms and Conditions to apply', 400);
   }
 
   const existing = await Ambassador.findOne({ email: email.toLowerCase(), status: 'pending' });
@@ -41,7 +83,25 @@ export const submitApplication = asyncHandler(async (req: Request, res: Response
     return;
   }
 
-  await Ambassador.create({ name, email, phone, role, location, social, why });
+  let idImageUrl: string | undefined;
+  if (idImage) {
+    const uploaded = await uploadToCloudinary(idImage, 'ambassadors/id-cards');
+    idImageUrl = uploaded.url;
+  }
+
+  await Ambassador.create({
+    name, email, phone, role, location, social, why,
+    homeAddress: homeAddress.trim(),
+    idType,
+    idNumber: idNumber.trim(),
+    idImageUrl,
+    nextOfKin: {
+      name: nextOfKinName.trim(),
+      address: nextOfKinAddress.trim(),
+      phone: nextOfKinPhone.trim(),
+    },
+    termsAcceptedAt: new Date(),
+  });
 
   logger.info(`Ambassador application received: ${email}`);
   res.status(201).json({ success: true, message: 'Application received successfully' });
@@ -259,27 +319,13 @@ export const getAmbassadorReferrals = asyncHandler(async (req: AuthRequest, res:
   summary.forEach((s: any) => { summaryMap[s._id] = s; });
 
   const vendorPartialSum = summaryMap.vendor?.partialSum || 0;
-  const nextMilestone = vendorPartialSum < 20 ? 20
-    : vendorPartialSum < 50 ? 50
-    : vendorPartialSum < 100 ? 100
-    : vendorPartialSum < 200 ? 200
-    : null;
-  const milestoneTarget = nextMilestone === 20 ? 3000
-    : nextMilestone === 50 ? 7500
-    : nextMilestone === 100 ? 20000
-    : nextMilestone === 200 ? 50000
-    : null;
 
   res.json({
     success: true,
     data: {
       referrals,
       summaryByType: summaryMap,
-      milestone: {
-        current: Math.round(vendorPartialSum * 10) / 10,
-        next: nextMilestone,
-        reward: milestoneTarget,
-      },
+      milestone: getVendorMilestone(vendorPartialSum),
     },
     meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
   });
@@ -341,32 +387,11 @@ export const getMyDashboard = asyncHandler(async (req: AuthRequest, res: Respons
   const vendorEarned = vendors.reduce((sum, v) => sum + (v.totalEarned || 0), 0);
   const customerEarned = customers.reduce((sum, c) => sum + (c.totalEarned || 0), 0);
 
-  const nextMilestone = vendorPartialSum < 20 ? 20
-    : vendorPartialSum < 50 ? 50
-    : vendorPartialSum < 100 ? 100
-    : vendorPartialSum < 200 ? 200
-    : null;
-  const milestoneReward = nextMilestone === 20 ? 3000
-    : nextMilestone === 50 ? 7500
-    : nextMilestone === 100 ? 20000
-    : nextMilestone === 200 ? 50000
-    : null;
-
   res.json({
     success: true,
     data: {
       ambassador,
-      milestone: {
-        current: Math.round(vendorPartialSum * 10) / 10,
-        next: nextMilestone,
-        reward: milestoneReward,
-        targets: [
-          { count: 20, reward: 3000 },
-          { count: 50, reward: 7500 },
-          { count: 100, reward: 20000 },
-          { count: 200, reward: 50000 },
-        ],
-      },
+      milestone: getVendorMilestone(vendorPartialSum),
       vendors,
       customers,
       summary: {
