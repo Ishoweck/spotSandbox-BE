@@ -18,6 +18,25 @@ export function getTierRate(ordinalPosition: number): number {
   return 300;
 }
 
+// ─── Vendor referral milestones (partial-count sum → cash reward) ─────────────
+const VENDOR_MILESTONES = [
+  { count: 20, reward: 3000 },
+  { count: 50, reward: 7500 },
+  { count: 100, reward: 20000 },
+  { count: 150, reward: 37500 },
+  { count: 200, reward: 50000 },
+];
+
+function getVendorMilestone(vendorPartialSum: number) {
+  const next = VENDOR_MILESTONES.find((m) => vendorPartialSum < m.count) || null;
+  return {
+    current: Math.round(vendorPartialSum * 10) / 10,
+    next: next?.count ?? null,
+    reward: next?.reward ?? null,
+    targets: VENDOR_MILESTONES,
+  };
+}
+
 // ─── Generate unique ambassador code (AMB-XXXX) ───────────────────────────────
 async function generateAmbassadorCode(): Promise<string> {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -300,27 +319,13 @@ export const getAmbassadorReferrals = asyncHandler(async (req: AuthRequest, res:
   summary.forEach((s: any) => { summaryMap[s._id] = s; });
 
   const vendorPartialSum = summaryMap.vendor?.partialSum || 0;
-  const nextMilestone = vendorPartialSum < 20 ? 20
-    : vendorPartialSum < 50 ? 50
-    : vendorPartialSum < 100 ? 100
-    : vendorPartialSum < 200 ? 200
-    : null;
-  const milestoneTarget = nextMilestone === 20 ? 3000
-    : nextMilestone === 50 ? 7500
-    : nextMilestone === 100 ? 20000
-    : nextMilestone === 200 ? 50000
-    : null;
 
   res.json({
     success: true,
     data: {
       referrals,
       summaryByType: summaryMap,
-      milestone: {
-        current: Math.round(vendorPartialSum * 10) / 10,
-        next: nextMilestone,
-        reward: milestoneTarget,
-      },
+      milestone: getVendorMilestone(vendorPartialSum),
     },
     meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
   });
@@ -382,32 +387,11 @@ export const getMyDashboard = asyncHandler(async (req: AuthRequest, res: Respons
   const vendorEarned = vendors.reduce((sum, v) => sum + (v.totalEarned || 0), 0);
   const customerEarned = customers.reduce((sum, c) => sum + (c.totalEarned || 0), 0);
 
-  const nextMilestone = vendorPartialSum < 20 ? 20
-    : vendorPartialSum < 50 ? 50
-    : vendorPartialSum < 100 ? 100
-    : vendorPartialSum < 200 ? 200
-    : null;
-  const milestoneReward = nextMilestone === 20 ? 3000
-    : nextMilestone === 50 ? 7500
-    : nextMilestone === 100 ? 20000
-    : nextMilestone === 200 ? 50000
-    : null;
-
   res.json({
     success: true,
     data: {
       ambassador,
-      milestone: {
-        current: Math.round(vendorPartialSum * 10) / 10,
-        next: nextMilestone,
-        reward: milestoneReward,
-        targets: [
-          { count: 20, reward: 3000 },
-          { count: 50, reward: 7500 },
-          { count: 100, reward: 20000 },
-          { count: 200, reward: 50000 },
-        ],
-      },
+      milestone: getVendorMilestone(vendorPartialSum),
       vendors,
       customers,
       summary: {
