@@ -29,10 +29,29 @@ async function generateAmbassadorCode(): Promise<string> {
 
 // ─── Public: Submit application from website ──────────────────────────────────
 export const submitApplication = asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
-  const { name, email, phone, role, location, social, why } = req.body;
+  const {
+    name, email, phone, role, location, social, why,
+    homeAddress, idType, idNumber,
+    nextOfKinName, nextOfKinAddress, nextOfKinPhone,
+    agreedToTerms,
+  } = req.body;
 
   if (!name || !email || !role || !location || !why) {
     throw new AppError('Missing required fields', 400);
+  }
+
+  const validIdTypes = ['nin', 'drivers_license', 'international_passport', 'student_id'];
+  if (!homeAddress?.trim() || !idType || !idNumber?.trim()) {
+    throw new AppError('Home address and means of ID are required', 400);
+  }
+  if (!validIdTypes.includes(idType)) {
+    throw new AppError('Invalid ID type', 400);
+  }
+  if (!nextOfKinName?.trim() || !nextOfKinAddress?.trim() || !nextOfKinPhone?.trim()) {
+    throw new AppError('Next of kin name, address, and phone are required', 400);
+  }
+  if (!agreedToTerms) {
+    throw new AppError('You must accept the Terms and Conditions to apply', 400);
   }
 
   const existing = await Ambassador.findOne({ email: email.toLowerCase(), status: 'pending' });
@@ -41,7 +60,18 @@ export const submitApplication = asyncHandler(async (req: Request, res: Response
     return;
   }
 
-  await Ambassador.create({ name, email, phone, role, location, social, why });
+  await Ambassador.create({
+    name, email, phone, role, location, social, why,
+    homeAddress: homeAddress.trim(),
+    idType,
+    idNumber: idNumber.trim(),
+    nextOfKin: {
+      name: nextOfKinName.trim(),
+      address: nextOfKinAddress.trim(),
+      phone: nextOfKinPhone.trim(),
+    },
+    termsAcceptedAt: new Date(),
+  });
 
   logger.info(`Ambassador application received: ${email}`);
   res.status(201).json({ success: true, message: 'Application received successfully' });

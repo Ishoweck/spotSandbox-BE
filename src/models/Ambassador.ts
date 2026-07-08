@@ -2,6 +2,13 @@ import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export type AmbassadorStatus = 'pending' | 'approved' | 'rejected';
 export type AmbassadorRole = 'student' | 'state';
+export type AmbassadorIdType = 'nin' | 'drivers_license' | 'international_passport' | 'student_id';
+
+export interface INextOfKin {
+  name: string;
+  address: string;
+  phone: string;
+}
 
 export interface IAmbassador extends Document {
   name: string;
@@ -26,6 +33,12 @@ export interface IAmbassador extends Document {
   rejectedAt?: Date;
   rejectionReason?: string;
   userId?: Types.ObjectId;
+  // KYC — collected on the application form, reviewed by admin before approval
+  homeAddress: string;
+  idType: AmbassadorIdType;
+  idNumber: string;
+  nextOfKin: INextOfKin;
+  termsAcceptedAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +73,19 @@ const ambassadorSchema = new Schema<IAmbassador>(
     rejectedAt: Date,
     rejectionReason: String,
     userId: { type: Schema.Types.ObjectId, ref: 'User', sparse: true },
+    homeAddress: { type: String, required: true, trim: true },
+    idType: {
+      type: String,
+      enum: ['nin', 'drivers_license', 'international_passport', 'student_id'],
+      required: true,
+    },
+    idNumber: { type: String, required: true, trim: true },
+    nextOfKin: {
+      name: { type: String, required: true, trim: true },
+      address: { type: String, required: true, trim: true },
+      phone: { type: String, required: true, trim: true },
+    },
+    termsAcceptedAt: { type: Date, required: true },
   },
   { timestamps: true }
 );
