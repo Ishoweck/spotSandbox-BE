@@ -37,6 +37,7 @@ export interface IAmbassador extends Document {
   homeAddress: string;
   idType: AmbassadorIdType;
   idNumber: string;
+  idImageUrl?: string;
   nextOfKin: INextOfKin;
   termsAcceptedAt: Date;
   createdAt: Date;
@@ -80,6 +81,7 @@ const ambassadorSchema = new Schema<IAmbassador>(
       required: true,
     },
     idNumber: { type: String, required: true, trim: true },
+    idImageUrl: { type: String, trim: true },
     nextOfKin: {
       name: { type: String, required: true, trim: true },
       address: { type: String, required: true, trim: true },

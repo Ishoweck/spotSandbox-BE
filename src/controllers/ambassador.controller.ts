@@ -7,6 +7,7 @@ import User from '../models/User';
 import { Wallet } from '../models/Additional';
 import { AppError, asyncHandler } from '../middleware/error';
 import { sendAmbassadorApprovalEmail } from '../utils/email';
+import { uploadToCloudinary } from '../utils/cloudinary';
 import { logger } from '../utils/logger';
 
 // ─── Tier rate lookup ──────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ async function generateAmbassadorCode(): Promise<string> {
 export const submitApplication = asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
   const {
     name, email, phone, role, location, social, why,
-    homeAddress, idType, idNumber,
+    homeAddress, idType, idNumber, idImage,
     nextOfKinName, nextOfKinAddress, nextOfKinPhone,
     agreedToTerms,
   } = req.body;
@@ -47,6 +48,9 @@ export const submitApplication = asyncHandler(async (req: Request, res: Response
   if (!validIdTypes.includes(idType)) {
     throw new AppError('Invalid ID type', 400);
   }
+  if (!idImage) {
+    throw new AppError('Please upload a photo of your ID', 400);
+  }
   if (!nextOfKinName?.trim() || !nextOfKinAddress?.trim() || !nextOfKinPhone?.trim()) {
     throw new AppError('Next of kin name, address, and phone are required', 400);
   }
@@ -60,11 +64,18 @@ export const submitApplication = asyncHandler(async (req: Request, res: Response
     return;
   }
 
+  let idImageUrl: string | undefined;
+  if (idImage) {
+    const uploaded = await uploadToCloudinary(idImage, 'ambassadors/id-cards');
+    idImageUrl = uploaded.url;
+  }
+
   await Ambassador.create({
     name, email, phone, role, location, social, why,
     homeAddress: homeAddress.trim(),
     idType,
     idNumber: idNumber.trim(),
+    idImageUrl,
     nextOfKin: {
       name: nextOfKinName.trim(),
       address: nextOfKinAddress.trim(),
