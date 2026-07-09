@@ -18,12 +18,26 @@ import { AppError } from '../middleware/error';
 import { notificationService } from '../services/notification.service';
 import { gatherStatementData, generateStatementPDF } from '../services/statement.service';
 import { sendEmail } from '../utils/email';
+import { generateSlug } from '../utils/helpers';
 
 const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
 import { logger } from '../utils/logger';
 
 const STATS_CACHE_HOURS = 24;
 const FAST_REPLY_HOURS = 24;
+
+async function buildUniqueVendorSlug(businessName: string, excludeUserId?: string): Promise<string> {
+  const base = generateSlug(businessName) || 'vendor';
+  let candidate = base;
+  let counter = 2;
+  while (true) {
+    const filter: any = { slug: candidate };
+    if (excludeUserId) filter.user = { $ne: excludeUserId };
+    const exists = await VendorProfile.findOne(filter).select('_id').lean();
+    if (!exists) return candidate;
+    candidate = `${base}-${counter++}`;
+  }
+}
 
 async function computeVendorResponseStats(
   vendorUserId: string
@@ -117,7 +131,7 @@ export class VendorController {
         .sort(sortCriteria)
         .skip(skip)
         .limit(limit)
-        .select('user businessName businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium'),
+        .select('user businessName slug businessDescription businessLogo businessBanner businessAddress averageRating totalReviews totalSales followers verificationStatus isPremium'),
       VendorProfile.countDocuments(baseFilter),
     ]);
 
@@ -139,6 +153,7 @@ export class VendorController {
 
         return {
           id: vendorUser._id,
+          slug: vendor.slug,
           name: vendor.businessName,
           description: vendor.businessDescription,
           image: vendor.businessLogo || '',
@@ -159,11 +174,13 @@ export class VendorController {
       })
     );
 
+    const filteredVendors = vendorsWithDetails.filter(v => v.productCount > 0);
+
     res.json({
       success: true,
       message: 'Top vendors fetched successfully',
       data: {
-        vendors: vendorsWithDetails,
+        vendors: filteredVendors,
         total,
       },
       meta: {
@@ -309,7 +326,7 @@ export class VendorController {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select('user businessName businessDescription businessLogo averageRating totalReviews totalSales followers verificationStatus');
+      .select('user businessName slug businessDescription businessLogo averageRating totalReviews totalSales followers verificationStatus');
 
     const total = await VendorProfile.countDocuments({
       followers: userId,
@@ -326,6 +343,7 @@ export class VendorController {
 
         return {
           id: vendorUser._id,
+          slug: vendor.slug,
           name: vendor.businessName,
           description: vendor.businessDescription,
           image: vendor.businessLogo || '',
@@ -373,9 +391,12 @@ export class VendorController {
       throw new AppError('Vendor profile already exists', 400);
     }
 
+    const slug = await buildUniqueVendorSlug(businessName);
+
     const vendorProfile = await VendorProfile.create({
       user: req.user?.id,
       businessName,
+      slug,
       businessDescription,
       businessAddress,
       businessPhone,
@@ -430,6 +451,16 @@ export class VendorController {
       throw new AppError('Vendor profile not found', 404);
     }
 
+    // Generate and persist slug on first access if missing (covers vendors created before slug feature)
+    if (!vendorProfile.slug) {
+      try {
+        vendorProfile.slug = await buildUniqueVendorSlug(vendorProfile.businessName, userId);
+        await vendorProfile.save();
+      } catch (err) {
+        logger.error('Failed to backfill vendor slug on profile fetch:', err);
+      }
+    }
+
     const products = await Product.find({ vendor: userId, status: 'active' }).select('averageRating totalReviews');
     const totalWeightedRating = products.reduce((sum: number, p: any) =>
       sum + ((p.averageRating || 0) * (p.totalReviews || 0)), 0);
@@ -475,17 +506,19 @@ export class VendorController {
 
     const wasVerified = vendorProfile.verificationStatus === VendorVerificationStatus.VERIFIED;
 
-    Object.keys(req.body).forEach((key) => {
-      if (allowedUpdates.includes(key)) {
-        if (key === 'businessAddress') {
-          // Strip stale ShipBubble address code so it gets re-validated on next order
-          const { shipBubble, ...freshAddress } = req.body.businessAddress as any;
-          (vendorProfile as any).businessAddress = freshAddress;
-        } else {
-          (vendorProfile as any)[key] = req.body[key];
-        }
+    for (const key of Object.keys(req.body)) {
+      if (!allowedUpdates.includes(key)) continue;
+      if (key === 'businessAddress') {
+        const { shipBubble, ...freshAddress } = req.body.businessAddress as any;
+        (vendorProfile as any).businessAddress = freshAddress;
+      } else {
+        (vendorProfile as any)[key] = req.body[key];
       }
-    });
+    }
+
+    if (req.body.businessName && req.body.businessName !== vendorProfile.businessName) {
+      vendorProfile.slug = await buildUniqueVendorSlug(req.body.businessName, req.user?.id);
+    }
 
     // Reset verification if a verified vendor edits their profile — requires admin re-review
     if (wasVerified) {
@@ -1346,13 +1379,27 @@ export class VendorController {
     const { vendorId } = req.params;
     const userId = req.user?.id;
 
-    const vendorProfile = await VendorProfile.findOne({
-      user: vendorId,
-      isActive: true,
-    }).populate('user', 'firstName lastName');
+    // Resolve by slug (human-readable) or by userId (ObjectId) for backward compatibility
+    const isObjectId = /^[a-f\d]{24}$/i.test(vendorId);
+    const vendorProfile = await VendorProfile.findOne(
+      isObjectId
+        ? { user: vendorId, isActive: true }
+        : { slug: vendorId, isActive: true },
+    ).populate('user', 'firstName lastName');
 
     if (!vendorProfile) {
       throw new AppError('Vendor not found', 404);
+    }
+
+    // Generate and persist slug on first access if missing
+    if (!vendorProfile.slug) {
+      try {
+        const vendorUser = vendorProfile.user as any;
+        vendorProfile.slug = await buildUniqueVendorSlug(vendorProfile.businessName, vendorUser?._id?.toString());
+        await vendorProfile.save();
+      } catch (err) {
+        logger.error('Failed to backfill vendor slug on public profile fetch:', err);
+      }
     }
 
     let isFollowing = false;
@@ -1403,6 +1450,7 @@ export class VendorController {
         vendor: {
           id: vendorUser._id,
           businessName: vendorProfile.businessName,
+          slug: vendorProfile.slug,
           businessDescription: vendorProfile.businessDescription,
           businessLogo: vendorProfile.businessLogo,
           businessBanner: vendorProfile.businessBanner,

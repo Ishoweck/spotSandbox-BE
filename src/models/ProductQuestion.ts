@@ -13,6 +13,7 @@ export interface IProductQuestion extends Document {
   helpfulBy: Types.ObjectId[];
   reported: boolean;
   reportReason?: string;
+  questionRemindersSent: number[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +69,10 @@ const ProductQuestionSchema = new Schema<IProductQuestion>(
     },
     reportReason: {
       type: String,
+    },
+    questionRemindersSent: {
+      type: [Number],
+      default: [],
     },
   },
   {

@@ -273,7 +273,7 @@ async function checkShareStoreReminder(now: Date): Promise<void> {
       });
       if (activeProducts === 0) return;
 
-      const storeLink = `${FRONTEND_URL}/shops/${vendor._id}`;
+      const storeLink = `${FRONTEND_URL}/vendor/${(vendor as any).slug || vendor._id}`;
       await sendIfNew(
         vendor._id as Types.ObjectId,
         EmailJobType.VENDOR_SHARE_STORE_REMINDER,

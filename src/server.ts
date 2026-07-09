@@ -22,6 +22,8 @@ import { setupOrderAutoComplete } from './utils/order-autocomplete';
 import { setupPointsExpiryReminders } from './utils/points-expiry-reminder';
 import { setupVCreditsExpiry } from './utils/vcredits-expiry';
 import { setupVendorReminders } from './utils/vendor-reminders';
+import { setupQuestionReminders } from './utils/question-reminders';
+import { backfillVendorSlugs } from './utils/vendor-slug-backfill';
 
 // Load environment variables
 dotenv.config();
@@ -195,6 +197,8 @@ server.listen(PORT, () => {
   console.log(`API: http://localhost:${PORT}/api/${API_VERSION}`);
   console.log(`WebSocket: ws://localhost:${PORT}`);
 
+  // One-time migration: generate slugs for existing vendors that don't have one
+  backfillVendorSlugs();
   // Start daily database backup scheduler
   setupDailyBackup();
   // Auto-release vendor funds 7 days after delivery if customer hasn't confirmed
@@ -205,6 +209,8 @@ server.listen(PORT, () => {
   setupVCreditsExpiry();
   // Vendor lifecycle reminder emails (KYC, products, profile, payouts, sales, subscriptions)
   setupVendorReminders();
+  // Remind vendors of unanswered product questions at 24h, 72h, and 7-day intervals
+  setupQuestionReminders();
 });
 
 // SET SERVER TIMEOUT

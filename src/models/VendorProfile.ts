@@ -4,6 +4,7 @@ import { VendorVerificationStatus, IKYCDocument, IPayoutDetails } from '../types
 export interface IVendorProfile extends Document {
   user: Types.ObjectId;
   businessName: string;
+  slug: string;
   businessDescription?: string;
   businessLogo?: string;
   businessBanner?: string;
@@ -94,6 +95,11 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     type: String,
     required: true,
     trim: true,
+  },
+  slug: {
+    type: String,
+    trim: true,
+    lowercase: true,
   },
   businessDescription: {
     type: String,
@@ -262,9 +268,10 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
 
 // Indexes
 vendorProfileSchema.index({ user: 1 });
+vendorProfileSchema.index({ slug: 1 }, { unique: true, sparse: true });
 vendorProfileSchema.index({ verificationStatus: 1 });
 vendorProfileSchema.index({ isActive: 1 });
-vendorProfileSchema.index({ followers: 1 }); // ✅ ADD THIS LINE
+vendorProfileSchema.index({ followers: 1 });
 
 
 const VendorProfile = mongoose.model<IVendorProfile>('VendorProfile', vendorProfileSchema);

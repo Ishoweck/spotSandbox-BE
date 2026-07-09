@@ -868,6 +868,72 @@ class NotificationService {
   }
 
   // ================================================================
+  // QUESTION NOTIFICATIONS
+  // ================================================================
+
+  async questionAsked(
+    vendorId: string,
+    askerName: string,
+    questionPreview: string,
+    productName: string,
+    productId: string,
+    questionId: string,
+  ): Promise<void> {
+    await this.send({
+      userId: vendorId,
+      type: NotificationType.QUESTION,
+      title: `New Question on "${productName}"`,
+      message: `${askerName} asked: "${questionPreview}"`,
+      data: { productId, questionId, type: 'question' },
+      referenceId: `question_asked:${questionId}`,
+    });
+  }
+
+  async questionAnswered(
+    customerId: string,
+    vendorName: string,
+    answerPreview: string,
+    productName: string,
+    productId: string,
+    questionId: string,
+  ): Promise<void> {
+    await this.send({
+      userId: customerId,
+      type: NotificationType.QUESTION,
+      title: `Your question was answered`,
+      message: `${vendorName} replied to your question on "${productName}": "${answerPreview}"`,
+      data: { productId, questionId, type: 'question' },
+      referenceId: `question_answered:${questionId}`,
+    });
+  }
+
+  async questionUnansweredReminder(
+    vendorId: string,
+    count: number,
+    productName: string,
+    productId: string,
+    questionId: string,
+    hoursElapsed: number,
+  ): Promise<void> {
+    const urgency = hoursElapsed >= 168 ? '⚠️ Final Reminder: ' : hoursElapsed >= 72 ? '⏰ Reminder: ' : '';
+    const title = count === 1
+      ? `${urgency}Unanswered Question`
+      : `${urgency}${count} Unanswered Questions`;
+    const message = count === 1
+      ? `A customer is still waiting for your reply on "${productName}". Tap to answer now.`
+      : `${count} customers are waiting for your replies. Answer them to keep your store active.`;
+
+    await this.send({
+      userId: vendorId,
+      type: NotificationType.QUESTION,
+      title,
+      message,
+      data: { productId, questionId, type: 'question' },
+      referenceId: makeReferenceId(vendorId, `q_reminder_${hoursElapsed}h`, String(Math.floor(Date.now() / (6 * 3600000)))),
+    });
+  }
+
+  // ================================================================
   // VENDOR SALES NOTIFICATION
   // ================================================================
 

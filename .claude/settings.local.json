@@ -91,7 +91,11 @@
       "Bash(Select-Object Name, PSIsContainer)",
       "Bash(dir \"C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-admin\\\\src\\\\components\\\\ui\")",
       "PowerShell(git *)",
-      "Bash(Sort-Object FullName)"
+      "Bash(Sort-Object FullName)",
+      "Bash(xargs grep -l \"VendorQuestion\\\\|vendor.*question\\\\|question.*inbox\" -i)",
+      "Bash(dir C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src *)",
+      "Bash(grep *)",
+      "Bash(Rename-Item C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\src\\\\app\\\\shops\\\\[id] *)"
     ]
   }
 }

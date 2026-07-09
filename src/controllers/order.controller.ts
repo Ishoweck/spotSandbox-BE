@@ -2990,7 +2990,7 @@
      */
     async getUserOrders(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 200);
       const skip = (page - 1) * limit;
 
       const filter: any = { user: req.user?.id };

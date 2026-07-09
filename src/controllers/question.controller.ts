@@ -1,6 +1,6 @@
 // controllers/question.controller.ts
 import { Response } from 'express';
-import { AuthRequest, ApiResponse, NotificationType } from '../types';
+import { AuthRequest, ApiResponse } from '../types';
 import ProductQuestion from '../models/ProductQuestion';
 import Product from '../models/Product';
 import User from '../models/User';
@@ -49,16 +49,17 @@ export class QuestionController {
       const asker = await User.findById(req.user?.id).select('firstName lastName');
       const vendorId = product.vendor?.toString();
       if (asker && vendorId) {
-        const preview = question.trim().length > 60
-          ? question.trim().substring(0, 60) + '…'
+        const preview = question.trim().length > 80
+          ? question.trim().substring(0, 80) + '…'
           : question.trim();
-        await notificationService.send({
-          userId: vendorId,
-          type: NotificationType.REVIEW,
-          title: `New Question on "${product.name}"`,
-          message: `${asker.firstName} ${asker.lastName} asked: "${preview}"`,
-          data: { productId, questionId: newQuestion._id.toString() },
-        });
+        await notificationService.questionAsked(
+          vendorId,
+          `${asker.firstName} ${asker.lastName}`,
+          preview,
+          product.name,
+          productId,
+          newQuestion._id.toString(),
+        );
       }
     } catch (err: any) {
       logger.error('Error sending question notification:', err.message);
@@ -136,7 +137,7 @@ export class QuestionController {
     const { questionId } = req.params;
     const { answer } = req.body;
 
-    const question = await ProductQuestion.findById(questionId).populate('product', 'vendor');
+    const question = await ProductQuestion.findById(questionId).populate('product', 'vendor name');
 
     if (!question) {
       throw new AppError('Question not found', 404);
@@ -157,6 +158,28 @@ export class QuestionController {
     await question.populate('answeredBy', 'firstName lastName avatar profileImage');
 
     logger.info(`Question ${questionId} answered by vendor ${req.user?.id}`);
+
+    // Notify the customer who asked
+    try {
+      const vendor = await User.findById(req.user?.id).select('firstName lastName');
+      const asker = question.user as any;
+      const prod = question.product as any;
+      if (vendor && asker?._id) {
+        const answerPreview = answer.trim().length > 80
+          ? answer.trim().substring(0, 80) + '…'
+          : answer.trim();
+        await notificationService.questionAnswered(
+          asker._id.toString(),
+          `${vendor.firstName} ${vendor.lastName}`,
+          answerPreview,
+          prod?.name || 'a product',
+          prod?._id?.toString() || '',
+          questionId,
+        );
+      }
+    } catch (err: any) {
+      logger.error('Error sending answer notification:', err.message);
+    }
 
     res.json({
       success: true,
