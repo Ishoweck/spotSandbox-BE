@@ -492,25 +492,35 @@ export class DisputeController {
       throw new AppError('Invalid refund type. Must be "full", "partial", or "none"', 400);
     }
 
-    dispute.resolvedBy = new mongoose.Types.ObjectId(req.user?.id);
-    dispute.resolution = resolution;
-    dispute.refundAmount = finalRefundAmount;
-    dispute.refundType = refundType;
-
-    // Add admin resolution message to thread
-    dispute.messages.push({
-      sender: req.user?.id,
-      senderRole: 'admin',
-      message: `Dispute resolved: ${refundType === 'none' ? 'Rejected' : `${refundType} refund of ₦${finalRefundAmount.toLocaleString()}`}. ${resolution || ''}`,
-      createdAt: new Date(),
-    } as any);
-
-    await dispute.save();
-
-    // Process refund inside a transaction so wallet + order updates are atomic
+    // Process refund and dispute resolution inside a single transaction —
+    // dispute.save() is inside so a wallet-credit failure rolls back the status change too
     const session = await startSession();
     try {
       await session.withTransaction(async () => {
+        // Atomically claim resolution — re-check inside transaction to prevent concurrent double-resolve
+        const freshDispute = await Dispute.findOneAndUpdate(
+          { _id: dispute._id, status: { $nin: [DisputeStatus.RESOLVED_FULL_REFUND, DisputeStatus.RESOLVED_PARTIAL_REFUND, DisputeStatus.REJECTED, DisputeStatus.CLOSED] } },
+          {
+            $set: {
+              status: dispute.status,
+              resolvedBy: new mongoose.Types.ObjectId(req.user?.id),
+              resolution,
+              refundAmount: finalRefundAmount,
+              refundType,
+            },
+            $push: {
+              messages: {
+                sender: req.user?.id,
+                senderRole: 'admin',
+                message: `Dispute resolved: ${refundType === 'none' ? 'Rejected' : `${refundType} refund of ₦${finalRefundAmount.toLocaleString()}`}. ${resolution || ''}`,
+                createdAt: new Date(),
+              },
+            },
+          },
+          { session, new: false }
+        );
+        if (!freshDispute) throw new AppError('Dispute already resolved by concurrent request', 409);
+
         if (finalRefundAmount > 0) {
           logger.info(`💰 Processing refund of ₦${finalRefundAmount} to customer wallet...`);
 

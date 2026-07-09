@@ -95,7 +95,12 @@
       "Bash(xargs grep -l \"VendorQuestion\\\\|vendor.*question\\\\|question.*inbox\" -i)",
       "Bash(dir C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend\\\\src *)",
       "Bash(grep *)",
-      "Bash(Rename-Item C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\src\\\\app\\\\shops\\\\[id] *)"
+      "Bash(Rename-Item C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-website\\\\src\\\\app\\\\shops\\\\[id] *)",
+      "Bash(git stash *)",
+      "Bash(git pull *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat\\(ambassador\\): add milestone payout system and milestonesPaid tracking *)",
+      "Bash(dir C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend *)"
     ]
   }
 }

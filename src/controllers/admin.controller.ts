@@ -2457,13 +2457,13 @@ export const processRefund = asyncHandler(
     const { id } = req.params;
     const { amount, reason, refundType = 'full' } = req.body;
 
-    const order = await Order.findById(id);
-    if (!order) {
+    const orderForCheck = await Order.findById(id).select('paymentStatus total user orderNumber');
+    if (!orderForCheck) {
       res.status(404).json({ success: false, message: 'Order not found' });
       return;
     }
 
-    if (order.paymentStatus !== PaymentStatus.COMPLETED) {
+    if (orderForCheck.paymentStatus !== PaymentStatus.COMPLETED) {
       res.status(400).json({
         success: false,
         message: 'Can only refund orders with completed payments',
@@ -2471,39 +2471,54 @@ export const processRefund = asyncHandler(
       return;
     }
 
-    const refundAmount = refundType === 'full' ? order.total : Number(amount);
+    const refundAmount = refundType === 'full' ? orderForCheck.total : Number(amount);
 
-    if (!refundAmount || refundAmount <= 0 || refundAmount > order.total) {
+    if (!refundAmount || refundAmount <= 0 || refundAmount > orderForCheck.total) {
       res.status(400).json({
         success: false,
-        message: `Invalid refund amount. Must be between 0 and ${order.total}`,
+        message: `Invalid refund amount. Must be between 0 and ${orderForCheck.total}`,
       });
       return;
     }
 
-    // Credit customer wallet
-    const wallet = await Wallet.findOne({ user: order.user });
-    if (wallet) {
-      wallet.balance += refundAmount;
-      wallet.totalEarned += refundAmount;
-      wallet.transactions.push({
-        type: TransactionType.CREDIT,
-        amount: refundAmount,
-        purpose: WalletPurpose.REFUND,
-        reference: `REFUND-${order.orderNumber}-${Date.now()}`,
-        description: `Refund for order #${order.orderNumber}${reason ? `: ${reason}` : ''}`,
-        relatedOrder: order._id,
-        status: 'completed',
-        timestamp: new Date(),
-      });
-      await wallet.save();
+    // Atomically flip the order to REFUNDED — prevents double-refund if admin clicks twice
+    const order = await Order.findOneAndUpdate(
+      { _id: id, paymentStatus: PaymentStatus.COMPLETED },
+      {
+        $set: {
+          status: OrderStatus.REFUNDED,
+          paymentStatus: PaymentStatus.REFUNDED,
+          refundAmount,
+          refundReason: reason || 'Admin processed refund',
+        },
+      },
+      { new: true }
+    );
+    if (!order) {
+      res.status(409).json({ success: false, message: 'Refund already processed or order state changed' });
+      return;
     }
 
-    order.status = OrderStatus.REFUNDED;
-    order.paymentStatus = PaymentStatus.REFUNDED;
-    order.refundAmount = refundAmount;
-    order.refundReason = reason || 'Admin processed refund';
-    await order.save();
+    // Credit customer wallet atomically — safe against concurrent calls
+    await Wallet.findOneAndUpdate(
+      { user: order.user },
+      {
+        $inc: { balance: refundAmount, totalEarned: refundAmount },
+        $push: {
+          transactions: {
+            type: TransactionType.CREDIT,
+            amount: refundAmount,
+            purpose: WalletPurpose.REFUND,
+            reference: `REFUND-${order.orderNumber}`,
+            description: `Refund for order #${order.orderNumber}${reason ? `: ${reason}` : ''}`,
+            relatedOrder: order._id,
+            status: 'completed',
+            timestamp: new Date(),
+          },
+        },
+      },
+      { upsert: true }
+    );
 
     // Notify customer
     await notificationService.refundIssued(

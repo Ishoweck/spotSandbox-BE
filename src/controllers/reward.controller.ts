@@ -95,14 +95,13 @@ export class RewardController {
     description: string,
     metadata?: any
   ): Promise<void> {
-    const user = await User.findById(userId);
-    if (!user) {
-      return;
-    }
-
-    // Update user points
-    user.points = (user.points || 0) + points;
-    await user.save();
+    // Atomic $inc — prevents lost updates if called concurrently for the same user
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { points } },
+      { new: false }
+    );
+    if (!user) return;
 
     // Set 60-day expiry from today
     const expiresAt = new Date();
@@ -184,26 +183,26 @@ export class RewardController {
       metadata: { vCredits: cashValue },
     });
 
-    // Add to wallet as VCredits (separate from cash balance)
-    let wallet = await Wallet.findOne({ user: user._id });
-    if (!wallet) {
-      wallet = await Wallet.create({ user: user._id });
-    }
-
-    wallet.vCredits = (wallet.vCredits || 0) + cashValue;
-    wallet.vCreditsExpiresAt = this.vCreditsExpiry();
-    wallet.vCreditsRemindersSent = [];
-    wallet.transactions.push({
-      type: 'credit',
-      amount: cashValue,
-      purpose: 'reward',
-      reference: `VCREDITS-${Date.now()}`,
-      description: `Converted ${points} points to ${cashValue} VCredits`,
-      status: 'completed',
-      timestamp: new Date(),
-    } as any);
-
-    await wallet.save();
+    // Add to wallet as VCredits — atomic $inc prevents lost updates on concurrent redemptions
+    await Wallet.findOneAndUpdate(
+      { user: user._id },
+      {
+        $inc: { vCredits: cashValue },
+        $set: { vCreditsExpiresAt: this.vCreditsExpiry(), vCreditsRemindersSent: [] },
+        $push: {
+          transactions: {
+            type: 'credit',
+            amount: cashValue,
+            purpose: 'reward',
+            reference: `VCREDITS-${user._id}-${Date.now()}`,
+            description: `Converted ${points} points to ${cashValue} VCredits`,
+            status: 'completed',
+            timestamp: new Date(),
+          },
+        },
+      },
+      { upsert: true }
+    );
 
     logger.info(`Points redeemed: ${points} by user ${req.user?.id}`);
 
@@ -221,7 +220,6 @@ export class RewardController {
         pointsRedeemed: points,
         vCreditsEarned: cashValue,
         remainingPoints: updated.points,
-        vCreditsBalance: wallet.vCredits,
       },
     });
     } finally {
@@ -655,23 +653,22 @@ export class RewardController {
    * Unlock vendor referral points when the vendor makes their first sale
    */
   async unlockVendorReferralPoints(vendorId: string): Promise<void> {
-    const lockedTx = await PointsTransaction.findOne({
-      lockedForVendor: new Types.ObjectId(vendorId),
-      status: 'locked',
-      type: 'earn',
-      activity: 'referral',
-    });
-
-    if (!lockedTx) return;
-
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + POINTS_EXPIRY_DAYS);
 
-    await PointsTransaction.findByIdAndUpdate(lockedTx._id, {
-      status: 'active',
-      expiresAt,
-      description: 'Vendor referral reward (unlocked — vendor made first sale)',
-    });
+    // Atomically flip status from 'locked' → 'active' — returns null if already unlocked,
+    // which prevents double-credit if called concurrently for the same vendor
+    const lockedTx = await PointsTransaction.findOneAndUpdate(
+      {
+        lockedForVendor: new Types.ObjectId(vendorId),
+        status: 'locked',
+        type: 'earn',
+        activity: 'referral',
+      },
+      { $set: { status: 'active', expiresAt, description: 'Vendor referral reward (unlocked — vendor made first sale)' } }
+    );
+
+    if (!lockedTx) return;
 
     await User.findByIdAndUpdate(lockedTx.user, {
       $inc: { points: lockedTx.points },
@@ -696,16 +693,13 @@ export class RewardController {
    * so points are never given for cancelled or still-in-escrow orders.
    */
   async awardOrderPoints(orderId: string): Promise<void> {
-    const order = await Order.findById(orderId);
-    if (!order || order.paymentStatus !== 'completed' || !(order as any).fundsReleased) return;
-
-    // Idempotency: bail if points were already awarded for this order
-    const alreadyAwarded = await PointsTransaction.findOne({
-      user: order.user,
-      activity: 'purchase',
-      'metadata.orderId': order._id,
-    });
-    if (alreadyAwarded) return;
+    // Atomically claim the points slot — prevents double-award if called concurrently
+    // from completeOrder and completeVendorShipment for the same order
+    const order = await Order.findOneAndUpdate(
+      { _id: orderId, paymentStatus: 'completed', fundsReleased: true, pointsAwarded: { $ne: true } },
+      { $set: { pointsAwarded: true } }
+    );
+    if (!order) return; // Not eligible or already awarded
 
     const points = Math.floor(order.total / 100);
     if (points > 0) {

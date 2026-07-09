@@ -251,62 +251,62 @@ export class ChallengeController {
   async claimReward(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     const { challengeId } = req.params;
 
-    const challenge = await Challenge.findById(challengeId);
-    if (!challenge) {
-      throw new AppError('Challenge not found', 404);
-    }
+    const userId = req.user!.id;
 
-    const participation = challenge.participants.find(
-      (p: any) => p.user.toString() === req.user?.id
+    // Atomically mark the reward as claimed — prevents double-claim on concurrent requests
+    const challenge = await Challenge.findOneAndUpdate(
+      {
+        _id: challengeId,
+        participants: {
+          $elemMatch: { user: userId, completed: true, rewardClaimed: { $ne: true } },
+        },
+      },
+      { $set: { 'participants.$.rewardClaimed': true } },
+      { new: false }
     );
 
-    if (!participation) {
-      throw new AppError('Not participating in this challenge', 400);
-    }
-
-    if (!participation.completed) {
-      throw new AppError('Challenge not yet completed', 400);
-    }
-
-    if (participation.rewardClaimed) {
+    if (!challenge) {
+      // Distinguish between "not found" and "already claimed / not eligible"
+      const existing = await Challenge.findById(challengeId);
+      if (!existing) throw new AppError('Challenge not found', 404);
+      const participation = existing.participants.find((p: any) => p.user.toString() === userId);
+      if (!participation) throw new AppError('Not participating in this challenge', 400);
+      if (!participation.completed) throw new AppError('Challenge not yet completed', 400);
       throw new AppError('Reward already claimed', 400);
     }
 
+    const participation = challenge.participants.find((p: any) => p.user.toString() === userId)!;
+
     // Process reward based on type
     if (challenge.rewardType === 'cash') {
-      // Add to wallet
-      let wallet = await Wallet.findOne({ user: req.user?.id });
-      if (!wallet) {
-        wallet = await Wallet.create({ user: req.user?.id });
-      }
-
-      wallet.balance += challenge.rewardValue;
-      wallet.totalEarned += challenge.rewardValue;
-      wallet.transactions.push({
-        type: 'credit',
-        amount: challenge.rewardValue,
-        purpose: 'reward',
-        reference: `CHALLENGE-${challenge._id}`,
-        description: `Reward for completing: ${challenge.title}`,
-        status: 'completed',
-        timestamp: new Date(),
-      } as any);
-
-      await wallet.save();
+      await Wallet.findOneAndUpdate(
+        { user: userId },
+        {
+          $inc: { balance: challenge.rewardValue, totalEarned: challenge.rewardValue },
+          $push: {
+            transactions: {
+              type: 'credit',
+              amount: challenge.rewardValue,
+              purpose: 'reward',
+              reference: `CHALLENGE-${challenge._id}`,
+              description: `Reward for completing: ${challenge.title}`,
+              status: 'completed',
+              timestamp: new Date(),
+            },
+          },
+        },
+        { upsert: true }
+      );
     } else if (challenge.rewardType === 'points') {
       const { rewardController } = await import('./reward.controller');
       await rewardController.awardPoints(
-        req.user?.id as string,
+        userId,
         challenge.rewardValue,
         'bonus',
         `Reward for completing: ${challenge.title}`,
         { challengeId: challenge._id.toString() }
       );
     }
-
-    // Mark reward as claimed
-    participation.rewardClaimed = true;
-    await challenge.save();
 
     logger.info(`Reward claimed: ${challenge.title} by user ${req.user?.id}`);
 

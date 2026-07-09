@@ -737,29 +737,41 @@ async function _fulfillOrder(reference: string, paidAmountNaira: number, metadat
     }
   }
 
-  // Create the order with snapshot financials
-  const order = await Order.create({
-    orderNumber:      reference,
-    user:             userId,
-    items:            orderItems,
-    subtotal:         snapshot.subtotal,
-    discount:         snapshot.discount || 0,
-    shippingCost:     snapshot.totalShippingCost || 0,
-    tax:              snapshot.tax || 0,
-    serviceCharge:    snapshot.serviceCharge || 0,
-    total:            snapshot.total,
-    status:           isDigitalOnly ? OrderStatus.DELIVERED : OrderStatus.PENDING,
-    paymentStatus:    PaymentStatus.COMPLETED,
-    paymentMethod:    snapshot.paymentMethod,
-    paymentReference: reference,
-    shippingAddress:  isDigitalOnly ? undefined : snapshot.shippingAddress,
-    couponCode:       snapshot.couponCode,
-    notes:            snapshot.notes,
-    deliveryType:     isDigitalOnly ? 'digital' : snapshot.deliveryType,
-    isPickup:         snapshot.deliveryType === 'pickup' || isDigitalOnly,
-    vendorShipments,
-    isDigital:        isDigitalOnly,
-  });
+  // Create the order with snapshot financials.
+  // The unique index on orderNumber means a concurrent duplicate webhook will throw
+  // error code 11000 — we catch that and treat it the same as "already exists".
+  let order: any;
+  try {
+    order = await Order.create({
+      orderNumber:      reference,
+      user:             userId,
+      items:            orderItems,
+      subtotal:         snapshot.subtotal,
+      discount:         snapshot.discount || 0,
+      shippingCost:     snapshot.totalShippingCost || 0,
+      tax:              snapshot.tax || 0,
+      serviceCharge:    snapshot.serviceCharge || 0,
+      total:            snapshot.total,
+      status:           isDigitalOnly ? OrderStatus.DELIVERED : OrderStatus.PENDING,
+      paymentStatus:    PaymentStatus.COMPLETED,
+      paymentMethod:    snapshot.paymentMethod,
+      paymentReference: reference,
+      shippingAddress:  isDigitalOnly ? undefined : snapshot.shippingAddress,
+      couponCode:       snapshot.couponCode,
+      notes:            snapshot.notes,
+      deliveryType:     isDigitalOnly ? 'digital' : snapshot.deliveryType,
+      isPickup:         snapshot.deliveryType === 'pickup' || isDigitalOnly,
+      vendorShipments,
+      isDigital:        isDigitalOnly,
+    });
+  } catch (createErr: any) {
+    if (createErr.code === 11000) {
+      logger.info(`[Paystack Webhook] Duplicate order create blocked for ${reference} — already fulfilled by concurrent request`);
+      await PendingPayment.findOneAndUpdate({ reference }, { status: 'completed', completedAt: new Date() });
+      return;
+    }
+    throw createErr;
+  }
 
   logger.info(`[Paystack Webhook] Order created: ${order._id} (ref: ${reference})`);
 

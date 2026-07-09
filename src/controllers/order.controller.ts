@@ -2165,13 +2165,26 @@
         logger.info(`📦 Vendor: ${group.vendorName} (${group.vendorId})`);
 
         const physicalItems = group.items.filter(item => item.isPhysical);
-        
+
         if (physicalItems.length === 0) {
           logger.info(`⏭️ Skipping ${group.vendorName} - no physical items`);
           continue;
         }
 
         logger.info(`📦 Physical items: ${physicalItems.length}/${group.items.length}`);
+
+        // Re-fetch the order from DB to get the latest trackingNumber state.
+        // This prevents duplicate Shipbubble labels when the vendor hits confirm
+        // multiple times (each request saw an empty vendorShipments array and proceeded).
+        const freshOrder = await Order.findById(order._id).select('vendorShipments').lean();
+        const freshVS = (freshOrder as any)?.vendorShipments?.find((vs: any) => {
+          const vsId = typeof vs.vendor === 'object' ? vs.vendor._id?.toString() : vs.vendor?.toString();
+          return vsId === group.vendorId;
+        });
+        if (freshVS?.trackingNumber && freshVS.trackingNumber !== 'CREATING') {
+          logger.info(`⏭️ Shipment already exists for vendor ${group.vendorName} (${freshVS.trackingNumber}) — skipping`);
+          continue;
+        }
 
         try {
           const vendor = await User.findById(group.vendorId);
@@ -2374,6 +2387,23 @@
                     courier: vendorShipment.courier,
                     trackingUrl: vendorShipment.trackingUrl,
                   });
+                } else {
+                  // No vendorShipment entry pre-created (e.g. old checkout flow or empty array).
+                  // Push a new entry so tracking is recorded and future calls are blocked.
+                  if (!order.vendorShipments) order.vendorShipments = [];
+                  order.vendorShipments.push({
+                    vendor: group.vendorId,
+                    vendorName: group.vendorName,
+                    items: [],
+                    origin: { street: '', city: '', state: '', country: 'Nigeria' },
+                    shippingCost: 0,
+                    trackingNumber: orderId,
+                    shipmentId: shipment.data.shipment_id || orderId,
+                    courier: selectedCourier.courier_name,
+                    status: 'created',
+                    ...(trackingUrl && { trackingUrl }),
+                  } as any);
+                  logger.warn(`⚠️ No vendorShipment entry found for ${group.vendorName} — pushed new entry with tracking ${orderId}`);
                 }
 
                 await order.save();
@@ -3382,22 +3412,22 @@
     async cancelOrder(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       const { cancelReason } = req.body;
 
-      const order = await Order.findOne({
-        _id: req.params.id,
-        user: req.user?.id,
-      });
+      // Atomically flip status to CANCELLED — prevents double-cancel from concurrent requests
+      const order = await Order.findOneAndUpdate(
+        {
+          _id: req.params.id,
+          user: req.user?.id,
+          status: { $in: [OrderStatus.PENDING, OrderStatus.CONFIRMED] },
+        },
+        { $set: { status: OrderStatus.CANCELLED, cancelReason } },
+        { new: true, populate: [{ path: 'items.product' }, { path: 'items.vendor' }] }
+      );
 
       if (!order) {
-        throw new AppError('Order not found', 404);
-      }
-
-      if (![OrderStatus.PENDING, OrderStatus.CONFIRMED].includes(order.status)) {
+        const existing = await Order.findOne({ _id: req.params.id, user: req.user?.id }).select('status');
+        if (!existing) throw new AppError('Order not found', 404);
         throw new AppError('Order cannot be cancelled at this stage', 400);
       }
-
-      order.status = OrderStatus.CANCELLED;
-      (order as any).cancelReason = cancelReason;
-      await order.save();
 
       // Cancel shipments — always mark status cancelled; only call ShipBubble if tracked
       if ((order as any).vendorShipments && (order as any).vendorShipments.length > 0) {
@@ -3445,26 +3475,31 @@
       // Refund if payment completed
       if (order.paymentStatus === PaymentStatus.COMPLETED) {
         const refundAmount = Math.max(0, order.total);
-        const wallet = await Wallet.findOne({ user: req.user?.id });
-        if (wallet && refundAmount > 0) {
-          wallet.balance += refundAmount;
-          wallet.transactions.push({
-            type: TransactionType.CREDIT,
-            amount: refundAmount,
-            purpose: WalletPurpose.REFUND,
-            reference: `REF-${order.orderNumber}`,
-            description: `Refund for cancelled order ${order.orderNumber}`,
-            relatedOrder: order._id,
-            status: 'completed',
-            timestamp: new Date(),
-          } as any);
-          await wallet.save();
+        if (refundAmount > 0) {
+          await Wallet.findOneAndUpdate(
+            { user: req.user?.id },
+            {
+              $inc: { balance: refundAmount, totalEarned: refundAmount },
+              $push: {
+                transactions: {
+                  type: TransactionType.CREDIT,
+                  amount: refundAmount,
+                  purpose: WalletPurpose.REFUND,
+                  reference: `REF-${order.orderNumber}`,
+                  description: `Refund for cancelled order ${order.orderNumber}`,
+                  relatedOrder: order._id,
+                  status: 'completed',
+                  timestamp: new Date(),
+                },
+              },
+            },
+            { upsert: true }
+          );
         }
 
-        order.paymentStatus = PaymentStatus.REFUNDED;
-        (order as any).refundAmount = refundAmount;
-        (order as any).refundReason = cancelReason;
-        await order.save();
+        await Order.findByIdAndUpdate(order._id, {
+          $set: { paymentStatus: PaymentStatus.REFUNDED, refundAmount, refundReason: cancelReason },
+        });
 
         // Notify customer about refund
         try {
@@ -3600,21 +3635,25 @@
 
       // Refund if payment was completed
       if (order.paymentStatus === PaymentStatus.COMPLETED && refundAmount > 0) {
-        const wallet = await Wallet.findOne({ user: req.user?.id });
-        if (wallet) {
-          wallet.balance += refundAmount;
-          wallet.transactions.push({
-            type: TransactionType.CREDIT,
-            amount: refundAmount,
-            purpose: WalletPurpose.REFUND,
-            reference: `REF-${order.orderNumber}-${vendorId.slice(-6)}`,
-            description: `Refund for cancelled shipment from ${shipment.vendorName} on order ${order.orderNumber}`,
-            relatedOrder: order._id,
-            status: 'completed',
-            timestamp: new Date(),
-          } as any);
-          await wallet.save();
-        }
+        await Wallet.findOneAndUpdate(
+          { user: req.user?.id },
+          {
+            $inc: { balance: refundAmount, totalEarned: refundAmount },
+            $push: {
+              transactions: {
+                type: TransactionType.CREDIT,
+                amount: refundAmount,
+                purpose: WalletPurpose.REFUND,
+                reference: `REF-${order.orderNumber}-${vendorId.slice(-6)}`,
+                description: `Refund for cancelled shipment from ${shipment.vendorName} on order ${order.orderNumber}`,
+                relatedOrder: order._id,
+                status: 'completed',
+                timestamp: new Date(),
+              },
+            },
+          },
+          { upsert: true }
+        );
 
         if (allCancelled) {
           order.paymentStatus = PaymentStatus.REFUNDED;
@@ -3866,22 +3905,26 @@
           const refundAmount = itemsTotal + shipmentCost;
 
           if (refundAmount > 0) {
-            const wallet = await Wallet.findOne({ user: customerId });
-            if (wallet) {
-              wallet.balance += refundAmount;
-              wallet.transactions.push({
-                type: TransactionType.CREDIT,
-                amount: refundAmount,
-                purpose: WalletPurpose.REFUND,
-                reference: `REF-${order.orderNumber}-${(req.user!.id as string).slice(-6)}`,
-                description: `Refund for vendor cancellation on order ${order.orderNumber}`,
-                relatedOrder: order._id,
-                status: 'completed',
-                timestamp: new Date(),
-              } as any);
-              await wallet.save();
-              logger.info(`✅ Refund of ₦${refundAmount} issued to customer ${customerId}`);
-            }
+            await Wallet.findOneAndUpdate(
+              { user: customerId },
+              {
+                $inc: { balance: refundAmount, totalEarned: refundAmount },
+                $push: {
+                  transactions: {
+                    type: TransactionType.CREDIT,
+                    amount: refundAmount,
+                    purpose: WalletPurpose.REFUND,
+                    reference: `REF-${order.orderNumber}-${(req.user!.id as string).slice(-6)}`,
+                    description: `Refund for vendor cancellation on order ${order.orderNumber}`,
+                    relatedOrder: order._id,
+                    status: 'completed',
+                    timestamp: new Date(),
+                  },
+                },
+              },
+              { upsert: true }
+            );
+            logger.info(`✅ Refund of ₦${refundAmount} issued to customer ${customerId}`);
 
             // Notify customer about the refund
             await notificationService.refundIssued(customerId, order.orderNumber, refundAmount);
@@ -4257,11 +4300,13 @@
         // Unlock vendor referral points if any vendor is making their first sale
         const uniqueVendorIds = [...new Set(order.items.map((item: any) => item.vendor.toString()))];
         for (const vendorId of uniqueVendorIds) {
-          const vendorProfile = await VendorProfile.findOne({ user: vendorId });
-          if (vendorProfile && !vendorProfile.referralRewarded && vendorProfile.referredBy) {
+          // Atomic: only unlock if referralRewarded is not already true
+          const claimed = await VendorProfile.findOneAndUpdate(
+            { user: vendorId, referredBy: { $exists: true }, referralRewarded: { $ne: true } },
+            { $set: { referralRewarded: true } }
+          );
+          if (claimed) {
             await rewardController.unlockVendorReferralPoints(vendorId);
-            vendorProfile.referralRewarded = true;
-            await vendorProfile.save();
             logger.info(`✅ Vendor referral unlocked for vendor ${vendorId}`);
           }
           // Ambassador 60% commission — fire regardless of referralRewarded flag (separate system)
@@ -4416,12 +4461,12 @@
           // Unlock vendor referral points for first-sale vendors
           const uniqueVendorIds = [...new Set(order.items.map((item: any) => item.vendor.toString()))];
           for (const vId of uniqueVendorIds) {
-            const vProfile = await VendorProfile.findOne({ user: vId });
-            if (vProfile && !vProfile.referralRewarded && vProfile.referredBy) {
-              await rewardController.unlockVendorReferralPoints(vId);
-              vProfile.referralRewarded = true;
-              await vProfile.save();
-            }
+            // Atomic: only unlock if referralRewarded is not already true
+            const vClaimed = await VendorProfile.findOneAndUpdate(
+              { user: vId, referredBy: { $exists: true }, referralRewarded: { $ne: true } },
+              { $set: { referralRewarded: true } }
+            );
+            if (vClaimed) await rewardController.unlockVendorReferralPoints(vId);
             // Ambassador 60% commission
             import('./ambassador.controller').then(({ handleVendorFirstSale }) => {
               handleVendorFirstSale(vId);

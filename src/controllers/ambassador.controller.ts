@@ -39,29 +39,24 @@ function getVendorMilestone(vendorPartialSum: number) {
 
 async function checkAndPayMilestones(ambassadorUserId: string, newPartialSum: number): Promise<void> {
   try {
-    const ambassador = await Ambassador.findOne({ userId: ambassadorUserId }).select('milestonesPaid');
-    if (!ambassador) return;
-
-    const paidMilestones: number[] = ambassador.milestonesPaid || [];
-    const newlyPaid: number[] = [];
-
     for (const milestone of VENDOR_MILESTONES) {
-      if (newPartialSum >= milestone.count && !paidMilestones.includes(milestone.count)) {
-        await creditAmbassadorWallet(
-          ambassadorUserId,
-          milestone.reward,
-          `Milestone bonus — ${milestone.count} vendors referred`
-        );
-        newlyPaid.push(milestone.count);
-        logger.info(`Ambassador milestone ${milestone.count}: ₦${milestone.reward} → ${ambassadorUserId}`);
-      }
-    }
+      if (newPartialSum < milestone.count) continue;
 
-    if (newlyPaid.length > 0) {
-      await Ambassador.updateOne(
-        { userId: ambassadorUserId },
-        { $addToSet: { milestonesPaid: { $each: newlyPaid } } }
+      // Atomically add this milestone to milestonesPaid only if not already there.
+      // findOneAndUpdate returns null when $addToSet makes no change (already in array),
+      // meaning another concurrent call already claimed this milestone — skip.
+      const claimed = await Ambassador.findOneAndUpdate(
+        { userId: ambassadorUserId, milestonesPaid: { $ne: milestone.count } },
+        { $addToSet: { milestonesPaid: milestone.count } }
       );
+      if (!claimed) continue;
+
+      await creditAmbassadorWallet(
+        ambassadorUserId,
+        milestone.reward,
+        `Milestone bonus — ${milestone.count} vendors referred`
+      );
+      logger.info(`Ambassador milestone ${milestone.count}: ₦${milestone.reward} → ${ambassadorUserId}`);
     }
   } catch (err) {
     logger.error('Error paying ambassador milestones:', err);
@@ -444,25 +439,27 @@ export const getMyDashboard = asyncHandler(async (req: AuthRequest, res: Respons
  */
 export async function handleVendorProductApproved(vendorUserId: string): Promise<void> {
   try {
-    const referral = await AmbassadorReferral.findOne({
-      referredUserId: vendorUserId,
-      referredUserType: 'vendor',
-      stage40Reached: false,
-    });
-    if (!referral) return;
-
-    // Verify vendor account is also active/verified
+    // Verify vendor eligibility first (fast check before taking the DB lock)
     const vendor = await User.findById(vendorUserId).select('status emailVerified');
     if (!vendor || vendor.status !== 'active' || !vendor.emailVerified) return;
 
-    const commissionAmount = Math.round(referral.tierRate! * 0.4 * 100) / 100;
+    // Atomically claim the 40% stage — findOneAndUpdate returns null if already claimed,
+    // preventing double-credit on concurrent or retried calls
+    const referral = await AmbassadorReferral.findOneAndUpdate(
+      {
+        referredUserId: vendorUserId,
+        referredUserType: 'vendor',
+        stage40Reached: { $ne: true },
+      },
+      { $set: { stage40Reached: true, partialCount: 0.4, commission40PaidAt: new Date() } }
+    );
+    if (!referral) return;
 
-    referral.stage40Reached = true;
-    referral.partialCount = 0.4;
-    referral.commission40Amount = commissionAmount;
-    referral.commission40PaidAt = new Date();
-    referral.totalEarned += commissionAmount;
-    await referral.save();
+    const commissionAmount = Math.round(referral.tierRate! * 0.4 * 100) / 100;
+    await AmbassadorReferral.updateOne(
+      { _id: referral._id },
+      { $inc: { totalEarned: commissionAmount }, $set: { commission40Amount: commissionAmount } }
+    );
 
     await creditAmbassadorWallet(
       referral.ambassadorId.toString(),
@@ -488,22 +485,23 @@ export async function handleVendorProductApproved(vendorUserId: string): Promise
  */
 export async function handleVendorFirstSale(vendorUserId: string): Promise<void> {
   try {
-    const referral = await AmbassadorReferral.findOne({
-      referredUserId: vendorUserId,
-      referredUserType: 'vendor',
-      stage40Reached: true,
-      stage60Reached: false,
-    });
+    // Atomically claim the 60% stage — prevents double-credit on concurrent or retried calls
+    const referral = await AmbassadorReferral.findOneAndUpdate(
+      {
+        referredUserId: vendorUserId,
+        referredUserType: 'vendor',
+        stage40Reached: true,
+        stage60Reached: { $ne: true },
+      },
+      { $set: { stage60Reached: true, partialCount: 1.0, commission60PaidAt: new Date() } }
+    );
     if (!referral) return;
 
     const commissionAmount = Math.round(referral.tierRate! * 0.6 * 100) / 100;
-
-    referral.stage60Reached = true;
-    referral.partialCount = 1.0;
-    referral.commission60Amount = commissionAmount;
-    referral.commission60PaidAt = new Date();
-    referral.totalEarned += commissionAmount;
-    await referral.save();
+    await AmbassadorReferral.updateOne(
+      { _id: referral._id },
+      { $inc: { totalEarned: commissionAmount }, $set: { commission60Amount: commissionAmount } }
+    );
 
     await creditAmbassadorWallet(
       referral.ambassadorId.toString(),
@@ -533,29 +531,32 @@ export async function handleCustomerOrderCompleted(
   orderAmount: number
 ): Promise<void> {
   try {
-    const referral = await AmbassadorReferral.findOne({
-      referredUserId: customerUserId,
-      referredUserType: 'customer',
-    });
-    if (!referral) return;
-
-    if (referral.customerOrdersTracked.length >= 3) return;
-
-    const alreadyTracked = referral.customerOrdersTracked.some(
-      (r) => r.orderId.toString() === orderId
-    );
-    if (alreadyTracked) return;
-
     const commissionAmount = Math.round(orderAmount * 0.03 * 100) / 100;
 
-    referral.customerOrdersTracked.push({
-      orderId: orderId as any,
-      orderAmount,
-      commissionAmount,
-      paidAt: new Date(),
-    });
-    referral.totalEarned += commissionAmount;
-    await referral.save();
+    // Atomically push the order entry only if:
+    //  - fewer than 3 orders already tracked (index [2] doesn't exist)
+    //  - this orderId hasn't been tracked yet
+    // Returns null if either guard fails — prevents double-credit on retries
+    const referral = await AmbassadorReferral.findOneAndUpdate(
+      {
+        referredUserId: customerUserId,
+        referredUserType: 'customer',
+        'customerOrdersTracked.2': { $exists: false },
+        'customerOrdersTracked.orderId': { $ne: orderId as any },
+      },
+      {
+        $push: {
+          customerOrdersTracked: {
+            orderId: orderId as any,
+            orderAmount,
+            commissionAmount,
+            paidAt: new Date(),
+          },
+        },
+        $inc: { totalEarned: commissionAmount },
+      }
+    );
+    if (!referral) return;
 
     await creditAmbassadorWallet(
       referral.ambassadorId.toString(),

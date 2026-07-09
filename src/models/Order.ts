@@ -67,6 +67,7 @@ export interface IOrder extends Document {
   affiliateLinkId?: Types.ObjectId;
   affiliateCommissionPaid?: boolean;
   cashbackAwarded?: boolean;
+  pointsAwarded?: boolean;
   statusHistory: {
     status: OrderStatus;
     timestamp: Date;
@@ -262,6 +263,7 @@ const orderSchema = new Schema<IOrder>({
   affiliateLinkId: { type: Schema.Types.ObjectId, ref: 'AffiliateLink' },
   affiliateCommissionPaid: { type: Boolean, default: false },
   cashbackAwarded: { type: Boolean, default: false },
+  pointsAwarded: { type: Boolean, default: false },
   statusHistory: [{
     status: {
       type: String,
@@ -290,7 +292,7 @@ orderSchema.pre('save', function(next) {
 });
 
 // Indexes
-orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ paymentStatus: 1 });
