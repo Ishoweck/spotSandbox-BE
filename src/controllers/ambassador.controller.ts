@@ -37,6 +37,37 @@ function getVendorMilestone(vendorPartialSum: number) {
   };
 }
 
+async function checkAndPayMilestones(ambassadorUserId: string, newPartialSum: number): Promise<void> {
+  try {
+    const ambassador = await Ambassador.findOne({ userId: ambassadorUserId }).select('milestonesPaid');
+    if (!ambassador) return;
+
+    const paidMilestones: number[] = ambassador.milestonesPaid || [];
+    const newlyPaid: number[] = [];
+
+    for (const milestone of VENDOR_MILESTONES) {
+      if (newPartialSum >= milestone.count && !paidMilestones.includes(milestone.count)) {
+        await creditAmbassadorWallet(
+          ambassadorUserId,
+          milestone.reward,
+          `Milestone bonus — ${milestone.count} vendors referred`
+        );
+        newlyPaid.push(milestone.count);
+        logger.info(`Ambassador milestone ${milestone.count}: ₦${milestone.reward} → ${ambassadorUserId}`);
+      }
+    }
+
+    if (newlyPaid.length > 0) {
+      await Ambassador.updateOne(
+        { userId: ambassadorUserId },
+        { $addToSet: { milestonesPaid: { $each: newlyPaid } } }
+      );
+    }
+  } catch (err) {
+    logger.error('Error paying ambassador milestones:', err);
+  }
+}
+
 // ─── Generate unique ambassador code (AMB-XXXX) ───────────────────────────────
 async function generateAmbassadorCode(): Promise<string> {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -439,6 +470,12 @@ export async function handleVendorProductApproved(vendorUserId: string): Promise
       `Ambassador vendor referral (40%) — vendor ${vendorUserId} approved with product`
     );
 
+    const partialSumResult = await AmbassadorReferral.aggregate([
+      { $match: { ambassadorId: referral.ambassadorId, referredUserType: 'vendor' } },
+      { $group: { _id: null, sum: { $sum: '$partialCount' } } },
+    ]);
+    await checkAndPayMilestones(referral.ambassadorId.toString(), partialSumResult[0]?.sum || 0);
+
     logger.info(`Ambassador 40% commission: ₦${commissionAmount} → ${referral.ambassadorId}`);
   } catch (err) {
     logger.error('Error processing ambassador 40% commission:', err);
@@ -473,6 +510,12 @@ export async function handleVendorFirstSale(vendorUserId: string): Promise<void>
       commissionAmount,
       `Ambassador vendor referral (60%) — vendor ${vendorUserId} first sale`
     );
+
+    const partialSumResult = await AmbassadorReferral.aggregate([
+      { $match: { ambassadorId: referral.ambassadorId, referredUserType: 'vendor' } },
+      { $group: { _id: null, sum: { $sum: '$partialCount' } } },
+    ]);
+    await checkAndPayMilestones(referral.ambassadorId.toString(), partialSumResult[0]?.sum || 0);
 
     logger.info(`Ambassador 60% commission: ₦${commissionAmount} → ${referral.ambassadorId}`);
   } catch (err) {

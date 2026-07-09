@@ -33,6 +33,7 @@ export interface IAmbassador extends Document {
   rejectedAt?: Date;
   rejectionReason?: string;
   userId?: Types.ObjectId;
+  milestonesPaid: number[];
   // KYC — collected on the application form, reviewed by admin before approval
   homeAddress: string;
   idType: AmbassadorIdType;
@@ -74,6 +75,7 @@ const ambassadorSchema = new Schema<IAmbassador>(
     rejectedAt: Date,
     rejectionReason: String,
     userId: { type: Schema.Types.ObjectId, ref: 'User', sparse: true },
+    milestonesPaid: { type: [Number], default: [] },
     homeAddress: { type: String, required: true, trim: true },
     idType: {
       type: String,
