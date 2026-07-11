@@ -4,7 +4,7 @@ import User from '../models/User';
 import bcrypt from 'bcryptjs';
 import Ambassador from '../models/Ambassador';
 import { Wallet } from '../models/Additional';
-import { generateTokens, verifyRefreshToken } from '../utils/jwt';
+import { generateTokens, verifyRefreshToken, generateFaceVerifyToken, verifyFaceVerifyToken } from '../utils/jwt';
 import { generateOTP, generateAffiliateCode, generateResetCode } from '../utils/helpers';
 import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendActivationEmail, sendFounderWelcomeEmail, sendVendorWelcomeEmail, sendProductPostingGuideEmail, sendBuyerFounderWelcomeEmail } from '../utils/email';
 import { AppError } from '../middleware/error';
@@ -358,6 +358,36 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     throw new AppError('Account is not active', 403);
   }
 
+  // Admin roles must pass face verification if they have a face registered
+  const adminRoles = [
+    UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.FINANCIAL_ADMIN,
+    UserRole.SUPPORT_ADMIN, UserRole.CONTENT_ADMIN, UserRole.KYC_ADMIN, UserRole.MARKETING_ADMIN,
+  ] as string[];
+  if (adminRoles.includes(user.role)) {
+    const userWithFace = await User.findById(user._id).select('+faceDescriptor');
+    if (userWithFace?.faceDescriptor && userWithFace.faceDescriptor.length === 128) {
+      // Issue a short-lived token — frontend must complete face verification to get real tokens
+      const faceVerifyToken = generateFaceVerifyToken(user._id.toString(), user.email);
+      res.json({
+        success: true,
+        message: 'Face verification required',
+        data: {
+          requiresFaceVerification: true,
+          faceVerifyToken,
+          user: {
+            id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            role: user.role,
+            avatar: user.avatar,
+          },
+        },
+      });
+      return;
+    }
+  }
+
   // ✅ AWARD DAILY LOGIN POINTS
   await this.awardDailyLoginPoints(user);
 
@@ -382,6 +412,68 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
         avatar: user.avatar,
         isAffiliate: user.isAffiliate,
         affiliateCode: user.affiliateCode,
+      },
+      ...tokens,
+    },
+  });
+}
+
+/** Register face descriptor for the authenticated admin */
+async registerFace(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+  const { faceDescriptor } = req.body;
+  if (!Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+    throw new AppError('Invalid face data. Expected a 128-dimension descriptor.', 400);
+  }
+  await User.findByIdAndUpdate(req.user!.id, { faceDescriptor });
+  res.json({ success: true, message: 'Face registered successfully.' });
+}
+
+/** Verify face against stored descriptor and return full auth tokens */
+async verifyFace(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+  const { faceVerifyToken, faceDescriptor } = req.body;
+  if (!faceVerifyToken || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+    throw new AppError('Invalid request', 400);
+  }
+
+  let decoded: { id: string; email: string };
+  try {
+    decoded = verifyFaceVerifyToken(faceVerifyToken);
+  } catch {
+    throw new AppError('Face verification session expired. Please log in again.', 401);
+  }
+
+  const user = await User.findById(decoded.id).select('+faceDescriptor +password');
+  if (!user) throw new AppError('User not found', 404);
+  if (!user.faceDescriptor || user.faceDescriptor.length !== 128) {
+    throw new AppError('No face registered for this account', 400);
+  }
+
+  // Euclidean distance — face-api.js threshold is 0.6; we use 0.5 for stricter admin security
+  const distance = Math.sqrt(
+    faceDescriptor.reduce((sum: number, v: number, i: number) => sum + Math.pow(v - user.faceDescriptor![i], 2), 0)
+  );
+  if (distance > 0.5) {
+    throw new AppError('Face does not match. Access denied.', 401);
+  }
+
+  await this.awardDailyLoginPoints(user);
+  user.lastLogin = new Date();
+  await user.save();
+
+  const tokens = generateTokens(user._id, user.email, user.role, (user as any).tokenVersion ?? 0);
+
+  res.json({
+    success: true,
+    message: 'Face verification successful',
+    data: {
+      user: {
+        id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        avatar: user.avatar,
       },
       ...tokens,
     },

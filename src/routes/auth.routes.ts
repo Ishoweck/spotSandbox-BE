@@ -75,6 +75,10 @@ router.post('/oauth/apple', validate(appleLoginValidation), asyncHandler(oauthCo
 // Get support user — requires auth so anonymous users can't enumerate admin IDs
 router.get('/support-user', authenticate, asyncHandler(authController.getSupportUser.bind(authController)));
 
+// Face recognition routes
+router.post('/register-face', authenticate, asyncHandler(authController.registerFace.bind(authController)));
+router.post('/verify-face', authLimiter, asyncHandler(authController.verifyFace.bind(authController)));
+
 // Protected routes
 router.post('/logout', authenticate, asyncHandler(authController.logout.bind(authController)));
 router.get('/me', authenticate, asyncHandler(authController.getMe.bind(authController)));

@@ -50,6 +50,21 @@ export const verifyRefreshToken = (token: string): TokenPayload => {
   }
 };
 
+// Short-lived token issued after password check, valid only for face verification step
+export const generateFaceVerifyToken = (userId: string, email: string): string => {
+  return jwt.sign({ id: userId, email, type: 'face_verify' }, JWT_SECRET, {
+    expiresIn: '5m',
+  } as jwt.SignOptions);
+};
+
+export const verifyFaceVerifyToken = (token: string): { id: string; email: string } => {
+  const payload = jwt.verify(token, JWT_SECRET) as any;
+  if (payload.type !== 'face_verify') {
+    throw new Error('Invalid token type');
+  }
+  return { id: payload.id, email: payload.email };
+};
+
 export const generateTokens = (userId: Types.ObjectId, email: string, role: UserRole, tokenVersion = 0) => {
   const payload: TokenPayload = {
     id: userId.toString(),

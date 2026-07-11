@@ -387,6 +387,7 @@ export interface IUserDocument extends Document {
   tokenVersion?: number;
   transactionPin?: string;
   hasTransactionPin?: boolean;
+  faceDescriptor?: number[];
 
   // Notification preferences
   notificationPreferences?: {

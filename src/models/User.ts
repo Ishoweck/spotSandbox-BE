@@ -173,6 +173,12 @@ const userSchema = new Schema<IUserDocument>(
       }],
     },
 
+    // Face descriptor for facial recognition (128-dim vector from face-api.js)
+    faceDescriptor: {
+      type: [Number],
+      select: false,
+    },
+
     // Notification preferences
     notificationPreferences: {
       pushEnabled: { type: Boolean, default: true },
