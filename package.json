@@ -25,6 +25,7 @@
     "seed:all-states": "npx ts-node src/scripts/seedAllStates.ts",
     "backfill:ratings": "npx ts-node src/scripts/backfillVendorRatings.ts",
     "backfill:addresses": "npx ts-node src/scripts/backfillVendorAddresses.ts",
+    "backfill:slugs": "npx ts-node src/scripts/backfillVendorSlugs.ts",
     "seed:notif-templates": "npx ts-node scripts/seed-notification-templates.ts"
   },
   "keywords": [

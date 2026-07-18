@@ -1402,17 +1402,22 @@ export class VendorController {
       }
     }
 
+    // Use the resolved user ObjectId for all downstream queries so slug-based
+    // lookups don't cause a CastError when Mongoose tries to cast the slug string
+    // to an ObjectId on the Product.vendor field.
+    const vendorUserId = (vendorProfile.user as any)._id;
+
     let isFollowing = false;
     if (userId) {
       isFollowing = vendorProfile.followers?.some(id => id.toString() === userId) || false;
     }
 
     const [products, productCount, disputeCount, allProductSales] = await Promise.all([
-      Product.find({ vendor: vendorId, status: 'active' })
+      Product.find({ vendor: vendorUserId, status: 'active' })
         .select('name slug price images averageRating totalReviews'),
-      Product.countDocuments({ vendor: vendorId, status: 'active' }),
-      Dispute.countDocuments({ vendor: vendorId }),
-      Product.find({ vendor: vendorId }).select('totalSales'),
+      Product.countDocuments({ vendor: vendorUserId, status: 'active' }),
+      Dispute.countDocuments({ vendor: vendorUserId }),
+      Product.find({ vendor: vendorUserId }).select('totalSales'),
     ]);
 
     const computedTotalSales = allProductSales.reduce((sum: number, p: any) => sum + (p.totalSales || 0), 0);
@@ -1432,7 +1437,7 @@ export class VendorController {
 
     if (statsStale) {
       try {
-        const stats = await computeVendorResponseStats(vendorId);
+        const stats = await computeVendorResponseStats(vendorUserId.toString());
         vendorProfile.responseRate = stats.responseRate;
         vendorProfile.responseSpeed = stats.responseSpeed;
         vendorProfile.statsComputedAt = new Date();
