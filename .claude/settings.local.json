@@ -101,7 +101,10 @@
       "Bash(git add *)",
       "Bash(git commit -m 'feat\\(ambassador\\): add milestone payout system and milestonesPaid tracking *)",
       "Bash(dir C:\\\\Users\\\\YungFlash\\\\Downloads\\\\vendorspot-backend *)",
-      "Bash(website\")"
+      "Bash(website\")",
+      "Bash(findstr /i \"clipboard\")",
+      "Bash(adb devices *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
