@@ -396,7 +396,10 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   await user.save();
 
   // Generate tokens — embed tokenVersion so logout can invalidate this session
-  const tokens = generateTokens(user._id, user.email, user.role, (user as any).tokenVersion ?? 0);
+  const [tokens, ambassadorDoc] = await Promise.all([
+    Promise.resolve(generateTokens(user._id, user.email, user.role, (user as any).tokenVersion ?? 0)),
+    Ambassador.findOne({ userId: user._id }).select('ambassadorCode').lean(),
+  ]);
 
   res.json({
     success: true,
@@ -412,6 +415,8 @@ async login(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
         avatar: user.avatar,
         isAffiliate: user.isAffiliate,
         affiliateCode: user.affiliateCode,
+        isAmbassador: !!ambassadorDoc,
+        ambassadorCode: (ambassadorDoc as any)?.ambassadorCode ?? null,
       },
       ...tokens,
     },
@@ -701,7 +706,10 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
    * Get current user
    */
   async getMe(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const user = await User.findById(req.user?.id);
+    const [user, ambassadorDoc] = await Promise.all([
+      User.findById(req.user?.id),
+      Ambassador.findOne({ userId: req.user?.id }).select('ambassadorCode').lean(),
+    ]);
 
     if (!user) {
       throw new AppError('User not found', 404);
@@ -734,6 +742,8 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
           phoneVerified: user.phoneVerified,
           isAffiliate: user.isAffiliate,
           affiliateCode: user.affiliateCode,
+          isAmbassador: !!ambassadorDoc,
+          ambassadorCode: (ambassadorDoc as any)?.ambassadorCode ?? null,
         },
       },
     });
@@ -1007,6 +1017,9 @@ async updateAvatar(req: AuthRequest, res: Response<ApiResponse>): Promise<void> 
           lastName: user.lastName,
           email: user.email,
           role: user.role,
+          isAffiliate: true,
+          affiliateCode: ambassador.ambassadorCode,
+          isAmbassador: true,
           ambassadorCode: ambassador.ambassadorCode,
         },
         ...tokens,

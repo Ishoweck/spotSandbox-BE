@@ -147,6 +147,7 @@ import {
   getApplication as getAmbassador,
   approveApplication as approveAmbassador,
   rejectApplication as rejectAmbassador,
+  resendInvite as resendAmbassadorInvite,
   addNote as addAmbassadorNote,
   getAmbassadorReferrals,
   updateApplication as updateAmbassador,
@@ -353,6 +354,7 @@ router.get('/ambassadors', authorize(SA, A, MA), getAllAmbassadors);
 router.get('/ambassadors/:id', authorize(SA, A, MA), getAmbassador);
 router.put('/ambassadors/:id', authorize(SA, A), updateAmbassador);
 router.delete('/ambassadors/:id', authorize(SA, A), deleteAmbassador);
+router.post('/ambassadors/resend-invite', authorize(SA, A), resendAmbassadorInvite);
 router.post('/ambassadors/:id/approve', authorize(SA, A), approveAmbassador);
 router.post('/ambassadors/:id/reject', authorize(SA, A), rejectAmbassador);
 router.put('/ambassadors/:id/notes', authorize(SA, A, MA), addAmbassadorNote);

@@ -1309,6 +1309,10 @@ export const verifyVendor = asyncHandler(
       }
     } else {
       await notificationService.vendorRejected(vendor.user.toString(), rejectionReason);
+      // Clawback any ambassador commissions paid for this vendor
+      import('./ambassador.controller').then(({ handleVendorRejectedOrBlocked }) => {
+        handleVendorRejectedOrBlocked(vendor.user.toString(), 'rejected');
+      }).catch(() => {});
     }
 
     res.json({
@@ -1345,6 +1349,10 @@ export const toggleVendorStatus = asyncHandler(
         { vendor: vendor.user, status: 'active' },
         { $set: { status: 'vendor_suspended' } }
       );
+      // Clawback any ambassador commissions paid for this vendor
+      import('./ambassador.controller').then(({ handleVendorRejectedOrBlocked }) => {
+        handleVendorRejectedOrBlocked(vendor.user.toString(), 'blocked');
+      }).catch(() => {});
       if (activeProdIds.length > 0) {
         try {
           const Cart = require('../models/Cart').default;

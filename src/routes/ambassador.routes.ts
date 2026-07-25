@@ -8,9 +8,13 @@ import {
   getApplication,
   approveApplication,
   rejectApplication,
+  resendInvite,
   addNote,
   getAmbassadorReferrals,
   getMyDashboard,
+  getMyEarnings,
+  updateApplication,
+  deleteApplication,
 } from '../controllers/ambassador.controller';
 
 const router = Router();
@@ -23,12 +27,16 @@ router.get('/verify-invite', verifyInvite);
 router.use(authenticate);
 
 router.get('/my-dashboard', getMyDashboard);
+router.get('/my-earnings', getMyEarnings);
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
 router.get('/', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), getAllApplications);
 router.get('/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), getApplication);
+router.post('/resend-invite', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), resendInvite);
 router.post('/:id/approve', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), approveApplication);
 router.post('/:id/reject', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), rejectApplication);
+router.put('/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), updateApplication);
+router.delete('/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), deleteApplication);
 router.put('/:id/notes', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), addNote);
 router.get('/:id/referrals', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), getAmbassadorReferrals);
 

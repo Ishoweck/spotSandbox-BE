@@ -6,7 +6,7 @@ import AmbassadorReferral from '../models/AmbassadorReferral';
 import User from '../models/User';
 import { Wallet } from '../models/Additional';
 import { AppError, asyncHandler } from '../middleware/error';
-import { sendAmbassadorApprovalEmail } from '../utils/email';
+import { sendAmbassadorApprovalEmail, sendAmbassadorClawbackEmail } from '../utils/email';
 import { uploadToCloudinary } from '../utils/cloudinary';
 import { logger } from '../utils/logger';
 
@@ -265,6 +265,54 @@ export const approveApplication = asyncHandler(async (req: AuthRequest, res: Res
   });
 });
 
+// ─── Admin: Resend invite link ────────────────────────────────────────────────
+export const resendInvite = asyncHandler(async (req: AuthRequest, res: Response<ApiResponse>) => {
+  const { email } = req.body;
+  if (!email) throw new AppError('Email is required', 400);
+
+  const ambassador = await Ambassador.findOne({ email: email.toLowerCase().trim() });
+  if (!ambassador) throw new AppError('No ambassador application found for that email', 404);
+
+  if (ambassador.userId) {
+    throw new AppError('This ambassador has already completed registration', 400);
+  }
+
+  // Auto-approve if still pending
+  if (ambassador.status === 'pending') {
+    ambassador.status = 'approved';
+    ambassador.approvedBy = req.user?.id as any;
+    ambassador.approvedAt = new Date();
+    if (!ambassador.ambassadorCode) {
+      ambassador.ambassadorCode = await generateAmbassadorCode();
+    }
+  }
+
+  if (ambassador.status !== 'approved') {
+    throw new AppError('Ambassador application is not approved', 400);
+  }
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expires = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+  ambassador.inviteToken = hashedToken;
+  ambassador.inviteTokenExpires = expires;
+  await ambassador.save();
+
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const signupLink = `${frontendUrl}/ambassador-signup?token=${rawToken}`;
+
+  await sendAmbassadorApprovalEmail(ambassador.email, ambassador.name, ambassador.ambassadorCode!, signupLink);
+
+  logger.info(`Ambassador invite resent: ${ambassador.email} | Code: ${ambassador.ambassadorCode}`);
+
+  res.json({
+    success: true,
+    message: `Ambassador invite link sent to ${ambassador.email}`,
+    data: { ambassadorCode: ambassador.ambassadorCode },
+  });
+});
+
 // ─── Admin: Reject application ────────────────────────────────────────────────
 export const rejectApplication = asyncHandler(async (req: AuthRequest, res: Response<ApiResponse>) => {
   const { reason } = req.body;
@@ -400,18 +448,27 @@ export const getMyDashboard = asyncHandler(async (req: AuthRequest, res: Respons
   const ambassador = await Ambassador.findOne({ userId }).select('ambassadorCode role name status approvedAt');
   if (!ambassador) throw new AppError('Ambassador profile not found', 404);
 
-  const [vendors, customers] = await Promise.all([
+  const [vendors, customers, wallet, user] = await Promise.all([
     AmbassadorReferral.find({ ambassadorId: userId, referredUserType: 'vendor' })
       .populate('referredUserId', 'firstName lastName email createdAt')
       .sort({ createdAt: -1 }),
     AmbassadorReferral.find({ ambassadorId: userId, referredUserType: 'customer' })
       .populate('referredUserId', 'firstName lastName email createdAt')
       .sort({ createdAt: -1 }),
+    Wallet.findOne({ user: userId }),
+    User.findById(userId).select('payoutDetails'),
   ]);
 
   const vendorPartialSum = vendors.reduce((sum, v) => sum + (v.partialCount || 0), 0);
   const vendorEarned = vendors.reduce((sum, v) => sum + (v.totalEarned || 0), 0);
   const customerEarned = customers.reduce((sum, c) => sum + (c.totalEarned || 0), 0);
+
+  const recentTransactions = wallet
+    ? [...wallet.transactions]
+        .filter((t) => t.purpose === 'commission')
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+        .slice(0, 20)
+    : [];
 
   res.json({
     success: true,
@@ -427,6 +484,61 @@ export const getMyDashboard = asyncHandler(async (req: AuthRequest, res: Respons
         customerEarned,
         totalEarned: vendorEarned + customerEarned,
       },
+      wallet: {
+        balance: wallet?.balance ?? 0,
+        pendingBalance: wallet?.pendingBalance ?? 0,
+        totalWithdrawn: wallet?.totalWithdrawn ?? 0,
+        recentTransactions,
+      },
+      hasBankAccount: !!(user as any)?.payoutDetails?.accountNumber,
+    },
+  });
+});
+
+// ─── Ambassador: Earnings + wallet history ────────────────────────────────────
+export const getMyEarnings = asyncHandler(async (req: AuthRequest, res: Response<ApiResponse>) => {
+  const userId = req.user?.id;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+
+  const ambassador = await Ambassador.findOne({ userId }).select('ambassadorCode name status');
+  if (!ambassador) throw new AppError('Ambassador profile not found', 404);
+
+  const [wallet, user] = await Promise.all([
+    Wallet.findOne({ user: userId }),
+    User.findById(userId).select('payoutDetails'),
+  ]);
+
+  const allTxns = wallet
+    ? [...wallet.transactions]
+        .filter((t) => t.purpose === 'commission')
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    : [];
+
+  const pendingWithdrawals = wallet
+    ? wallet.transactions.filter((t) => t.purpose === 'withdrawal' && t.status === 'pending')
+    : [];
+
+  const startIndex = (page - 1) * limit;
+  const transactions = allTxns.slice(startIndex, startIndex + limit);
+
+  res.json({
+    success: true,
+    data: {
+      balance: wallet?.balance ?? 0,
+      pendingBalance: wallet?.pendingBalance ?? 0,
+      totalEarned: wallet?.totalEarned ?? 0,
+      totalWithdrawn: wallet?.totalWithdrawn ?? 0,
+      hasBankAccount: !!(user as any)?.payoutDetails?.accountNumber,
+      bankAccount: (user as any)?.payoutDetails ?? null,
+      pendingWithdrawals,
+      transactions,
+    },
+    meta: {
+      page,
+      limit,
+      total: allTxns.length,
+      totalPages: Math.ceil(allTxns.length / limit),
     },
   });
 });
@@ -626,7 +738,7 @@ async function creditAmbassadorWallet(
         transactions: {
           type: 'credit',
           amount,
-          purpose: 'ambassador_commission',
+          purpose: 'commission',
           reference: `amb_${ambassadorUserId}_${Date.now()}`,
           description,
           status: 'completed',
@@ -636,4 +748,137 @@ async function creditAmbassadorWallet(
     },
     { upsert: true }
   );
+}
+
+// ─── Internal: Debit ambassador wallet (clawback) ─────────────────────────────
+async function debitAmbassadorWallet(
+  ambassadorUserId: string,
+  amount: number,
+  description: string
+): Promise<void> {
+  await Wallet.findOneAndUpdate(
+    { user: ambassadorUserId },
+    {
+      $inc: { balance: -amount, totalEarned: -amount },
+      $push: {
+        transactions: {
+          type: 'debit',
+          amount,
+          purpose: 'commission',
+          reference: `amb_rev_${ambassadorUserId}_${Date.now()}`,
+          description,
+          status: 'completed',
+          timestamp: new Date(),
+        },
+      },
+    },
+    { upsert: true }
+  );
+}
+
+// ─── Internal: Reverse milestone bonuses that are now above the new partial sum ─
+async function reverseExcessMilestones(
+  ambassadorUserId: string,
+  newPartialSum: number
+): Promise<{ count: number; reward: number }[]> {
+  const reversed: { count: number; reward: number }[] = [];
+
+  // Iterate from highest milestone down so we debit in the correct order
+  for (const milestone of [...VENDOR_MILESTONES].reverse()) {
+    if (newPartialSum >= milestone.count) continue;
+
+    // Atomically remove the milestone — returns null if it wasn't paid
+    const updated = await Ambassador.findOneAndUpdate(
+      { userId: ambassadorUserId, milestonesPaid: milestone.count },
+      { $pull: { milestonesPaid: milestone.count } }
+    );
+    if (!updated) continue;
+
+    await debitAmbassadorWallet(
+      ambassadorUserId,
+      milestone.reward,
+      `Milestone reversal — vendor referral count dropped below ${milestone.count}`
+    );
+    reversed.push({ count: milestone.count, reward: milestone.reward });
+    logger.info(`Ambassador milestone reversal ${milestone.count}: -₦${milestone.reward} from ${ambassadorUserId}`);
+  }
+
+  return reversed;
+}
+
+/**
+ * Called when a referred vendor is rejected (KYC) or blocked (admin deactivation).
+ * Claws back all commissions paid for that vendor and reverses any milestones
+ * whose threshold is no longer met after the reduction.
+ * Emails the ambassador with a full breakdown.
+ */
+export async function handleVendorRejectedOrBlocked(
+  vendorUserId: string,
+  reason: 'rejected' | 'blocked'
+): Promise<void> {
+  try {
+    const referral = await AmbassadorReferral.findOne({
+      referredUserId: vendorUserId,
+      referredUserType: 'vendor',
+    });
+    if (!referral) return; // vendor was not ambassador-referred
+
+    const paid40 = referral.stage40Reached ? (referral.commission40Amount || 0) : 0;
+    const paid60 = referral.stage60Reached ? (referral.commission60Amount || 0) : 0;
+    const totalClawback = paid40 + paid60;
+
+    // Reset stages so a future re-approval can legitimately retrigger payment
+    await AmbassadorReferral.updateOne(
+      { _id: referral._id },
+      {
+        $set: {
+          stage40Reached: false,
+          stage60Reached: false,
+          partialCount: 0,
+          commission40Amount: 0,
+          commission60Amount: 0,
+          totalEarned: Math.max(0, (referral.totalEarned || 0) - totalClawback),
+        },
+      }
+    );
+
+    if (totalClawback > 0) {
+      await debitAmbassadorWallet(
+        referral.ambassadorId.toString(),
+        totalClawback,
+        `Commission clawback — referred vendor ${reason} (${vendorUserId})`
+      );
+    }
+
+    // Recalculate partial sum across all vendor referrals after the reset
+    const partialSumResult = await AmbassadorReferral.aggregate([
+      { $match: { ambassadorId: referral.ambassadorId, referredUserType: 'vendor' } },
+      { $group: { _id: null, sum: { $sum: '$partialCount' } } },
+    ]);
+    const newPartialSum = partialSumResult[0]?.sum || 0;
+
+    const milestonesReversed = await reverseExcessMilestones(
+      referral.ambassadorId.toString(),
+      newPartialSum
+    );
+
+    // Notify the ambassador by email
+    const ambassadorUser = await User.findById(referral.ambassadorId).select('email firstName');
+    if (ambassadorUser?.email) {
+      await sendAmbassadorClawbackEmail(
+        ambassadorUser.email,
+        ambassadorUser.firstName || 'Ambassador',
+        totalClawback,
+        reason,
+        newPartialSum,
+        milestonesReversed
+      ).catch((err) => logger.error('Failed to send ambassador clawback email:', err));
+    }
+
+    logger.info(
+      `Ambassador clawback: ₦${totalClawback} from ${referral.ambassadorId} — vendor ${vendorUserId} (${reason})`
+    );
+  } catch (err) {
+    logger.error('Error processing ambassador clawback:', err);
+  }
 }

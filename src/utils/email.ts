@@ -2284,3 +2284,152 @@ export const sendReviewRequestEmail = async (
     html: wrapEmail('How was your order?', body),
   });
 };
+
+// ─── Ambassador Commission Clawback Email ────────────────────────────────────
+
+export const sendAmbassadorClawbackEmail = async (
+  email: string,
+  firstName: string,
+  clawbackAmount: number,
+  reason: 'rejected' | 'blocked',
+  newPartialSum: number,
+  milestonesReversed: { count: number; reward: number }[] = []
+): Promise<void> => {
+  const APP_URL = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const dashboardUrl = `${APP_URL}/ambassador-dashboard`;
+
+  const reasonLabel = reason === 'rejected'
+    ? 'rejected during verification'
+    : 'removed from the platform';
+
+  const milestoneRows = milestonesReversed.map(m => `
+    <tr>
+      <td style="padding:8px 0;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">
+        Milestone bonus (${m.count} vendors reached)
+      </td>
+      <td style="padding:8px 0;font-size:13px;color:#DC2626;font-weight:700;text-align:right;border-bottom:1px solid #f3f4f6;">
+        -₦${m.reward.toLocaleString()}
+      </td>
+    </tr>`).join('');
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Logo -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              ${emailLogo}
+            </td>
+          </tr>
+
+          <!-- Hero -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <div style="background:#fff7f0;border:1px solid #fed7aa;border-radius:10px;padding:22px 24px;">
+                <p style="margin:0 0 4px 0;font-size:12px;font-weight:700;color:#c2410c;letter-spacing:1px;text-transform:uppercase;">Earnings Update</p>
+                <h1 style="margin:0;font-size:20px;font-weight:800;color:#1f2937;line-height:1.3;">Commission Reversal Notice</h1>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;">Hi ${firstName},</p>
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">
+                We're writing to let you know that a vendor you referred has been <strong>${reasonLabel}</strong>. As outlined in our Ambassador Program terms, commissions tied to that vendor have been reversed.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Reversal breakdown -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <p style="margin:0 0 10px 0;font-size:13px;font-weight:700;color:#111111;text-transform:uppercase;letter-spacing:0.5px;">Reversal Breakdown</p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                <tr style="background:#f9fafb;">
+                  <td style="padding:10px 16px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Item</td>
+                  <td style="padding:10px 16px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Amount</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 16px;font-size:13px;color:#374151;border-top:1px solid #e5e7eb;">Vendor referral commissions (40% + 60%)</td>
+                  <td style="padding:12px 16px;font-size:13px;color:#DC2626;font-weight:700;text-align:right;border-top:1px solid #e5e7eb;">-₦${clawbackAmount.toLocaleString()}</td>
+                </tr>
+                ${milestoneRows}
+              </table>
+            </td>
+          </tr>
+
+          <!-- Progress -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px 20px;">
+                <p style="margin:0 0 4px 0;font-size:12px;font-weight:700;color:#15803d;letter-spacing:0.5px;text-transform:uppercase;">Your Current Progress</p>
+                <p style="margin:0;font-size:22px;font-weight:800;color:#111111;">${(Math.round(newPartialSum * 10) / 10).toFixed(1)} <span style="font-size:14px;font-weight:400;color:#6b7280;">vendor referral credits</span></p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Reassurance -->
+          <tr>
+            <td style="padding:20px 32px 0 32px;">
+              <p style="margin:0 0 12px 0;font-size:14px;color:#374151;line-height:1.6;">
+                This doesn't affect commissions from your other referrals — those remain in your wallet. Keep sharing your code and earning; the impact of one vendor doesn't define your progress.
+              </p>
+              <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">
+                If you think this action was made in error, please reach out to our support team.
+              </p>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <a href="${dashboardUrl}"
+                style="display:inline-block;background-color:#CC3366;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:8px;">
+                View My Dashboard
+              </a>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" />
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 32px 24px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">
+                Questions? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#374151;"><strong>Vendorspot</strong> — Confidence in every click.</p>
+              <p style="margin:8px 0 0 0;font-size:11px;color:#9ca3af;">&copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  await sendEmail({
+    to: email,
+    subject: 'Important update on your ambassador earnings',
+    html,
+  });
+};
