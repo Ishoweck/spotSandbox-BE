@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { Resend } from 'resend';
 
+// Add ambassador emails here before running the script
 const EMAILS = [
   'kayskidadenusi@gmail.com',
   'chiamakaaligo@gmail.com',
@@ -77,8 +78,9 @@ async function buildEmail(name: string, ambassadorCode: string, signupLink: stri
 </html>`;
 }
 
+// Recursively retries until a unique code is found (collisions are extremely rare)
 async function generateAmbassadorCode(AmbassadorModel: mongoose.Model<any>): Promise<string> {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ambiguous chars (0, O, I, 1) excluded
   const suffix = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   const code = `AMB-${suffix}`;
   const exists = await AmbassadorModel.findOne({ ambassadorCode: code });
@@ -119,10 +121,11 @@ async function main() {
       ambassador.approvedAt = new Date();
     }
 
+    // Store hashed token in DB; send raw token in the link so we never expose the hash
     const rawToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
     ambassador.inviteToken = hashedToken;
-    ambassador.inviteTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    ambassador.inviteTokenExpires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48hr expiry
     await ambassador.save();
 
     const signupLink = `${FRONTEND_URL}/ambassador-signup?token=${rawToken}`;
