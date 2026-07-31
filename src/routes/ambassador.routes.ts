@@ -15,6 +15,8 @@ import {
   getMyEarnings,
   updateApplication,
   deleteApplication,
+  getAmbassadorLeaderboard,
+  getAmbassadorReport,
 } from '../controllers/ambassador.controller';
 
 const router = Router();
@@ -28,8 +30,10 @@ router.use(authenticate);
 
 router.get('/my-dashboard', getMyDashboard);
 router.get('/my-earnings', getMyEarnings);
+router.get('/leaderboard', getAmbassadorLeaderboard);
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
+router.get('/report', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), getAmbassadorReport);
 router.get('/', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), getAllApplications);
 router.get('/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MARKETING_ADMIN), getApplication);
 router.post('/resend-invite', authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN), resendInvite);

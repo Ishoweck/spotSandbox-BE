@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, ApiResponse } from '../types';
 import { messageService } from '../services/message.service';
 import { ticketService } from '../services/ticket.service';
+import { notificationService } from '../services/notification.service';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 import User from '../models/User';
@@ -52,18 +53,22 @@ export class MessageController {
     const io = req.app.get('io');
     if (io) {
       const { conversationId } = result;
-      // Emit to the conversation room
       io.to(conversationId).emit('new_message', {
         message: result.message,
         conversationId,
       });
-
-      // Also emit to receiver's personal room in case they haven't joined the conversation room yet
       io.to(`user_${receiverId}`).emit('new_message_notification', {
         message: result.message,
         conversationId,
       });
     }
+
+    // Push notification for offline receivers — includes conversationId so app deep-links directly
+    User.findById(senderId).select('firstName lastName').lean().then((sender: any) => {
+      const senderName = sender ? `${sender.firstName || ''} ${sender.lastName || ''}`.trim() || 'Someone' : 'Someone';
+      const preview = messageType === 'text' ? (message || '') : `Sent a ${messageType || 'file'}`;
+      return notificationService.newChatMessage(receiverId, senderId, senderName, result.conversationId, preview);
+    }).catch(() => {});
 
     res.status(201).json({
       success: true,

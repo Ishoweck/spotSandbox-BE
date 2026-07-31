@@ -491,6 +491,15 @@ export class VendorController {
       throw new AppError('Vendor profile not found', 404);
     }
 
+    // Rate-limit: business details can only be updated once per month
+    if (vendorProfile.businessDetailsLastUpdated) {
+      const daysSinceLastUpdate = (Date.now() - vendorProfile.businessDetailsLastUpdated.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceLastUpdate < 30) {
+        const daysLeft = Math.ceil(30 - daysSinceLastUpdate);
+        throw new AppError(`Business details can only be updated once per month. You can update again in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}.`, 429);
+      }
+    }
+
     const allowedUpdates = [
       'businessName',
       'businessDescription',
@@ -525,6 +534,7 @@ export class VendorController {
       vendorProfile.verificationStatus = VendorVerificationStatus.PENDING;
     }
 
+    vendorProfile.businessDetailsLastUpdated = new Date();
     await vendorProfile.save();
 
     // Keep business address in sync with user's saved addresses
@@ -639,6 +649,12 @@ export class VendorController {
     }
 
     const { salesChannel, weeklyOrders, stockModel, registered, kycDoc, goal, dispatchTime } = req.body;
+
+    const required = { salesChannel, weeklyOrders, stockModel, registered, kycDoc, goal, dispatchTime };
+    const missing = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
+    if (missing.length) {
+      throw new AppError(`Missing survey fields: ${missing.join(', ')}`, 400);
+    }
 
     vendorProfile.businessSurvey = {
       salesChannel,

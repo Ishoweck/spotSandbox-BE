@@ -937,6 +937,17 @@ class NotificationService {
   // VENDOR SALES NOTIFICATION
   // ================================================================
 
+  async newChatMessage(receiverId: string, senderId: string, senderName: string, conversationId: string, preview: string): Promise<void> {
+    await this.send({
+      userId: receiverId,
+      type: NotificationType.CHAT,
+      title: `💬 ${senderName}`,
+      message: preview.length > 80 ? preview.slice(0, 77) + '...' : preview,
+      data: { type: 'chat', conversationId, senderId, senderName },
+      referenceId: makeReferenceId(receiverId, 'chat', `${senderId}:${Math.floor(Date.now() / 60000)}`),
+    });
+  }
+
   async vendorSaleCompleted(vendorId: string, orderNumber: string, amount: number, earnings: number): Promise<void> {
     await this.send({
       userId: vendorId,

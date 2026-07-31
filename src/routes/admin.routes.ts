@@ -7,6 +7,7 @@ import {
   getRevenueAnalytics,
   getUserAnalytics,
   getOrderAnalytics,
+  getVendorDistributionStats,
 
   // Admin Management (Super Admin only)
   createAdmin,
@@ -215,6 +216,7 @@ router.get('/dashboard', authorize(...allAdmins), getDashboard);
 router.get('/analytics/revenue', authorize(SA, A, FA), getRevenueAnalytics);
 router.get('/analytics/users', authorize(SA, A, SPA), getUserAnalytics);
 router.get('/analytics/orders', authorize(SA, A, FA, SPA), getOrderAnalytics);
+router.get('/analytics/vendor-distribution', authorize(SA, A, SPA), getVendorDistributionStats);
 
 // ================================================================
 // ADMIN MANAGEMENT (SUPER_ADMIN ONLY)

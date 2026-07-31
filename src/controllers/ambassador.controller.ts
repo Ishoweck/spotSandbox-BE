@@ -543,6 +543,139 @@ export const getMyEarnings = asyncHandler(async (req: AuthRequest, res: Response
   });
 });
 
+// ─── Ambassador leaderboard (visible to all logged-in ambassadors) ────────────
+
+export const getAmbassadorLeaderboard = asyncHandler(async (req: AuthRequest, res: Response<ApiResponse>) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+
+  const rows = await AmbassadorReferral.aggregate([
+    {
+      $group: {
+        _id: '$ambassadorId',
+        totalEarned: { $sum: '$totalEarned' },
+        vendorCount: { $sum: { $cond: [{ $eq: ['$referredUserType', 'vendor'] }, 1, 0] } },
+        customerCount: { $sum: { $cond: [{ $eq: ['$referredUserType', 'customer'] }, 1, 0] } },
+        totalReferrals: { $sum: 1 },
+      },
+    },
+    { $sort: { totalEarned: -1 } },
+    { $limit: limit },
+    {
+      $lookup: {
+        from: 'ambassadors',
+        localField: '_id',
+        foreignField: 'userId',
+        as: 'profile',
+      },
+    },
+    { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        ambassadorId: '$_id',
+        name: '$profile.name',
+        location: '$profile.location',
+        role: '$profile.role',
+        ambassadorCode: '$profile.ambassadorCode',
+        totalEarned: 1,
+        vendorCount: 1,
+        customerCount: 1,
+        totalReferrals: 1,
+      },
+    },
+  ]);
+
+  // Tag the current user's position
+  const userId = req.user?.id;
+  const leaderboard = rows.map((row, idx) => ({
+    rank: idx + 1,
+    isMe: row.ambassadorId?.toString() === userId,
+    ...row,
+  }));
+
+  res.json({ success: true, data: { leaderboard } });
+});
+
+// ─── Ambassador effort report (admin only) ────────────────────────────────────
+
+export const getAmbassadorReport = asyncHandler(async (req: AuthRequest, res: Response<ApiResponse>) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const skip = (page - 1) * limit;
+
+  const [rows, total] = await Promise.all([
+    AmbassadorReferral.aggregate([
+      {
+        $group: {
+          _id: '$ambassadorId',
+          totalEarned: { $sum: '$totalEarned' },
+          vendorCount: { $sum: { $cond: [{ $eq: ['$referredUserType', 'vendor'] }, 1, 0] } },
+          customerCount: { $sum: { $cond: [{ $eq: ['$referredUserType', 'customer'] }, 1, 0] } },
+          totalReferrals: { $sum: 1 },
+          commission40Total: { $sum: '$commission40Amount' },
+          commission60Total: { $sum: '$commission60Amount' },
+        },
+      },
+      { $sort: { totalEarned: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'ambassadors',
+          localField: '_id',
+          foreignField: 'userId',
+          as: 'profile',
+        },
+      },
+      { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'wallets',
+          localField: '_id',
+          foreignField: 'user',
+          as: 'wallet',
+        },
+      },
+      { $unwind: { path: '$wallet', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          ambassadorId: '$_id',
+          name: '$profile.name',
+          email: '$profile.email',
+          phone: '$profile.phone',
+          location: '$profile.location',
+          role: '$profile.role',
+          ambassadorCode: '$profile.ambassadorCode',
+          status: '$profile.status',
+          milestonesPaid: '$profile.milestonesPaid',
+          totalEarned: 1,
+          vendorCount: 1,
+          customerCount: 1,
+          totalReferrals: 1,
+          commission40Total: 1,
+          commission60Total: 1,
+          walletBalance: { $ifNull: ['$wallet.balance', 0] },
+          walletTotalEarned: { $ifNull: ['$wallet.totalEarned', 0] },
+          walletTotalWithdrawn: { $ifNull: ['$wallet.totalWithdrawn', 0] },
+        },
+      },
+    ]),
+    AmbassadorReferral.aggregate([{ $group: { _id: '$ambassadorId' } }, { $count: 'total' }]),
+  ]);
+
+  const totalAmbassadors = total[0]?.total || 0;
+
+  res.json({
+    success: true,
+    data: { report: rows },
+    meta: {
+      page,
+      limit,
+      total: totalAmbassadors,
+      totalPages: Math.ceil(totalAmbassadors / limit),
+    },
+  });
+});
+
 // ─── Ambassador commission service (called by other controllers) ───────────────
 
 /**

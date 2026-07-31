@@ -152,6 +152,76 @@ export const getDashboard = asyncHandler(
 );
 
 /**
+ * GET /admin/analytics/vendor-distribution
+ * Breakdown of vendors by Nigerian state and by category
+ */
+export const getVendorDistributionStats = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const [vendorsByState, vendorsByCategory] = await Promise.all([
+      // Group active/verified vendors by businessAddress.state
+      VendorProfile.aggregate([
+        {
+          $match: {
+            'businessAddress.state': { $exists: true, $nin: [null, ''] },
+          },
+        },
+        {
+          $group: {
+            _id: '$businessAddress.state',
+            count: { $sum: 1 },
+            verified: {
+              $sum: { $cond: [{ $eq: ['$verificationStatus', 'verified'] }, 1, 0] },
+            },
+          },
+        },
+        { $sort: { count: -1 } },
+        { $project: { state: '$_id', count: 1, verified: 1, _id: 0 } },
+      ]),
+
+      // Group vendors by category via their products
+      Product.aggregate([
+        {
+          $match: {
+            category: { $exists: true, $ne: null },
+            vendor: { $exists: true },
+          },
+        },
+        {
+          $group: {
+            _id: '$category',
+            vendorCount: { $addToSet: '$vendor' },
+          },
+        },
+        { $project: { category: '$_id', vendorCount: { $size: '$vendorCount' }, _id: 0 } },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'category',
+            foreignField: '_id',
+            as: 'categoryInfo',
+          },
+        },
+        { $unwind: { path: '$categoryInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            categoryId: '$category',
+            categoryName: { $ifNull: ['$categoryInfo.name', 'Unknown'] },
+            vendorCount: 1,
+          },
+        },
+        { $sort: { vendorCount: -1 } },
+        { $limit: 30 },
+      ]),
+    ]);
+
+    res.json({
+      success: true,
+      data: { vendorsByState, vendorsByCategory },
+    });
+  }
+);
+
+/**
  * GET /admin/analytics/revenue
  * Revenue analytics with date range
  */

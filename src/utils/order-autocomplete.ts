@@ -127,30 +127,36 @@ async function runAutoComplete(): Promise<void> {
         }
       }
 
-      // Credit affiliate commission if applicable
+      // Credit affiliate commission if applicable (atomic guard prevents double-credit with completeOrder)
       if ((order as any).affiliateUser && (order as any).affiliateCommission) {
-        const affiliateUserId = (order as any).affiliateUser;
-        const commissionAmount = (order as any).affiliateCommission;
-        await Wallet.findOneAndUpdate(
-          { user: affiliateUserId },
-          {
-            $inc: { balance: commissionAmount, totalEarned: commissionAmount },
-            $push: {
-              transactions: {
-                type: TransactionType.CREDIT,
-                amount: commissionAmount,
-                purpose: WalletPurpose.COMMISSION,
-                reference: `autocomplete_affiliate_${order.orderNumber}`,
-                description: `Affiliate commission for Order #${order.orderNumber} (auto-released)`,
-                relatedOrder: order._id,
-                status: 'completed',
-                timestamp: new Date(),
+        const claimed = await Order.findOneAndUpdate(
+          { _id: order._id, affiliateCommissionPaid: { $ne: true } },
+          { $set: { affiliateCommissionPaid: true } }
+        );
+        if (claimed) {
+          const affiliateUserId = (order as any).affiliateUser;
+          const commissionAmount = (order as any).affiliateCommission;
+          await Wallet.findOneAndUpdate(
+            { user: affiliateUserId },
+            {
+              $inc: { balance: commissionAmount, totalEarned: commissionAmount },
+              $push: {
+                transactions: {
+                  type: TransactionType.CREDIT,
+                  amount: commissionAmount,
+                  purpose: WalletPurpose.COMMISSION,
+                  reference: `autocomplete_affiliate_${order.orderNumber}`,
+                  description: `Affiliate commission for Order #${order.orderNumber} (auto-released)`,
+                  relatedOrder: order._id,
+                  status: 'completed',
+                  timestamp: new Date(),
+                },
               },
             },
-          },
-          { upsert: true }
-        );
-        logger.info(`✅ Auto-credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+            { upsert: true }
+          );
+          logger.info(`✅ Auto-credited ₦${commissionAmount} affiliate commission for order ${order.orderNumber}`);
+        }
       }
 
       // Award purchase points to customer and referral points to their referrer

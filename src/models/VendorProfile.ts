@@ -62,6 +62,7 @@ export interface IVendorProfile extends Document {
   referralRewarded: boolean;
   responseRate: number;
   responseSpeed: number;
+  businessDetailsLastUpdated?: Date;
   statsComputedAt?: Date;
   rejectionReason?: string;
   statusHistory: {
@@ -238,6 +239,7 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     min: 0,
     max: 100,
   },
+  businessDetailsLastUpdated: Date,
   statsComputedAt: Date,
   rejectionReason: String,
   statusHistory: [{
