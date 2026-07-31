@@ -325,6 +325,16 @@ export class CartController {
       throw new AppError('You have already used this coupon', 400);
     }
 
+    // Check if coupon is restricted to specific users
+    if (coupon.assignedTo && coupon.assignedTo.length > 0) {
+      const isAssigned = coupon.assignedTo.some(
+        (id) => id.toString() === req.user!.id
+      );
+      if (!isAssigned) {
+        throw new AppError('This coupon is not available for your account', 400);
+      }
+    }
+
     // Check minimum purchase
     if (coupon.minPurchase && cart.subtotal < coupon.minPurchase) {
       throw new AppError(

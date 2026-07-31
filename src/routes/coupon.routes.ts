@@ -30,6 +30,44 @@ router.get(
   asyncHandler(couponController.getMyCoupons.bind(couponController))
 );
 
+// Vendor-scoped coupon management
+const vendorCouponValidation = [
+  body('code').notEmpty().withMessage('Coupon code is required'),
+  body('discountType').isIn(['percentage', 'fixed']).withMessage('Invalid discount type'),
+  body('discountValue').isFloat({ min: 0 }).withMessage('Discount value must be positive'),
+  body('validFrom').isISO8601().withMessage('Valid from date is required'),
+  body('validUntil').isISO8601().withMessage('Valid until date is required'),
+];
+
+router.get(
+  '/vendor',
+  authenticate,
+  authorize(UserRole.VENDOR),
+  asyncHandler(couponController.getVendorCoupons.bind(couponController))
+);
+
+router.post(
+  '/vendor',
+  authenticate,
+  authorize(UserRole.VENDOR),
+  validate(vendorCouponValidation),
+  asyncHandler(couponController.createVendorCoupon.bind(couponController))
+);
+
+router.put(
+  '/vendor/:id',
+  authenticate,
+  authorize(UserRole.VENDOR),
+  asyncHandler(couponController.updateVendorCoupon.bind(couponController))
+);
+
+router.delete(
+  '/vendor/:id',
+  authenticate,
+  authorize(UserRole.VENDOR),
+  asyncHandler(couponController.deleteVendorCoupon.bind(couponController))
+);
+
 // Admin/Vendor routes
 router.use(authenticate);
 router.use(authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN));

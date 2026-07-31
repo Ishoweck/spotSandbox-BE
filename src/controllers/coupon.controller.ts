@@ -322,6 +322,107 @@ export class CouponController {
       data: { stats },
     });
   }
+
+  // ──────────────────────────────────────────────
+  // VENDOR-SCOPED COUPON MANAGEMENT
+  // ──────────────────────────────────────────────
+
+  async getVendorCoupons(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const skip = (page - 1) * limit;
+
+    const filter: any = { vendor: req.user!.id };
+    if (req.query.isActive !== undefined) {
+      filter.isActive = req.query.isActive === 'true';
+    }
+
+    const [coupons, total] = await Promise.all([
+      Coupon.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Coupon.countDocuments(filter),
+    ]);
+
+    res.json({
+      success: true,
+      data: { coupons, total, page, limit },
+    });
+  }
+
+  async createVendorCoupon(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const {
+      code, description, discountType, discountValue,
+      minPurchase, maxDiscount, usageLimit,
+      validFrom, validUntil,
+      applicableProducts, applicableCategories,
+    } = req.body;
+
+    const existing = await Coupon.findOne({ code: code.toUpperCase() });
+    if (existing) {
+      throw new AppError('Coupon code already exists', 400);
+    }
+
+    const coupon = await Coupon.create({
+      code: code.toUpperCase(),
+      description,
+      discountType,
+      discountValue,
+      minPurchase,
+      maxDiscount,
+      usageLimit,
+      validFrom: new Date(validFrom),
+      validUntil: new Date(validUntil),
+      applicableProducts,
+      applicableCategories,
+      vendor: req.user!.id,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Coupon created successfully',
+      data: { coupon },
+    });
+  }
+
+  async updateVendorCoupon(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const coupon = await Coupon.findOne({ _id: req.params.id, vendor: req.user!.id });
+    if (!coupon) {
+      throw new AppError('Coupon not found or not authorized', 404);
+    }
+
+    const allowed = [
+      'description', 'discountType', 'discountValue', 'minPurchase',
+      'maxDiscount', 'usageLimit', 'validFrom', 'validUntil',
+      'applicableProducts', 'applicableCategories', 'isActive',
+    ];
+    allowed.forEach((key) => {
+      if (req.body[key] !== undefined) {
+        (coupon as any)[key] = key === 'validFrom' || key === 'validUntil'
+          ? new Date(req.body[key])
+          : req.body[key];
+      }
+    });
+
+    await coupon.save();
+
+    res.json({
+      success: true,
+      message: 'Coupon updated successfully',
+      data: { coupon },
+    });
+  }
+
+  async deleteVendorCoupon(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const coupon = await Coupon.findOne({ _id: req.params.id, vendor: req.user!.id });
+    if (!coupon) {
+      throw new AppError('Coupon not found or not authorized', 404);
+    }
+    await coupon.deleteOne();
+    res.json({ success: true, message: 'Coupon deleted successfully' });
+  }
 }
 
 export const couponController = new CouponController();

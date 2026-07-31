@@ -18,7 +18,8 @@ export interface ICoupon extends Document {
   applicableCategories?: Types.ObjectId[];
   excludedProducts?: Types.ObjectId[];
   usedBy: Types.ObjectId[];
-  assignedTo?: Types.ObjectId[]; // if set, only these users can redeem this coupon
+  assignedTo?: Types.ObjectId[];
+  vendor?: Types.ObjectId; // set when a vendor creates this coupon
 }
 
 const couponSchema = new Schema<ICoupon>({
@@ -82,6 +83,12 @@ const couponSchema = new Schema<ICoupon>({
     type: Schema.Types.ObjectId,
     ref: 'User',
   }],
+  vendor: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    index: true,
+    default: null,
+  },
 }, {
   timestamps: true,
 });
