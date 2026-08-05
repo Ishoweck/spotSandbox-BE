@@ -1377,6 +1377,16 @@ export const verifyVendor = asyncHandler(
         enqueueEmail(EmailJobType.FOUNDER_WELCOME, vendorUser.email, vendorUser.firstName, 30_000).catch(() => {});
         enqueueEmail(EmailJobType.PRODUCT_POSTING_GUIDE, vendorUser.email, undefined, 60_000).catch(() => {});
       }
+
+      // Re-trigger ambassador 40% commission if vendor already has active products.
+      // Handles the re-approval case: vendor edited profile → reset to pending → rejected → re-approved.
+      // handleVendorProductApproved is idempotent (stage40Reached: { $ne: true } guard), so safe to call always.
+      const hasActiveProducts = await Product.exists({ vendor: vendor.user, status: 'active' });
+      if (hasActiveProducts) {
+        import('./ambassador.controller').then(({ handleVendorProductApproved }) => {
+          handleVendorProductApproved(vendor.user.toString());
+        }).catch(() => {});
+      }
     } else {
       await notificationService.vendorRejected(vendor.user.toString(), rejectionReason);
       // Clawback any ambassador commissions paid for this vendor

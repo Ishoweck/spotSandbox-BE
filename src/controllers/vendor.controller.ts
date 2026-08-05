@@ -491,8 +491,16 @@ export class VendorController {
       throw new AppError('Vendor profile not found', 404);
     }
 
-    // Rate-limit: business details can only be updated once per month
-    if (vendorProfile.businessDetailsLastUpdated) {
+    // Sensitive fields: trigger pending re-review + 30-day rate-limit when changed
+    const sensitiveFields = ['businessName', 'businessAddress', 'businessPhone', 'businessEmail'];
+    // Cosmetic fields: always allowed, no rate-limit, no re-review
+    const cosmeticFields = ['businessDescription', 'businessLogo', 'businessBanner', 'businessWebsite', 'storefront', 'socialMedia'];
+
+    const incomingKeys = Object.keys(req.body);
+    const touchesSensitive = sensitiveFields.some((f) => incomingKeys.includes(f));
+
+    // Rate-limit only applies when identity-sensitive fields are being changed
+    if (touchesSensitive && vendorProfile.businessDetailsLastUpdated) {
       const daysSinceLastUpdate = (Date.now() - vendorProfile.businessDetailsLastUpdated.getTime()) / (1000 * 60 * 60 * 24);
       if (daysSinceLastUpdate < 30) {
         const daysLeft = Math.ceil(30 - daysSinceLastUpdate);
@@ -500,22 +508,11 @@ export class VendorController {
       }
     }
 
-    const allowedUpdates = [
-      'businessName',
-      'businessDescription',
-      'businessLogo',
-      'businessBanner',
-      'businessAddress',
-      'businessPhone',
-      'businessEmail',
-      'businessWebsite',
-      'storefront',
-      'socialMedia',
-    ];
+    const allowedUpdates = [...sensitiveFields, ...cosmeticFields];
 
     const wasVerified = vendorProfile.verificationStatus === VendorVerificationStatus.VERIFIED;
 
-    for (const key of Object.keys(req.body)) {
+    for (const key of incomingKeys) {
       if (!allowedUpdates.includes(key)) continue;
       if (key === 'businessAddress') {
         const { shipBubble, ...freshAddress } = req.body.businessAddress as any;
@@ -529,12 +526,14 @@ export class VendorController {
       vendorProfile.slug = await buildUniqueVendorSlug(req.body.businessName, req.user?.id);
     }
 
-    // Reset verification if a verified vendor edits their profile — requires admin re-review
-    if (wasVerified) {
+    // Only reset verification when identity-sensitive fields change — cosmetic edits don't require re-review
+    if (wasVerified && touchesSensitive) {
       vendorProfile.verificationStatus = VendorVerificationStatus.PENDING;
     }
 
-    vendorProfile.businessDetailsLastUpdated = new Date();
+    if (touchesSensitive) {
+      vendorProfile.businessDetailsLastUpdated = new Date();
+    }
     await vendorProfile.save();
 
     // Keep business address in sync with user's saved addresses
