@@ -146,14 +146,23 @@ if (process.env.NODE_ENV === 'development') {
 // WELL-KNOWN FILES — Required for iOS Universal Links and Android App Links
 // ============================================================
 app.get('/.well-known/apple-app-site-association', (req, res) => {
+  // Apple requires this file be served as application/json with no extension.
+  // Bundle ID matches app.json (com.vendorspotng.vendorspot for iOS).
+  // Team ID must come from Apple Developer account — set APPLE_TEAM_ID in env.
   res.setHeader('Content-Type', 'application/json');
   res.json({
     applinks: {
       apps: [],
       details: [
         {
-          appID: `${process.env.APPLE_TEAM_ID || 'TEAMID'}.${process.env.APPLE_BUNDLE_ID || 'com.vendorspot.app'}`,
-          paths: ['/affiliate/*', '/products/*', '/shops/*', '/vendor/*'],
+          appID: `${process.env.APPLE_TEAM_ID || 'TEAMID_MISSING'}.${process.env.APPLE_BUNDLE_ID || 'com.vendorspotng.vendorspot'}`,
+          paths: [
+            '/vendor/*', '/vendors/*',
+            '/shops/*', '/shop/*',
+            '/products/*', '/product/*',
+            '/affiliate/*',
+            '/blog/*',
+          ],
         },
       ],
     },
@@ -161,14 +170,18 @@ app.get('/.well-known/apple-app-site-association', (req, res) => {
 });
 
 app.get('/.well-known/assetlinks.json', (req, res) => {
+  // Android App Links verification — Play Store signing certificate SHA-256
+  // fingerprints must be listed. Get them from Play Console > App integrity.
+  // Add BOTH the upload key AND the Play App Signing key fingerprint (comma-separated).
   res.setHeader('Content-Type', 'application/json');
+  const fingerprints = (process.env.ANDROID_SHA256_FINGERPRINTS || '').split(',').map(s => s.trim()).filter(Boolean);
   res.json([
     {
       relation: ['delegate_permission/common.handle_all_urls'],
       target: {
         namespace: 'android_app',
         package_name: process.env.ANDROID_PACKAGE_NAME || 'com.vendorspot.app',
-        sha256_cert_fingerprints: (process.env.ANDROID_SHA256_FINGERPRINTS || '').split(',').filter(Boolean),
+        sha256_cert_fingerprints: fingerprints,
       },
     },
   ]);
