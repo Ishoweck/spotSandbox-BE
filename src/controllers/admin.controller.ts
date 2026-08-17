@@ -1133,15 +1133,20 @@ export const getVendorDetails = asyncHandler(
     const { id } = req.params;
 
     // Support both VendorProfile _id and User _id (e.g. when navigating from a product)
-    let vendor = await VendorProfile.findById(id).populate(
-      'user',
-      'firstName lastName email phone status avatar createdAt'
-    );
-    if (!vendor && mongoose.isValidObjectId(id)) {
-      vendor = await VendorProfile.findOne({ user: id }).populate(
+    // Explicitly select the hidden Dojah fields so admin can review face-match photo
+    let vendor = await VendorProfile.findById(id)
+      .select('+ninVerification.nin +ninVerification.returnedPhoto')
+      .populate(
         'user',
         'firstName lastName email phone status avatar createdAt'
       );
+    if (!vendor && mongoose.isValidObjectId(id)) {
+      vendor = await VendorProfile.findOne({ user: id })
+        .select('+ninVerification.nin +ninVerification.returnedPhoto')
+        .populate(
+          'user',
+          'firstName lastName email phone status avatar createdAt'
+        );
     }
 
     if (!vendor) {

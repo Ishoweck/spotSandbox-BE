@@ -83,6 +83,21 @@ export interface IVendorProfile extends Document {
       createdAt: Date;
     }[];
   };
+  ninVerification?: {
+    nin?: string;
+    provider?: 'dojah' | 'manual';
+    attemptedAt?: Date;
+    apiSuccess?: boolean;
+    autoVerified?: boolean;
+    nameMatch?: boolean;
+    nameMatchScore?: number;
+    faceMatch?: boolean;
+    faceMatchScore?: number;
+    returnedName?: string;
+    returnedPhoto?: string;
+    failureReason?: string;
+    adminOverride?: boolean;
+  };
 }
 
 const vendorProfileSchema = new Schema<IVendorProfile>({
@@ -263,6 +278,21 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
       createdByName: String,
       createdAt: { type: Date, default: Date.now },
     }],
+  },
+  ninVerification: {
+    nin: { type: String, select: false }, // sensitive — hidden by default
+    provider: { type: String, enum: ['dojah', 'manual'] },
+    attemptedAt: Date,
+    apiSuccess: Boolean,
+    autoVerified: Boolean,
+    nameMatch: Boolean,
+    nameMatchScore: Number,
+    faceMatch: Boolean,
+    faceMatchScore: Number,
+    returnedName: String,
+    returnedPhoto: { type: String, select: false }, // base64 blob — hidden by default
+    failureReason: String,
+    adminOverride: Boolean,
   },
 }, {
   timestamps: true,

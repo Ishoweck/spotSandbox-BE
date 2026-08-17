@@ -77,7 +77,8 @@ app.use((req: any, res, next) => {
   const isUploadRoute =
     req.path.startsWith('/api/v1/upload') ||
     req.path.startsWith('/api/v1/products') ||
-    req.path.startsWith('/api/v1/ambassadors');
+    req.path.startsWith('/api/v1/ambassadors') ||
+    req.path === '/api/v1/vendor/kyc/verify-nin'; // base64 selfie payload
   express.json({
     limit: isUploadRoute ? '50mb' : '1mb',
     // Capture raw body for webhook signature verification (Paystack, Resend)

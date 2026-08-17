@@ -19,6 +19,7 @@ import { notificationService } from '../services/notification.service';
 import { gatherStatementData, generateStatementPDF } from '../services/statement.service';
 import { sendEmail } from '../utils/email';
 import { generateSlug } from '../utils/helpers';
+import { verifyNINWithSelfie } from '../services/dojah.service';
 
 const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
 import { logger } from '../utils/logger';
@@ -634,6 +635,106 @@ export class VendorController {
       success: true,
       message: 'KYC documents uploaded successfully',
       data: { vendorProfile },
+    });
+  }
+
+  /**
+   * Automated NIN verification via Dojah + selfie face-match.
+   * PRODUCTION-SAFE: always falls back to manual admin review if Dojah fails or flags a mismatch.
+   * Vendor never sees a Dojah-specific error.
+   */
+  async verifyNIN(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { nin, selfieImage } = req.body;
+
+    if (!nin || !selfieImage) {
+      throw new AppError('NIN and selfie image are required', 400);
+    }
+    if (!/^\d{11}$/.test(String(nin).trim())) {
+      throw new AppError('NIN must be exactly 11 digits', 400);
+    }
+
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id });
+    if (!vendorProfile) {
+      throw new AppError('Vendor profile not found', 404);
+    }
+
+    // Registered name for match — try User.name, fall back to businessName
+    const user = await User.findById(req.user?.id).select('firstName lastName name');
+    const registeredName = [
+      (user as any)?.firstName,
+      (user as any)?.lastName,
+    ].filter(Boolean).join(' ').trim()
+      || (user as any)?.name
+      || vendorProfile.businessName;
+
+    const result = await verifyNINWithSelfie(String(nin).trim(), selfieImage, registeredName);
+
+    // Persist verification context regardless of outcome
+    vendorProfile.ninVerification = {
+      nin: String(nin).trim(),
+      provider: 'dojah',
+      attemptedAt: new Date(),
+      apiSuccess: result.success,
+      autoVerified: result.autoVerified,
+      nameMatch: result.nameMatch,
+      nameMatchScore: result.nameMatchScore,
+      faceMatch: result.faceMatch,
+      faceMatchScore: result.faceMatchScore,
+      returnedName: result.returnedName,
+      returnedPhoto: result.returnedPhoto,
+      failureReason: result.failureReason,
+      adminOverride: false,
+    };
+
+    // Ensure a NIN kyc document exists so admin queue picks it up
+    const ninDocIdx = vendorProfile.kycDocuments.findIndex((d) => d.type === 'NIN');
+    if (ninDocIdx < 0) {
+      vendorProfile.kycDocuments.push({
+        type: 'NIN',
+        documentUrl: result.returnedPhoto ? `data:image/jpeg;base64,${result.returnedPhoto}` : 'nin-lookup',
+        verificationStatus: 'pending',
+      } as any);
+    }
+
+    if (result.autoVerified) {
+      // Silent auto-verify — mark NIN doc + overall status verified
+      vendorProfile.kycDocuments.forEach((doc) => {
+        if (doc.type === 'NIN') {
+          doc.verificationStatus = 'verified';
+          doc.verifiedAt = new Date();
+        }
+      });
+      if (vendorProfile.verificationStatus !== VendorVerificationStatus.VERIFIED) {
+        vendorProfile.verificationStatus = VendorVerificationStatus.VERIFIED;
+        vendorProfile.verifiedAt = new Date();
+        vendorProfile.statusHistory.push({
+          action: 'auto_verified_by_dojah',
+          reason: `NIN + selfie match (name ${(result.nameMatchScore * 100).toFixed(0)}%, face ${result.faceMatchScore}%)`,
+          at: new Date(),
+        });
+      }
+      await vendorProfile.save();
+
+      logger.info(`Vendor auto-verified via Dojah: ${req.user?.id}`);
+      res.json({
+        success: true,
+        message: 'Identity verified successfully',
+        data: { verified: true, status: 'verified' },
+      });
+      return;
+    }
+
+    // Not auto-verified — leave pending for admin. Vendor sees a neutral message.
+    if (vendorProfile.verificationStatus === VendorVerificationStatus.REJECTED) {
+      vendorProfile.verificationStatus = VendorVerificationStatus.PENDING;
+    }
+    await vendorProfile.save();
+
+    logger.info(`NIN submission pending admin review: ${req.user?.id} — reason: ${result.failureReason}`);
+    res.json({
+      success: true,
+      message: 'Submitted for review. You will be notified once approved.',
+      data: { verified: false, status: 'pending' },
     });
   }
 

@@ -159,6 +159,22 @@ router.post(
   asyncHandler(vendorController.uploadKYCDocuments.bind(vendorController))
 );
 
+/**
+ * POST /api/v1/vendor/kyc/verify-nin
+ * Automated NIN + selfie verification via Dojah.
+ * Body: { nin: string (11 digits), selfieImage: string (base64) }
+ * Always falls back to manual admin review on any Dojah issue.
+ */
+const verifyNinValidation = [
+  body('nin').matches(/^\d{11}$/).withMessage('NIN must be exactly 11 digits'),
+  body('selfieImage').notEmpty().withMessage('Selfie image is required'),
+];
+router.post(
+  '/kyc/verify-nin',
+  validate(verifyNinValidation),
+  asyncHandler(vendorController.verifyNIN.bind(vendorController))
+);
+
 const payoutDetailsValidation = [
   body('bankName').notEmpty().withMessage('Bank name is required'),
   body('accountNumber').notEmpty().withMessage('Account number is required'),
