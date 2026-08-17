@@ -2029,6 +2029,7 @@ export const updateProductStatus = asyncHandler(
       }
     }
 
+    const wasApproved = product.status !== ProductStatus.ACTIVE && status === ProductStatus.ACTIVE;
     product.status = status;
     await product.save();
 
@@ -2045,6 +2046,35 @@ export const updateProductStatus = asyncHandler(
       title: 'Product Status Updated',
       message: statusMessages[status] || `Your product "${product.name}" status changed to ${status}.`,
     });
+
+    // ✅ On approval, emit a dedicated socket event so the mobile app can pop up
+    // the "share your product" celebratory banner (fire-and-forget, ignore errors).
+    if (wasApproved) {
+      try {
+        const { emitToUser } = await import('../services/notification.service');
+        const frontend = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+        emitToUser(product.vendor.toString(), 'product_approved', {
+          productId: product._id.toString(),
+          productName: product.name,
+          productImage: product.images?.[0] || null,
+          productUrl: `${frontend}/products/${product.slug || product._id}`,
+          approvedAt: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        logger.error('Failed to emit product_approved socket event:', { error: err?.message });
+      }
+
+      // Track in Slack too — vendor's first-product moment
+      trackEvent(SlackEvent.VENDOR_PRODUCT_ADDED, {
+        actor: { id: product.vendor.toString() },
+        message: `📦 Product approved — "${product.name}"\nVendor gets a share prompt on next app open.`,
+        meta: {
+          productId: product._id.toString(),
+          productName: product.name,
+          adminId: req.user?.id,
+        },
+      });
+    }
 
     // Notify followers only when product goes live for the first time
     if (status === ProductStatus.ACTIVE) {

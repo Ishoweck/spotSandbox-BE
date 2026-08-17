@@ -14,6 +14,19 @@ export const setSocketInstance = (io: SocketServer) => {
   ioInstance = io;
 };
 
+/**
+ * Emit a custom socket event to a specific user's room.
+ * Fire-and-forget — safe to call even if socket isn't initialized yet.
+ * Use this for one-off UX events that don't need to be persisted as notifications
+ * (e.g. celebratory pop-ups, live counters).
+ */
+export const emitToUser = (userId: string, event: string, data: any): void => {
+  if (!ioInstance) return;
+  try {
+    ioInstance.to(`user_${userId}`).emit(event, data);
+  } catch { /* silent */ }
+};
+
 // Whether BullMQ queues are available (set after Redis connects)
 let queueReady = false;
 export const setQueueReady = (ready: boolean) => { queueReady = ready; };
