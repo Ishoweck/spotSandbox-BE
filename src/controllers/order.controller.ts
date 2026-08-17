@@ -21,6 +21,7 @@
   import { generateReceiptPDF } from '../services/receipt.service';
   import { notificationService, emitOrderStatusUpdate, emitNewOrder } from '../services/notification.service';
   import { logger } from '../utils/logger';
+  import { trackEvent, SlackEvent } from '../utils/slack-events';
   import Conversation from '../models/Conversation';
   import axios from 'axios';
 
@@ -1944,6 +1945,62 @@
       });
 
       logger.info(`✅ Order created with verified payment: ${order._id}`);
+
+      // Track order in Slack — customer channel (fire per order), vendor channel (fire per vendor)
+      try {
+        trackEvent(
+          isFirstOrder ? SlackEvent.CUSTOMER_FIRST_ORDER : SlackEvent.CUSTOMER_ORDER_PLACED,
+          {
+            actor: {
+              id: req.user?.id,
+              name: (req.user as any)?.firstName && (req.user as any)?.lastName ? `${(req.user as any).firstName} ${(req.user as any).lastName}` : undefined,
+              email: (req.user as any)?.email,
+            },
+            message: `${isFirstOrder ? '🎊 FIRST ORDER' : '🛒 Order placed'} — ${orderNumber}\n${vendorGroups.length} vendor${vendorGroups.length === 1 ? '' : 's'} · ${orderItems.length} item${orderItems.length === 1 ? '' : 's'} · Total ₦${total.toLocaleString()}`,
+            meta: {
+              orderNumber,
+              total: `₦${total.toLocaleString()}`,
+              itemCount: orderItems.length,
+              vendorCount: vendorGroups.length,
+              deliveryType,
+              paymentMethod,
+              shippingCost: `₦${totalShippingCost.toLocaleString()}`,
+              currentStep: deliveryType === 'pickup' ? 'Vendor to prepare for pickup' : 'Vendor to fulfill + ShipBubble creates shipment',
+              journeyStage: isFirstOrder ? '3 of 3 (Signup → OTP → First Order ✅)' : 'Returning customer order',
+            },
+          },
+        );
+        // High-value order flag
+        if (total >= 100_000) {
+          trackEvent(SlackEvent.CUSTOMER_HIGH_VALUE_ORDER, {
+            actor: { id: req.user?.id, email: (req.user as any)?.email },
+            message: `💰 High-value order — ${orderNumber} (₦${total.toLocaleString()})`,
+            meta: { orderNumber, total: `₦${total.toLocaleString()}` },
+          });
+        }
+        // Vendor-side: notify each vendor's channel; flag first-sale specifically
+        for (const group of vendorGroups) {
+          const priorSales = await Order.countDocuments({
+            'items.vendor': new mongoose.Types.ObjectId(group.vendorId),
+            _id: { $ne: order._id },
+          });
+          trackEvent(
+            priorSales === 0 ? SlackEvent.VENDOR_FIRST_SALE : SlackEvent.VENDOR_ORDER_RECEIVED,
+            {
+              actor: { id: group.vendorId, name: group.vendorName },
+              message: `${priorSales === 0 ? '🎊 FIRST SALE' : 'Order received'} — ${orderNumber}`,
+              meta: {
+                orderNumber,
+                vendorName: group.vendorName,
+                itemCount: group.items.length,
+                subtotal: `₦${(group.items.reduce((s: number, i: any) => s + i.price * i.quantity, 0)).toLocaleString()}`,
+              },
+            },
+          );
+        }
+      } catch (err: any) {
+        logger.error('[Slack] Order tracking failed:', err?.message);
+      }
 
       // Mark the pending payment record as done
       try {

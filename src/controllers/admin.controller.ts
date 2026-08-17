@@ -45,6 +45,7 @@ import bcrypt from 'bcryptjs';
 import AppVersion from '../models/AppVersion';
 import { orderController } from './order.controller';
 import CompanyExpense, { ExpenseStatus } from '../models/CompanyExpense';
+import { trackEvent, SlackEvent } from '../utils/slack-events';
 
 // ================================================================
 // DASHBOARD & ANALYTICS
@@ -1399,6 +1400,25 @@ export const verifyVendor = asyncHandler(
         handleVendorRejectedOrBlocked(vendor.user.toString(), 'rejected');
       }).catch(() => {});
     }
+
+    trackEvent(
+      status === 'verified' ? SlackEvent.VENDOR_KYC_VERIFIED : SlackEvent.VENDOR_KYC_REJECTED,
+      {
+        actor: { id: vendor.user.toString(), name: vendor.businessName },
+        message: status === 'verified'
+          ? `✅ Admin approved vendor KYC — ${vendor.businessName}\nVendor can now set payout details and add products.`
+          : `❌ Admin rejected vendor KYC — ${vendor.businessName}\nVendor needs to re-upload documents.`,
+        meta: {
+          businessName: vendor.businessName,
+          adminId: req.user?.id,
+          reason: rejectionReason || 'none',
+          currentStep: status === 'verified' ? 'Set payout details → add first product' : 'Re-upload KYC documents',
+          journeyStage: status === 'verified'
+            ? '4 of 5 (Signup → OTP → Profile → NIN ✅ → Payout → First Product)'
+            : 'Blocked at NIN step — needs re-submission',
+        },
+      },
+    );
 
     res.json({
       success: true,

@@ -20,6 +20,7 @@ import { gatherStatementData, generateStatementPDF } from '../services/statement
 import { sendEmail } from '../utils/email';
 import { generateSlug } from '../utils/helpers';
 import { verifyNINWithSelfie } from '../services/dojah.service';
+import { trackEvent, SlackEvent } from '../utils/slack-events';
 
 const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
 import { logger } from '../utils/logger';
@@ -430,6 +431,16 @@ export class VendorController {
 
     logger.info(`Vendor profile created: ${req.user?.id}`);
 
+    trackEvent(SlackEvent.VENDOR_PROFILE_CREATED, {
+      actor: { id: req.user?.id, email: (req.user as any)?.email },
+      message: `Vendor profile created — ${vendorProfile.businessName}`,
+      meta: {
+        businessName: vendorProfile.businessName,
+        city: vendorProfile.businessAddress?.city,
+        state: vendorProfile.businessAddress?.state,
+      },
+    });
+
     res.status(201).json({
       success: true,
       message: 'Vendor profile created successfully',
@@ -716,6 +727,19 @@ export class VendorController {
       await vendorProfile.save();
 
       logger.info(`Vendor auto-verified via Dojah: ${req.user?.id}`);
+
+      trackEvent(SlackEvent.VENDOR_KYC_AUTO_VERIFIED, {
+        actor: { id: req.user?.id, name: registeredName, email: (req.user as any)?.email },
+        message: `⚡ Vendor auto-verified via Dojah — ${vendorProfile.businessName}\nNo manual review needed. Vendor can now list products.`,
+        meta: {
+          businessName: vendorProfile.businessName,
+          nameMatchScore: `${(result.nameMatchScore * 100).toFixed(0)}%`,
+          faceMatchScore: `${result.faceMatchScore}%`,
+          currentStep: 'Set payout details → add first product',
+          journeyStage: '4 of 5 (Signup → OTP → Profile → NIN ✅ → Payout → First Product)',
+        },
+      });
+
       res.json({
         success: true,
         message: 'Identity verified successfully',
@@ -731,6 +755,21 @@ export class VendorController {
     await vendorProfile.save();
 
     logger.info(`NIN submission pending admin review: ${req.user?.id} — reason: ${result.failureReason}`);
+
+    trackEvent(SlackEvent.VENDOR_NIN_SUBMITTED, {
+      actor: { id: req.user?.id, name: registeredName, email: (req.user as any)?.email },
+      message: `🆔 NIN submitted, queued for admin review — ${vendorProfile.businessName}\n${result.failureReason ? `Reason: ${result.failureReason.slice(0, 100)}` : 'Dojah returned inconclusive result.'}`,
+      meta: {
+        businessName: vendorProfile.businessName,
+        dojahAttempted: result.attempted,
+        dojahSuccess: result.success,
+        nameMatchScore: result.nameMatchScore ? `${(result.nameMatchScore * 100).toFixed(0)}%` : 'n/a',
+        faceMatchScore: result.faceMatchScore ? `${result.faceMatchScore}%` : 'n/a',
+        currentStep: 'Admin manual review in dashboard',
+        journeyStage: '3.5 of 5 (Signup → OTP → Profile → NIN pending → Payout → First Product)',
+      },
+    });
+
     res.json({
       success: true,
       message: 'Submitted for review. You will be notified once approved.',
@@ -769,6 +808,12 @@ export class VendorController {
 
     await vendorProfile.save();
 
+    trackEvent(SlackEvent.VENDOR_BUSINESS_SURVEY, {
+      actor: { id: req.user?.id, email: (req.user as any)?.email },
+      message: `Vendor completed onboarding survey — ${vendorProfile.businessName}`,
+      meta: { salesChannel, weeklyOrders, stockModel, goal, dispatchTime },
+    });
+
     res.status(200).json({ success: true, message: 'Survey submitted successfully' });
   }
 
@@ -791,6 +836,12 @@ export class VendorController {
     };
 
     await vendorProfile.save();
+
+    trackEvent(SlackEvent.VENDOR_PAYOUT_DETAILS_SET, {
+      actor: { id: req.user?.id, email: (req.user as any)?.email },
+      message: `Payout details set — ${vendorProfile.businessName}`,
+      meta: { bankName, accountName, accountNumber: `***${accountNumber?.slice(-4)}` },
+    });
 
     res.json({
       success: true,

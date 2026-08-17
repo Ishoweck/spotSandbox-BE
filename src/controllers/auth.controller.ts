@@ -15,6 +15,7 @@ import { VendorVerificationStatus } from '../types';
 import { deleteFromCloudinary, uploadToCloudinary } from '../utils/cloudinary';
 import { notificationService } from '../services/notification.service';
 import { logger } from '../utils/logger';
+import { trackEvent, SlackEvent } from '../utils/slack-events';
 
 export class AuthController {
   /**
@@ -85,6 +86,25 @@ export class AuthController {
     }
 
     await sendOTPEmail(email, otpCode, firstName);
+
+    // Track signup in Slack (fire-and-forget)
+    const isVendor = safeRole === UserRole.VENDOR;
+    trackEvent(
+      isVendor ? SlackEvent.VENDOR_REGISTERED : SlackEvent.CUSTOMER_REGISTERED,
+      {
+        actor: { id: user._id.toString(), name: `${firstName} ${lastName}`.trim(), email },
+        message: isVendor
+          ? `🎉 New vendor signup — ${firstName} ${lastName}\nOTP just sent. Waiting for email verification, then business profile setup.`
+          : `👋 New customer signup — ${firstName} ${lastName}\nOTP just sent. Waiting for email verification, then first browse.`,
+        meta: {
+          phone: phone || 'not-provided',
+          referralCode: referralCode || 'none',
+          otpExpiresIn: '10 min',
+          currentStep: 'OTP verification',
+          journeyStage: isVendor ? '1 of 5 (Signup ✅ → OTP → Profile → NIN → Payout → First Product)' : '1 of 3 (Signup ✅ → OTP → First Browse)',
+        },
+      },
+    );
 
     res.status(201).json({
       success: true,
@@ -188,6 +208,20 @@ async verifyEmail(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
   user.status = UserStatus.ACTIVE;
   user.otp = undefined;
   await user.save();
+
+  // Track email verified in Slack — signals next step in journey
+  const wasVendor = user.role === 'vendor';
+  trackEvent(
+    wasVendor ? SlackEvent.VENDOR_EMAIL_VERIFIED : SlackEvent.CUSTOMER_EMAIL_VERIFIED,
+    {
+      actor: { id: user._id.toString(), name: `${user.firstName} ${user.lastName}`.trim(), email: user.email },
+      message: `📧 Email verified — ${user.firstName} ${user.lastName}\n${wasVendor ? 'Vendor now needs to create business profile.' : 'Customer ready to browse and place first order.'}`,
+      meta: {
+        currentStep: wasVendor ? 'Create business profile' : 'Browse & place first order',
+        journeyStage: wasVendor ? '2 of 5 (Signup → OTP ✅ → Profile → NIN → Payout → First Product)' : '2 of 3 (Signup → OTP ✅ → First Browse)',
+      },
+    },
+  );
 
   // Check verified-identity badge in background
   import('./reward.controller').then(({ rewardController: rc }) => rc.checkBadges(user._id.toString())).catch(() => {});

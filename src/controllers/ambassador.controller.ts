@@ -9,6 +9,7 @@ import { AppError, asyncHandler } from '../middleware/error';
 import { sendAmbassadorApprovalEmail, sendAmbassadorClawbackEmail } from '../utils/email';
 import { uploadToCloudinary } from '../utils/cloudinary';
 import { logger } from '../utils/logger';
+import { trackEvent, SlackEvent } from '../utils/slack-events';
 
 // ─── Tier rate lookup ──────────────────────────────────────────────────────────
 // Vendors 1-50: ₦150, 51-100: ₦250, 101-200: ₦300
@@ -130,6 +131,13 @@ export const submitApplication = asyncHandler(async (req: Request, res: Response
   });
 
   logger.info(`Ambassador application received: ${email}`);
+
+  trackEvent(SlackEvent.AMBASSADOR_APPLIED, {
+    actor: { name, email },
+    message: `New ambassador application — ${name} (${role})`,
+    meta: { role, location, phone, idType, why: (why || '').slice(0, 100) },
+  });
+
   res.status(201).json({ success: true, message: 'Application received successfully' });
 });
 
@@ -257,6 +265,12 @@ export const approveApplication = asyncHandler(async (req: AuthRequest, res: Res
     logger.info(`[DEV] Ambassador signup link: ${signupLink}`);
   }
   logger.info(`Ambassador approved: ${ambassador.email} | Code: ${ambassadorCode}`);
+
+  trackEvent(SlackEvent.AMBASSADOR_APPROVED, {
+    actor: { name: ambassador.name, email: ambassador.email },
+    message: `Ambassador approved — ${ambassador.name} (${ambassador.role})`,
+    meta: { ambassadorCode, role: ambassador.role, location: ambassador.location, adminId: req.user?.id },
+  });
 
   res.json({
     success: true,

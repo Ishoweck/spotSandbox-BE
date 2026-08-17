@@ -17,12 +17,14 @@ import { setSocketInstance, setQueueReady } from './services/notification.servic
 import { connectRedis } from './config/redis';
 import { startNotificationWorkers } from './workers/notification.worker';
 import { startEmailWorker } from './workers/email.worker';
+import { startSlackWorker } from './workers/slack.worker';
 import { setupDailyBackup } from './utils/backup';
 import { setupOrderAutoComplete } from './utils/order-autocomplete';
 import { setupPointsExpiryReminders } from './utils/points-expiry-reminder';
 import { setupVCreditsExpiry } from './utils/vcredits-expiry';
 import { setupVendorReminders } from './utils/vendor-reminders';
 import { setupQuestionReminders } from './utils/question-reminders';
+import { setupAutomatedEmails } from './utils/automated-emails';
 import { backfillVendorSlugs } from './utils/vendor-slug-backfill';
 
 // Load environment variables
@@ -46,6 +48,7 @@ connectRedis().then(() => {
   setQueueReady(true);
   startNotificationWorkers();
   startEmailWorker();
+  startSlackWorker();
 }).catch((err) => {
   logger.warn('[Redis] Workers not started — notifications will use direct fallback:', err?.message);
 });
@@ -213,6 +216,8 @@ server.listen(PORT, () => {
   setupVendorReminders();
   // Remind vendors of unanswered product questions at 24h, 72h, and 7-day intervals
   setupQuestionReminders();
+  // Customer abandoned-cart (24h/72h), come-back (30d silent), weekly admin + ambassador digests
+  setupAutomatedEmails();
 });
 
 // SET SERVER TIMEOUT
