@@ -33,6 +33,15 @@ export enum EmailJobType {
   DISPUTE_OPENED         = 'dispute_opened',
   DISPUTE_RESOLVED       = 'dispute_resolved',
   REVIEW_REQUEST         = 'review_request',
+
+  // ── Customer lifecycle (interval-based) ─────────────────────────────────────
+  CART_ABANDONED_24H     = 'cart_abandoned_24h',
+  CART_ABANDONED_72H     = 'cart_abandoned_72h',
+  CUSTOMER_COMEBACK      = 'customer_comeback',
+
+  // ── Weekly digests ──────────────────────────────────────────────────────────
+  ADMIN_WEEKLY_DIGEST        = 'admin_weekly_digest',
+  AMBASSADOR_WEEKLY_SUMMARY  = 'ambassador_weekly_summary',
 }
 
 export interface EmailJobData {
@@ -69,7 +78,8 @@ export async function enqueueEmail(
     { type, to, firstName, meta },
     {
       delay: delayMs,
-      jobId: `email:${type}:${to}:${Date.now()}`,
+      // BullMQ disallows ":" in custom jobIds (reserved as internal namespace separator)
+      jobId: `email-${type}-${to}-${Date.now()}`,
     },
   );
 }

@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import { logger } from './logger';
+import { isAutomatedContext } from './email-context';
 
 import dotenv from "dotenv"
 
@@ -23,7 +24,19 @@ const emailLogo = `
     </tr>
   </table>`;
 
-function wrapEmail(titleText: string, bodyHtml: string): string {
+type EmailAudience = 'vendor' | 'customer' | 'admin' | 'ambassador';
+
+function footerLineFor(audience: EmailAudience): string {
+  switch (audience) {
+    case 'customer':   return "You're receiving this email because you have a Vendorspot account.";
+    case 'admin':      return "You're receiving this email because you're an administrator on Vendorspot.";
+    case 'ambassador': return "You're receiving this email because you're a Vendorspot ambassador.";
+    case 'vendor':
+    default:           return "You're receiving this email because you're a vendor on Vendorspot.";
+  }
+}
+
+function wrapEmail(titleText: string, bodyHtml: string, audience: EmailAudience = 'vendor'): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -80,7 +93,7 @@ function wrapEmail(titleText: string, bodyHtml: string): string {
           <tr>
             <td style="padding:0 32px 24px 32px;">
               <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
-                You're receiving this email because you're a vendor on Vendorspot.<br />
+                ${footerLineFor(audience)}<br />
                 &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
               </p>
             </td>
@@ -100,25 +113,48 @@ interface EmailOptions {
   text?: string;
   html?: string;
   attachments?: Array<{ filename: string; content: Buffer }>;
+  /** Skip the audit BCC (rarely needed — e.g. an email TO the audit inbox itself). */
+  skipAudit?: boolean;
 }
+
+// Automated/scheduled emails are BCC'd to the audit inbox for an internal audit trail.
+// Transactional emails (OTP, welcome, order confirmations) are NOT audited.
+// The "automated" flag is set by the email worker via AsyncLocalStorage — see email-context.ts.
+// Override the address with EMAIL_AUDIT_BCC in .env; set to empty string to disable entirely.
+const AUDIT_BCC = process.env.EMAIL_AUDIT_BCC ?? 'support@vendorspotng.com';
 
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
   try {
-    const { data, error } = await resend.emails.send({
+    const payload: any = {
       from: process.env.EMAIL_FROM || 'VendorSpot <noreply@vendorspotng.com>',
       to: options.to,
       subject: options.subject,
       text: options.text,
       html: options.html,
       attachments: options.attachments,
-    });
+    };
+
+    // Audit BCC — only when the send happens inside the email worker (automated context).
+    // Skipped when: (a) not in an automated context, (b) recipient IS the audit inbox,
+    // (c) caller explicitly opts out via skipAudit.
+    const shouldAudit =
+      AUDIT_BCC &&
+      isAutomatedContext() &&
+      !options.skipAudit &&
+      options.to.toLowerCase() !== AUDIT_BCC.toLowerCase();
+
+    if (shouldAudit) {
+      payload.bcc = AUDIT_BCC;
+    }
+
+    const { data, error } = await resend.emails.send(payload);
 
     if (error) {
       logger.error('Resend error:', error);
       throw new Error(`Failed to send email: ${error.message}`);
     }
 
-    logger.info(`Email sent to ${options.to}`, { emailId: data?.id });
+    logger.info(`Email sent to ${options.to}`, { emailId: data?.id, audited: !!payload.bcc });
   } catch (error) {
     logger.error('Email sending error:', error);
     throw new Error('Failed to send email');
@@ -2432,4 +2468,159 @@ export const sendAmbassadorClawbackEmail = async (
     subject: 'Important update on your ambassador earnings',
     html,
   });
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Automated interval-based emails
+// ═══════════════════════════════════════════════════════════════════════════
+
+const FRONTEND = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+
+function fmtNaira(n: number): string {
+  return `₦${(n || 0).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
+}
+
+/** Cart abandoned — 24h reminder (soft nudge). */
+export const sendCartAbandoned24hEmail = async (
+  to: string,
+  firstName: string,
+  itemCount: number,
+  cartTotal: number,
+): Promise<void> => {
+  const name = firstName || 'there';
+  const body = `
+    <p style="margin:0 0 12px 0;font-size:15px;color:#111;">Hi ${name},</p>
+    <p style="margin:0 0 12px 0;font-size:14px;color:#374151;line-height:1.6;">
+      You left <strong>${itemCount} item${itemCount === 1 ? '' : 's'}</strong>
+      in your cart worth <strong>${fmtNaira(cartTotal)}</strong>.
+      They're still waiting — checkout in one click.
+    </p>
+    <p style="margin:20px 0;">
+      <a href="${FRONTEND}/cart" style="background:#CC3366;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Complete Checkout</a>
+    </p>
+    <p style="margin:0;font-size:13px;color:#6b7280;">Prices and stock can change — grab yours before they're gone.</p>`;
+  await sendEmail({ to, subject: 'You forgot something in your cart 🛒', html: wrapEmail('Your cart is waiting', body, 'customer') });
+};
+
+/** Cart abandoned — 72h reminder (final nudge, small discount hint). */
+export const sendCartAbandoned72hEmail = async (
+  to: string,
+  firstName: string,
+  itemCount: number,
+  cartTotal: number,
+): Promise<void> => {
+  const name = firstName || 'there';
+  const body = `
+    <p style="margin:0 0 12px 0;font-size:15px;color:#111;">Hi ${name},</p>
+    <p style="margin:0 0 12px 0;font-size:14px;color:#374151;line-height:1.6;">
+      Your cart with ${itemCount} item${itemCount === 1 ? '' : 's'} (${fmtNaira(cartTotal)})
+      is about to be cleared. Complete your order now so you don't lose it.
+    </p>
+    <p style="margin:20px 0;">
+      <a href="${FRONTEND}/cart" style="background:#CC3366;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Complete My Order</a>
+    </p>
+    <p style="margin:0;font-size:13px;color:#6b7280;">
+      Need help checking out? Reply to this email and we'll walk you through it.
+    </p>`;
+  await sendEmail({ to, subject: 'Last chance — your cart is about to expire', html: wrapEmail("Don't miss out", body, 'customer') });
+};
+
+/** Come-back after 30 days silent. */
+export const sendCustomerComebackEmail = async (
+  to: string,
+  firstName: string,
+  daysSince: number,
+): Promise<void> => {
+  const name = firstName || 'there';
+  const body = `
+    <p style="margin:0 0 12px 0;font-size:15px;color:#111;">Hi ${name},</p>
+    <p style="margin:0 0 12px 0;font-size:14px;color:#374151;line-height:1.6;">
+      It's been about ${daysSince} days since we last saw you.
+      We've added new vendors and products since then — come take a look.
+    </p>
+    <p style="margin:20px 0;">
+      <a href="${FRONTEND}" style="background:#CC3366;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Browse What's New</a>
+    </p>
+    <p style="margin:0;font-size:13px;color:#6b7280;">
+      Any feedback? Just reply — we read every response.
+    </p>`;
+  await sendEmail({ to, subject: 'We miss you at Vendorspot 👋', html: wrapEmail("Long time no see", body, 'customer') });
+};
+
+/** Weekly admin digest — Monday morning snapshot. */
+export const sendAdminWeeklyDigestEmail = async (
+  to: string,
+  firstName: string,
+  stats: {
+    pendingKycs: number;
+    openDisputes: number;
+    refundsThisWeek: number;
+    newSignups: number;
+    revenueThisWeek: number;
+    weekLabel: string;
+  },
+): Promise<void> => {
+  const row = (label: string, value: string | number, color = '#111') => `
+    <tr>
+      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#6b7280;">${label}</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:16px;font-weight:700;color:${color};text-align:right;">${value}</td>
+    </tr>`;
+  const body = `
+    <p style="margin:0 0 12px 0;font-size:15px;color:#111;">Hi ${firstName || 'Admin'},</p>
+    <p style="margin:0 0 16px 0;font-size:14px;color:#374151;">
+      Here's your weekly Vendorspot snapshot for <strong>${stats.weekLabel}</strong>:
+    </p>
+    <table role="presentation" width="100%" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+      ${row('Pending KYCs', stats.pendingKycs, stats.pendingKycs > 0 ? '#F59E0B' : '#111')}
+      ${row('Open Disputes', stats.openDisputes, stats.openDisputes > 0 ? '#EF4444' : '#111')}
+      ${row('Refunds This Week', stats.refundsThisWeek)}
+      ${row('New Signups', stats.newSignups, '#10B981')}
+      ${row('Revenue This Week', fmtNaira(stats.revenueThisWeek), '#10B981')}
+    </table>
+    <p style="margin:20px 0 0 0;">
+      <a href="${FRONTEND.replace('vendorspotng.com', 'theadmin.vendorspotng.com')}" style="background:#111;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Open Admin Dashboard</a>
+    </p>`;
+  await sendEmail({ to, subject: `Vendorspot weekly digest — ${stats.weekLabel}`, html: wrapEmail('Weekly Digest', body, 'admin') });
+};
+
+/** Ambassador weekly performance summary. */
+export const sendAmbassadorWeeklySummaryEmail = async (
+  to: string,
+  firstName: string,
+  stats: {
+    referralsThisWeek: number;
+    commissionsThisWeek: number;
+    totalReferrals: number;
+    totalEarned: number;
+    rank?: number | null;
+    weekLabel: string;
+  },
+): Promise<void> => {
+  const rankLine = stats.rank
+    ? `<p style="margin:0 0 16px 0;font-size:14px;color:#374151;">You're ranked <strong>#${stats.rank}</strong> on the ambassador leaderboard this week.</p>`
+    : '';
+  const row = (label: string, value: string | number) => `
+    <tr>
+      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#6b7280;">${label}</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:16px;font-weight:700;color:#111;text-align:right;">${value}</td>
+    </tr>`;
+  const body = `
+    <p style="margin:0 0 12px 0;font-size:15px;color:#111;">Hi ${firstName || 'Ambassador'},</p>
+    <p style="margin:0 0 16px 0;font-size:14px;color:#374151;">
+      Your Vendorspot ambassador stats for <strong>${stats.weekLabel}</strong>:
+    </p>
+    ${rankLine}
+    <table role="presentation" width="100%" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+      ${row('Referrals This Week', stats.referralsThisWeek)}
+      ${row('Commissions This Week', fmtNaira(stats.commissionsThisWeek))}
+      ${row('Total Referrals', stats.totalReferrals)}
+      ${row('Total Earned', fmtNaira(stats.totalEarned))}
+    </table>
+    <p style="margin:20px 0;font-size:13px;color:#6b7280;">
+      Keep sharing your code — every signup counts. Full stats on your dashboard.
+    </p>
+    <p style="margin:20px 0 0 0;">
+      <a href="${FRONTEND}/ambassador" style="background:#CC3366;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Open Ambassador Dashboard</a>
+    </p>`;
+  await sendEmail({ to, subject: `Your ambassador week — ${stats.weekLabel}`, html: wrapEmail('Weekly Ambassador Summary', body, 'ambassador') });
 };

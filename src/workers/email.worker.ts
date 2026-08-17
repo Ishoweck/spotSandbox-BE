@@ -25,11 +25,22 @@ import {
   sendDisputeOpenedEmail,
   sendDisputeResolvedEmail,
   sendReviewRequestEmail,
+  sendCartAbandoned24hEmail,
+  sendCartAbandoned72hEmail,
+  sendCustomerComebackEmail,
+  sendAdminWeeklyDigestEmail,
+  sendAmbassadorWeeklySummaryEmail,
 } from '../utils/email';
 import { EmailJobType, type EmailJobData } from '../queues/email.queue';
 import { logger } from '../utils/logger';
+import { emailContext } from '../utils/email-context';
 
 async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
+  // Mark this async context as "automated" so sendEmail() adds the audit BCC.
+  return emailContext.run({ automated: true }, () => processEmailJobInner(job));
+}
+
+async function processEmailJobInner(job: Job<EmailJobData>): Promise<void> {
   const { type, to, firstName, meta } = job.data;
 
   switch (type) {
@@ -141,6 +152,32 @@ async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     case EmailJobType.REVIEW_REQUEST:
       await sendReviewRequestEmail(to, firstName ?? '', meta?.orderNumber ?? '', meta?.vendorName);
+      break;
+
+    case EmailJobType.CART_ABANDONED_24H:
+      await sendCartAbandoned24hEmail(to, firstName ?? '', meta?.itemCount ?? 0, meta?.cartTotal ?? 0);
+      break;
+
+    case EmailJobType.CART_ABANDONED_72H:
+      await sendCartAbandoned72hEmail(to, firstName ?? '', meta?.itemCount ?? 0, meta?.cartTotal ?? 0);
+      break;
+
+    case EmailJobType.CUSTOMER_COMEBACK:
+      await sendCustomerComebackEmail(to, firstName ?? '', meta?.daysSince ?? 30);
+      break;
+
+    case EmailJobType.ADMIN_WEEKLY_DIGEST:
+      await sendAdminWeeklyDigestEmail(to, firstName ?? '', meta?.stats ?? {
+        pendingKycs: 0, openDisputes: 0, refundsThisWeek: 0,
+        newSignups: 0, revenueThisWeek: 0, weekLabel: '',
+      });
+      break;
+
+    case EmailJobType.AMBASSADOR_WEEKLY_SUMMARY:
+      await sendAmbassadorWeeklySummaryEmail(to, firstName ?? '', meta?.stats ?? {
+        referralsThisWeek: 0, commissionsThisWeek: 0,
+        totalReferrals: 0, totalEarned: 0, weekLabel: '',
+      });
       break;
 
     default:
