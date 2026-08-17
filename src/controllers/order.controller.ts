@@ -2213,15 +2213,37 @@
           const senderFullAddress = `${senderOrigin.street || 'Store Address'}, ${senderOrigin.city}, ${senderOrigin.state}, ${senderOrigin.country}`;
           const receiverFullAddress = `${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.state}, ${order.shippingAddress.country || 'Nigeria'}`;
 
+          // ShipBubble requires a full-name (2+ words, letters + spaces only — no numbers, no symbols).
+          // Business names like "Seyiscents" (1 word) or "Seyi's Scents" (apostrophe) get rejected.
+          // Strip symbols + numbers, then require 2+ words. Fall back to owner name if not enough words.
+          const shipBubbleSafeName = (preferred: string, fallback: string): string => {
+            const clean = (s: string) =>
+              (s || '').replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+            const cleanedPreferred = clean(preferred);
+            if (cleanedPreferred.split(' ').filter(Boolean).length >= 2) return cleanedPreferred;
+            const cleanedFallback = clean(fallback);
+            if (cleanedFallback.split(' ').filter(Boolean).length >= 2) return cleanedFallback;
+            // Last resort — pad the single word we have
+            const single = cleanedPreferred || cleanedFallback || 'Store';
+            return `${single} Vendor`;
+          };
+          const ownerFullName = vendor.firstName && vendor.lastName
+            ? `${vendor.firstName} ${vendor.lastName}`
+            : vendor.firstName || vendor.lastName || '';
+          const senderName = shipBubbleSafeName(group.vendorName, ownerFullName);
+
           const senderAddress = {
-            name: group.vendorName,
+            name: senderName,
             phone: vendorProfile?.businessPhone || vendor.phone || '+2348000000000',
             email: vendorProfile?.businessEmail || vendor.email || 'sender@store.com',
             address: senderFullAddress,
           };
 
+          const receiverFallbackName = order.shippingAddress.fullName || `${user.firstName} ${user.lastName}`;
+          const receiverName = shipBubbleSafeName(receiverFallbackName, `${user.firstName || ''} ${user.lastName || ''}`);
+
           const receiverAddress = {
-            name: order.shippingAddress.fullName || `${user.firstName} ${user.lastName}`,
+            name: receiverName,
             phone: order.shippingAddress.phone || user.phone || '+2348000000000',
             email: user.email,
             address: receiverFullAddress,
@@ -2256,15 +2278,27 @@
           // ✅ FIX: Determine category for ShipBubble
           const categoryId = this.determineCategoryForItems(physicalItems);
 
+          // Use stored ShipBubble address codes when available — skips redundant validation
+          // and avoids re-hitting name-format errors on already-validated addresses.
+          const storedSenderCode = usingPickupAddress
+            ? (senderOrigin as any)?.shipBubble?.addressCode
+            : (vendorProfile?.businessAddress as any)?.shipBubble?.addressCode;
+          const storedReceiverCode = (order.shippingAddress as any)?.shipBubble?.addressCode;
+
           // Step 1: Get delivery rates
-          logger.info('🔍 Fetching delivery rates from ShipBubble...');
-          
+          logger.info('🔍 Fetching delivery rates from ShipBubble...', {
+            usingStoredSenderCode: !!storedSenderCode,
+            usingStoredReceiverCode: !!storedReceiverCode,
+          });
+
           const ratesResponse = await shipBubbleService.getDeliveryRates(
             senderAddress,
             receiverAddress,
             packageItems,
             undefined,
-            categoryId  // ✅ Pass correct category
+            categoryId,
+            storedSenderCode,
+            storedReceiverCode,
           );
 
           logger.info('📊 Rates response:', {
