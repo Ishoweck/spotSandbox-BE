@@ -28,6 +28,18 @@ import { logger } from '../utils/logger';
 const STATS_CACHE_HOURS = 24;
 const FAST_REPLY_HOURS = 24;
 
+// Accept either an ObjectId (user._id) or a vendor slug and return the user
+// ObjectId string. Used by any endpoint that receives :vendorId from a route
+// deep-linked via slug (share URLs are /shops/<slug>). Returns null if no
+// matching vendor exists.
+async function resolveVendorUserId(vendorIdOrSlug: string): Promise<string | null> {
+  if (!vendorIdOrSlug) return null;
+  const isObjectId = /^[a-f\d]{24}$/i.test(vendorIdOrSlug);
+  if (isObjectId) return vendorIdOrSlug;
+  const profile = await VendorProfile.findOne({ slug: vendorIdOrSlug }).select('user').lean();
+  return profile ? (profile.user as any).toString() : null;
+}
+
 async function buildUniqueVendorSlug(businessName: string, excludeUserId?: string): Promise<string> {
   const base = generateSlug(businessName) || 'vendor';
   let candidate = base;
@@ -124,14 +136,18 @@ export class VendorController {
         sortCriteria = { averageRating: -1, totalReviews: -1 };
     }
 
-    const baseFilter: any = { isActive: true };
+    // Always restrict to verified vendors — public results must never leak
+    // unapproved stores, even during search. Previous code skipped this
+    // filter when q was provided, exposing pending vendors to buyers.
+    const baseFilter: any = {
+      isActive: true,
+      verificationStatus: VendorVerificationStatus.VERIFIED,
+    };
     if (q) {
       baseFilter.$or = [
         { businessName: { $regex: q, $options: 'i' } },
         { businessDescription: { $regex: q, $options: 'i' } },
       ];
-    } else {
-      baseFilter.verificationStatus = VendorVerificationStatus.VERIFIED;
     }
 
     const [vendors, total] = await Promise.all([
@@ -209,11 +225,18 @@ export class VendorController {
    * Follow a vendor
    */
   async followVendor(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { vendorId } = req.params;
+    const { vendorId: vendorIdOrSlug } = req.params;
     const userId = req.user?.id;
 
     if (!userId) {
       throw new AppError('Authentication required', 401);
+    }
+
+    // Accept slug OR ObjectId. Website share URLs use /shops/<slug>, so a
+    // deep-linked vendor page on mobile hands us a slug here, not an id.
+    const vendorId = await resolveVendorUserId(vendorIdOrSlug);
+    if (!vendorId) {
+      throw new AppError('Vendor not found', 404);
     }
 
     const vendorProfile = await VendorProfile.findOne({
@@ -277,11 +300,16 @@ export class VendorController {
    * Unfollow a vendor
    */
   async unfollowVendor(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { vendorId } = req.params;
+    const { vendorId: vendorIdOrSlug } = req.params;
     const userId = req.user?.id;
 
     if (!userId) {
       throw new AppError('Authentication required', 401);
+    }
+
+    const vendorId = await resolveVendorUserId(vendorIdOrSlug);
+    if (!vendorId) {
+      throw new AppError('Vendor not found', 404);
     }
 
     const vendorProfile = await VendorProfile.findOne({

@@ -240,9 +240,27 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       filter.averageRating = { $gte: Number(req.query.rating) };
     }
     
-    // Search
+    // Search — regex-based partial match so "iph" matches "iPhone", etc.
+    // $text was stemmed / exact-word only, causing legit searches to miss
+    // approved products that the buyer clearly meant. escapeRegex prevents
+    // ReDoS from user input. Uses $and so the state filter's own $or is
+    // preserved when both filters are passed together.
     if (req.query.search) {
-      filter.$text = { $search: req.query.search as string };
+      const q = String(req.query.search).trim();
+      if (q) {
+        const pattern = escapeRegex(q);
+        const searchOr = [
+          { name: { $regex: pattern, $options: 'i' } },
+          { description: { $regex: pattern, $options: 'i' } },
+          { tags: { $regex: pattern, $options: 'i' } },
+        ];
+        if (filter.$or) {
+          filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+          delete filter.$or;
+        } else {
+          filter.$or = searchOr;
+        }
+      }
     }
 
     // Sort
@@ -811,12 +829,28 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
 
   // NEW: Get Vendor Products
   async getVendorProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { vendorId } = req.params;
+    const { vendorId: vendorIdOrSlug } = req.params;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const skip = (page - 1) * limit;
 
-    const products = await Product.find({ 
+    // Accept slug OR ObjectId — shop URLs on the website use vendor slugs.
+    let vendorId = vendorIdOrSlug;
+    const isObjectId = /^[a-f\d]{24}$/i.test(vendorIdOrSlug);
+    if (!isObjectId) {
+      const profile = await VendorProfile.findOne({ slug: vendorIdOrSlug }).select('user').lean();
+      if (!profile) {
+        res.json({
+          success: true,
+          message: 'Vendor products fetched successfully',
+          data: { products: [], total: 0, page, limit, hasMore: false },
+        });
+        return;
+      }
+      vendorId = (profile.user as any).toString();
+    }
+
+    const products = await Product.find({
       status: ProductStatus.ACTIVE,
       vendor: vendorId
     })
@@ -827,9 +861,9 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       .limit(limit)
       .lean();
 
-    const total = await Product.countDocuments({ 
+    const total = await Product.countDocuments({
       status: ProductStatus.ACTIVE,
-      vendor: vendorId 
+      vendor: vendorId
     });
 
     const formattedProducts = products.map(this.formatProduct);
