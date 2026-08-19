@@ -2086,7 +2086,8 @@ export const updateProductStatus = asyncHandler(
             followerIds,
             vendorProfile.businessName || 'A vendor you follow',
             product.name,
-            product._id.toString()
+            product._id.toString(),
+            product.slug
           );
         }
       } catch (err) {

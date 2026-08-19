@@ -27,6 +27,7 @@
     "backfill:ratings": "npx ts-node src/scripts/backfillVendorRatings.ts",
     "backfill:addresses": "npx ts-node src/scripts/backfillVendorAddresses.ts",
     "backfill:slugs": "npx ts-node src/scripts/backfillVendorSlugs.ts",
+    "backfill:product-slugs": "npx ts-node src/scripts/backfillProductSlugs.ts",
     "seed:notif-templates": "npx ts-node scripts/seed-notification-templates.ts"
   },
   "keywords": [

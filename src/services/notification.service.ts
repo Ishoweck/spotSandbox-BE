@@ -532,30 +532,32 @@ class NotificationService {
   // PROMOTION NOTIFICATIONS
   // ================================================================
 
-  async newProductFromFollowedVendor(followerIds: string[], vendorName: string, productName: string, productId: string): Promise<void> {
+  async newProductFromFollowedVendor(followerIds: string[], vendorName: string, productName: string, productId: string, productSlug?: string): Promise<void> {
     if (followerIds.length === 0) return;
 
+    const linkTarget = productSlug || productId;
     await this.sendToMany({
       userIds: followerIds,
       type: NotificationType.PROMOTION,
       title: 'New Arrival',
       message: `${vendorName} just listed "${productName}". Check it out!`,
-      data: { productId, vendorName },
-      link: `/products/${productId}`,
+      data: { productId, productSlug, vendorName },
+      link: `/products/${linkTarget}`,
       referenceId: `new_product:${productId}`,
     });
   }
 
-  async priceDrop(userIds: string[], productName: string, oldPrice: number, newPrice: number, productId: string): Promise<void> {
+  async priceDrop(userIds: string[], productName: string, oldPrice: number, newPrice: number, productId: string, productSlug?: string): Promise<void> {
     if (userIds.length === 0) return;
 
+    const linkTarget = productSlug || productId;
     await this.sendToMany({
       userIds,
       type: NotificationType.PROMOTION,
       title: 'Price Drop',
       message: `"${productName}" dropped from ₦${oldPrice.toLocaleString()} to ₦${newPrice.toLocaleString()}!`,
-      data: { productId, oldPrice, newPrice },
-      link: `/products/${productId}`,
+      data: { productId, productSlug, oldPrice, newPrice },
+      link: `/products/${linkTarget}`,
       referenceId: `price_drop:${productId}`,
     });
   }

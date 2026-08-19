@@ -11,6 +11,22 @@ import { getPaginationMeta, generateSlug, generateSKU, escapeRegex, stripEmojis 
 import { uploadMultipleToCloudinary, uploadDigitalFileToCloudinary, uploadToCloudinary } from '../utils/cloudinary';
 import { notificationService } from '../services/notification.service';
 
+// Slug collision handling — mirrors buildUniqueVendorSlug in vendor.controller.ts.
+// Since Product.slug has a unique index, without this two products with the
+// same name (e.g. "iPhone 15") would collide on the second insert.
+async function buildUniqueProductSlug(name: string, excludeId?: string): Promise<string> {
+  const base = generateSlug(name) || 'product';
+  let candidate = base;
+  let counter = 2;
+  while (true) {
+    const filter: any = { slug: candidate };
+    if (excludeId) filter._id = { $ne: excludeId };
+    const exists = await Product.findOne(filter).select('_id').lean();
+    if (!exists) return candidate;
+    candidate = `${base}-${counter++}`;
+  }
+}
+
 export class ProductController {
 
   private async getActiveVendorIds(): Promise<any[]> {
@@ -65,7 +81,7 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
     if (productData.description) productData.description = stripEmojis(productData.description);
 
     // Generate slug and SKU
-    productData.slug = generateSlug(productData.name);
+    productData.slug = await buildUniqueProductSlug(productData.name);
     if (!productData.sku) {
       productData.sku = generateSKU(productData.name);
     }
@@ -302,6 +318,12 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
         throw new AppError('Product not found', 404);
       }
 
+      // Auto-backfill missing slug so historical products become shareable
+      // the first time someone opens them. Uses the collision-safe builder.
+      if (!product.slug && product.name) {
+        product.slug = await buildUniqueProductSlug(product.name, product._id.toString());
+      }
+
       // Increment views only for valid, reachable products
       product.views += 1;
       await product.save();
@@ -332,7 +354,12 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
 
     if (!vendorId) throw new AppError('User not authenticated', 401);
 
-    const product = await Product.findOne({ _id: id, vendor: vendorId })
+    const isObjectId = /^[a-f\d]{24}$/i.test(id);
+    const product = await Product.findOne(
+      isObjectId
+        ? { _id: id, vendor: vendorId }
+        : { slug: id, vendor: vendorId }
+    )
       .populate('vendor', 'firstName lastName email profileImage')
       .populate('category', 'name');
 
@@ -1053,7 +1080,8 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
             product.name,
             oldPrice,
             req.body.price,
-            product._id.toString()
+            product._id.toString(),
+            product.slug
           );
         }
       } catch (error) {
@@ -1114,6 +1142,7 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
 
     return {
       id: product._id.toString(),
+      slug: product.slug,
       name: product.name,
       description: product.description,
       shortDescription: product.shortDescription,
