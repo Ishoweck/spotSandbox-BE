@@ -706,12 +706,17 @@ export class VendorController {
       adminOverride: false,
     };
 
-    // Ensure a NIN kyc document exists so admin queue picks it up
+    // Only push a NIN kycDocument if Dojah returned a real photo we can
+    // render for admin review. When Dojah returned no photo, we don't create
+    // a placeholder doc anymore — the vendor is routed to the manual upload
+    // flow instead (see the manual_upload_required response below). Prior
+    // behavior stored the sentinel 'nin-lookup' as documentUrl, which the
+    // admin UI's <a href> tried to navigate to and 404'd.
     const ninDocIdx = vendorProfile.kycDocuments.findIndex((d) => d.type === 'NIN');
-    if (ninDocIdx < 0) {
+    if (ninDocIdx < 0 && result.returnedPhoto) {
       vendorProfile.kycDocuments.push({
         type: 'NIN',
-        documentUrl: result.returnedPhoto ? `data:image/jpeg;base64,${result.returnedPhoto}` : 'nin-lookup',
+        documentUrl: `data:image/jpeg;base64,${result.returnedPhoto}`,
         verificationStatus: 'pending',
       } as any);
     }
@@ -779,10 +784,14 @@ export class VendorController {
       },
     });
 
+    // Signal the mobile app to prompt manual NIN upload. This is the primary
+    // user-visible outcome when Dojah can't auto-verify — instead of a fake
+    // "under review" pending state with no evidence for admin, we ask the
+    // vendor to upload their NIN slip/card the old way.
     res.json({
       success: true,
-      message: 'Submitted for review. You will be notified once approved.',
-      data: { verified: false, status: 'pending' },
+      message: "We couldn't verify your NIN automatically. Please upload a photo of your NIN slip or card to continue.",
+      data: { verified: false, status: 'manual_upload_required' },
     });
   }
 

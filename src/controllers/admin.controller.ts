@@ -34,7 +34,7 @@ import {
 } from '../models/Additional';
 import { notificationService, emitOrderStatusUpdate } from '../services/notification.service';
 import { shipBubbleService } from '../services/shipbubble.service';
-import { sendEmail, sendActivationEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail } from '../utils/email';
+import { sendEmail, sendActivationEmail, sendVendorWelcomeEmail, sendFounderWelcomeEmail, sendProductPostingGuideEmail, sendNinReuploadRequestEmail } from '../utils/email';
 import { enqueueEmail, EmailJobType } from '../utils/email-queue';
 import { sendPushNotification } from '../config/firebase';
 import { getPaginationMeta, generateSlug } from '../utils/helpers';
@@ -1718,6 +1718,53 @@ export const updateVendorKycDocument = asyncHandler(
       success: true,
       message: `Document ${status === 'verified' ? 'approved' : status === 'rejected' ? 'rejected' : 'reset to pending'}`,
       data: { kycDocuments: vendor.kycDocuments },
+    });
+  }
+);
+
+/**
+ * POST /admin/vendors/:id/request-nin-reupload
+ * Emails the vendor asking them to upload their NIN document manually.
+ * Used for orphan records where Dojah didn't return a photo and no real
+ * NIN image is on file. Also fires an in-app notification for immediacy.
+ */
+export const requestNinReupload = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    const vendor = await VendorProfile.findById(id).populate('user', 'email firstName lastName');
+    if (!vendor) {
+      res.status(404).json({ success: false, message: 'Vendor not found' });
+      return;
+    }
+
+    const vendorUser = vendor.user as any;
+    const email = vendorUser?.email;
+    if (!email) {
+      res.status(400).json({ success: false, message: 'Vendor has no email on file' });
+      return;
+    }
+
+    await sendNinReuploadRequestEmail(email, vendorUser?.firstName);
+
+    // In-app notification too so the vendor sees it immediately if the app
+    // is open, without waiting for email delivery.
+    try {
+      await notificationService.send({
+        userId: vendorUser._id.toString(),
+        type: NotificationType.ACCOUNT,
+        title: 'Action needed — upload your NIN',
+        message: 'Please upload a photo of your NIN slip or card in your store profile to activate your account.',
+      });
+    } catch (err) {
+      logger.error('Failed to send in-app NIN reupload notification:', err);
+    }
+
+    logger.info(`Admin requested NIN reupload for vendor ${vendor._id} (${email})`);
+
+    res.json({
+      success: true,
+      message: `Re-upload request emailed to ${email}`,
     });
   }
 );

@@ -689,6 +689,77 @@ export const sendVendorWelcomeEmail = async (email: string, firstName?: string):
   });
 };
 
+// Sent by admins for vendors whose automated NIN verification (Dojah)
+// couldn't complete — asks them to upload their NIN manually via the
+// store profile / KYC screen. Admin triggers this from the vendor detail
+// modal when they see an orphan / rejected NIN document.
+export const sendNinReuploadRequestEmail = async (
+  email: string,
+  firstName?: string,
+): Promise<void> => {
+  const displayName = firstName || 'there';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
+  const kycLink = `${frontendUrl}/dashboard`;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /></head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;" cellspacing="0" cellpadding="0" border="0">
+          <tr><td style="padding:28px 32px 0 32px;">${emailLogo}</td></tr>
+          <tr>
+            <td style="padding:28px 32px 0 32px;">
+              <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${displayName},</p>
+              <p style="margin:0 0 14px 0;font-size:15px;color:#374151;line-height:1.6;">We tried to verify your NIN automatically, but couldn't complete the check. To finish setting up your vendor account, please upload a clear photo of your NIN slip or card.</p>
+              <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">
+                <strong>How to upload:</strong> open your Vendorspot app or dashboard, go to your store profile, tap <strong>KYC Verification</strong>, then upload your NIN document.
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px 0;">
+                <tr>
+                  <td style="background:#CC3366;border-radius:8px;">
+                    <a href="${kycLink}" style="display:inline-block;padding:12px 24px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">Upload NIN document</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 16px 0;font-size:14px;color:#6b7280;line-height:1.6;">Once uploaded, our team will review it and activate your storefront within 24 hours.</p>
+              <p style="margin:0 0 4px 0;font-size:15px;color:#374151;">Thank you,</p>
+              <p style="margin:0 0 28px 0;font-size:15px;color:#374151;font-weight:600;">The Vendorspot Team</p>
+            </td>
+          </tr>
+          <tr><td style="padding:0 32px;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:0;" /></td></tr>
+          <tr>
+            <td style="padding:20px 32px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#6b7280;">Need help? <a href="mailto:support@vendorspotng.com" style="color:#CC3366;text-decoration:none;">support@vendorspotng.com</a></p>
+              <p style="margin:0;font-size:13px;color:#374151;"><strong>Vendorspot</strong> — Confidence in every click.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                You're receiving this email because your Vendorspot account needs additional verification.<br />
+                &copy; ${new Date().getFullYear()} Vendorspot (TheSpot) Ltd. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+
+  await sendEmail({
+    to: email,
+    subject: 'Action needed — upload your NIN to activate your Vendorspot storefront',
+    html,
+  });
+};
+
 export const sendFounderWelcomeEmail = async (email: string, firstName?: string): Promise<void> => {
   const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
   const ceoPhotoUrl = `${frontendUrl}/team/ceo.png`;
