@@ -102,6 +102,10 @@ export class VendorController {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || (q ? 50 : 10)));
     const skip = (page - 1) * limit;
     const sortBy = (req.query.sortBy as string) || 'rating';
+    // Default to true so the home "top vendors" carousel keeps its old behavior
+    // (only vendors with at least one live product). The mobile "browse all
+    // vendors" tab passes hasProducts=false so newly-approved vendors show.
+    const hasProducts = req.query.hasProducts !== 'false';
 
     let sortCriteria: any = {};
 
@@ -111,6 +115,9 @@ export class VendorController {
         break;
       case 'products':
         sortCriteria = { productCount: -1 };
+        break;
+      case 'newest':
+        sortCriteria = { verifiedAt: -1, createdAt: -1 };
         break;
       case 'rating':
       default:
@@ -176,7 +183,9 @@ export class VendorController {
       })
     );
 
-    const filteredVendors = vendorsWithDetails.filter(v => v.productCount > 0);
+    const filteredVendors = hasProducts
+      ? vendorsWithDetails.filter(v => v.productCount > 0)
+      : vendorsWithDetails;
 
     res.json({
       success: true,
