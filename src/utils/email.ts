@@ -699,7 +699,7 @@ export const sendNinReuploadRequestEmail = async (
 ): Promise<void> => {
   const displayName = firstName || 'there';
   const frontendUrl = process.env.FRONTEND_URL || 'https://vendorspotng.com';
-  const kycLink = `${frontendUrl}/dashboard`;
+  const kycLink = `${frontendUrl}/vendor/kyc`;
 
   const html = `
 <!DOCTYPE html>

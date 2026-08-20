@@ -654,6 +654,16 @@ export class VendorController {
       throw new AppError('Vendor profile not found', 404);
     }
 
+    // Track whether the vendor is fixing an orphan NIN (auto-verified without
+    // a stored image) — in that case we must reset overall status so admin
+    // reviews the newly-uploaded photo.
+    const preExistingNin = vendorProfile.kycDocuments.find((d) => d.type === 'NIN');
+    const preExistingNinUrl = (preExistingNin as any)?.documentUrl?.trim?.() || '';
+    const wasNinOrphan =
+      vendorProfile.verificationStatus === VendorVerificationStatus.VERIFIED &&
+      (!preExistingNin || !preExistingNinUrl || preExistingNinUrl === 'nin-lookup');
+    const uploadingNin = documents.some((d: any) => d.type === 'NIN' && d.documentUrl);
+
     documents.forEach((doc: any) => {
       const existingIdx = vendorProfile.kycDocuments.findIndex((d) => d.type === doc.type);
       if (existingIdx >= 0) {
@@ -671,8 +681,19 @@ export class VendorController {
       }
     });
 
-    if (vendorProfile.verificationStatus === VendorVerificationStatus.PENDING) {
+    // Orphan-verified vendor is now uploading their real NIN photo → put the
+    // account back into review so admin approves the human-uploaded image.
+    if (wasNinOrphan && uploadingNin) {
       vendorProfile.verificationStatus = VendorVerificationStatus.PENDING;
+      vendorProfile.verifiedAt = undefined;
+      if (vendorProfile.ninVerification) {
+        vendorProfile.ninVerification.autoVerified = false;
+      }
+      vendorProfile.statusHistory.push({
+        action: 'vendor_uploaded_orphan_nin',
+        reason: 'Vendor uploaded NIN image after being auto-verified without one',
+        at: new Date(),
+      });
     }
 
     await vendorProfile.save();

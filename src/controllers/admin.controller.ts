@@ -1722,11 +1722,44 @@ export const updateVendorKycDocument = asyncHandler(
   }
 );
 
+// A NIN kycDocument is "valid" only when documentUrl is a real image URL —
+// not empty, not the legacy 'nin-lookup' sentinel we used to store. Used by
+// requestNinReupload + backfillOrphanNin to detect orphan verified vendors.
+const hasValidNinDoc = (docs: any[] = []): boolean => {
+  const nin = docs.find((d) => d?.type === 'NIN');
+  if (!nin) return false;
+  const url = (nin.documentUrl || '').trim();
+  return !!url && url !== 'nin-lookup';
+};
+
+// Rewrites the NIN entry in kycDocuments so mobile/website UI stops
+// treating this vendor as "already has NIN verified". Called by both
+// requestNinReupload and backfillOrphanNin.
+const markNinDocRejected = (vendor: any, reason: string): void => {
+  const ninIdx = vendor.kycDocuments?.findIndex?.((d: any) => d?.type === 'NIN');
+  if (ninIdx == null || ninIdx < 0) {
+    // No NIN doc at all — push a placeholder rejected entry so the mobile
+    // KYC UI shows the "Rejected" state on the NIN row instead of "Verified".
+    vendor.kycDocuments.push({
+      type: 'NIN',
+      documentUrl: '',
+      verificationStatus: 'rejected',
+      rejectionReason: reason,
+    });
+  } else {
+    vendor.kycDocuments[ninIdx].verificationStatus = 'rejected';
+    vendor.kycDocuments[ninIdx].rejectionReason = reason;
+    vendor.kycDocuments[ninIdx].verifiedAt = undefined;
+  }
+};
+
 /**
  * POST /admin/vendors/:id/request-nin-reupload
- * Emails the vendor asking them to upload their NIN document manually.
- * Used for orphan records where Dojah didn't return a photo and no real
- * NIN image is on file. Also fires an in-app notification for immediacy.
+ * Emails the vendor asking them to upload their NIN document manually AND
+ * resets the vendor's verification so the mobile / website UI unblocks the
+ * upload flow. Prior to the reset, auto-verified vendors with no NIN image
+ * saw "Account Verified" and couldn't upload anything — see session
+ * 2026-08-20 for the diagnosis.
  */
 export const requestNinReupload = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
@@ -1744,6 +1777,25 @@ export const requestNinReupload = asyncHandler(
       res.status(400).json({ success: false, message: 'Vendor has no email on file' });
       return;
     }
+
+    // Reset verification so the frontend allows upload again.
+    const wasVerified = vendor.verificationStatus === VendorVerificationStatus.VERIFIED;
+    vendor.verificationStatus = VendorVerificationStatus.PENDING;
+    vendor.verifiedAt = undefined;
+    if (vendor.ninVerification) {
+      vendor.ninVerification.autoVerified = false;
+      vendor.ninVerification.adminOverride = false;
+    }
+    markNinDocRejected(vendor, 'NIN image missing — please upload a clear photo of your NIN slip or card');
+    vendor.statusHistory.push({
+      action: 'admin_requested_nin_reupload',
+      changedBy: req.user?.id,
+      reason: wasVerified
+        ? 'Was auto-verified without a stored NIN image — reset to pending for manual upload'
+        : 'Admin asked vendor to re-upload NIN',
+      at: new Date(),
+    });
+    await vendor.save();
 
     await sendNinReuploadRequestEmail(email, vendorUser?.firstName);
 
@@ -1765,6 +1817,81 @@ export const requestNinReupload = asyncHandler(
     res.json({
       success: true,
       message: `Re-upload request emailed to ${email}`,
+      data: { verificationStatus: vendor.verificationStatus, resetFromVerified: wasVerified },
+    });
+  }
+);
+
+/**
+ * POST /admin/vendors/backfill-orphan-nin
+ * One-shot cleanup for vendors that Dojah auto-verified without returning a
+ * usable NIN photo — they ended up VERIFIED with no NIN kycDocument (or a
+ * sentinel 'nin-lookup' URL). Mobile UI treated them as fully verified and
+ * blocked re-upload. This resets them all in one call. Idempotent — running
+ * twice is a no-op the second time.
+ *
+ * Optional query: ?since=YYYY-MM-DD to scope by attemptedAt.
+ * Returns { affected: number, ids: string[] } for admin confirmation.
+ */
+export const backfillOrphanNin = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const since = req.query.since ? new Date(String(req.query.since)) : null;
+    const dryRun = req.query.dryRun === 'true';
+
+    const filter: any = {
+      verificationStatus: VendorVerificationStatus.VERIFIED,
+      'ninVerification.autoVerified': true,
+    };
+    if (since && !isNaN(since.getTime())) {
+      filter['ninVerification.attemptedAt'] = { $gte: since };
+    }
+
+    const candidates = await VendorProfile.find(filter)
+      .select('_id user businessName verificationStatus kycDocuments ninVerification')
+      .populate('user', 'email firstName');
+
+    const orphans = candidates.filter((v: any) => !hasValidNinDoc(v.kycDocuments));
+
+    if (dryRun) {
+      res.json({
+        success: true,
+        message: `${orphans.length} orphan verified vendors found (dry run — nothing changed)`,
+        data: {
+          affected: orphans.length,
+          ids: orphans.map((v: any) => v._id.toString()),
+          businessNames: orphans.map((v: any) => v.businessName),
+        },
+      });
+      return;
+    }
+
+    const resetIds: string[] = [];
+    for (const vendor of orphans) {
+      vendor.verificationStatus = VendorVerificationStatus.PENDING;
+      vendor.verifiedAt = undefined;
+      if (vendor.ninVerification) {
+        vendor.ninVerification.autoVerified = false;
+      }
+      markNinDocRejected(vendor, 'NIN image missing from record — please upload a clear photo of your NIN slip or card');
+      vendor.statusHistory.push({
+        action: 'backfill_orphan_nin_reset',
+        changedBy: req.user?.id,
+        reason: 'Auto-verified by Dojah without a stored NIN image — reset to pending',
+        at: new Date(),
+      });
+      await vendor.save();
+      resetIds.push(vendor._id.toString());
+    }
+
+    logger.info(`Backfill orphan NIN: reset ${resetIds.length} vendors (since=${since?.toISOString() || 'all'})`);
+
+    res.json({
+      success: true,
+      message: `Reset ${resetIds.length} orphan verified vendors to pending`,
+      data: {
+        affected: resetIds.length,
+        ids: resetIds,
+      },
     });
   }
 );

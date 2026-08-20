@@ -36,6 +36,7 @@ import {
   validateVendorAddress,
   updateVendorKycDocument,
   requestNinReupload,
+  backfillOrphanNin,
 
   // Outreach Management
   getOutreachList,
@@ -250,6 +251,7 @@ router.put('/vendors/:id/address', authorize(SA, A, KA), updateVendorAddress);
 router.post('/vendors/:id/address/validate', authorize(SA, A, KA), validateVendorAddress);
 router.put('/vendors/:id/kyc/:docIndex', authorize(SA, A, KA), updateVendorKycDocument);
 router.post('/vendors/:id/request-nin-reupload', authorize(SA, A, KA), requestNinReupload);
+router.post('/vendors/backfill-orphan-nin', authorize(SA, A, KA), backfillOrphanNin);
 router.post('/vendors/:id/wallet/resolve', authorize(SA), resolveVendorWallet);
 router.post('/vendors/fix-commission-rates', authorize(SA), fixLegacyCommissionRates);
 router.put('/vendors/:id/outreach', authorize(...allAdmins), updateVendorOutreach);
