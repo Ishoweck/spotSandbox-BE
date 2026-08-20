@@ -755,29 +755,55 @@ export class VendorController {
       adminOverride: false,
     };
 
-    // Only push a NIN kycDocument if Dojah returned a real photo we can
-    // render for admin review. When Dojah returned no photo, we don't create
-    // a placeholder doc anymore — the vendor is routed to the manual upload
-    // flow instead (see the manual_upload_required response below). Prior
-    // behavior stored the sentinel 'nin-lookup' as documentUrl, which the
-    // admin UI's <a href> tried to navigate to and 404'd.
+    // Store the NIN photo when Dojah returned one. A NIN doc may already
+    // exist as an empty placeholder (created when admin previously reset
+    // this vendor for re-upload — see markNinDocRejected in
+    // admin.controller.ts). Treat both "missing" and "empty placeholder"
+    // as reusable slots so we don't leave a verified vendor with no image.
     const ninDocIdx = vendorProfile.kycDocuments.findIndex((d) => d.type === 'NIN');
-    if (ninDocIdx < 0 && result.returnedPhoto) {
-      vendorProfile.kycDocuments.push({
-        type: 'NIN',
-        documentUrl: `data:image/jpeg;base64,${result.returnedPhoto}`,
-        verificationStatus: 'pending',
-      } as any);
+    const existingNin = ninDocIdx >= 0 ? vendorProfile.kycDocuments[ninDocIdx] : null;
+    const existingUrl = ((existingNin as any)?.documentUrl || '').trim();
+    const isEmptyPlaceholder = ninDocIdx >= 0 && (!existingUrl || existingUrl === 'nin-lookup');
+    if (result.returnedPhoto) {
+      const dataUrl = `data:image/jpeg;base64,${result.returnedPhoto}`;
+      if (ninDocIdx < 0) {
+        vendorProfile.kycDocuments.push({
+          type: 'NIN',
+          documentUrl: dataUrl,
+          verificationStatus: 'pending',
+        } as any);
+      } else if (isEmptyPlaceholder) {
+        (vendorProfile.kycDocuments[ninDocIdx] as any).documentUrl = dataUrl;
+        (vendorProfile.kycDocuments[ninDocIdx] as any).verificationStatus = 'pending';
+        (vendorProfile.kycDocuments[ninDocIdx] as any).rejectionReason = undefined;
+        (vendorProfile.kycDocuments[ninDocIdx] as any).verifiedAt = undefined;
+      }
     }
 
     if (result.autoVerified) {
-      // Silent auto-verify — mark NIN doc + overall status verified
+      // Silent auto-verify — mark NIN doc + overall status verified.
+      // Guard: don't auto-verify a NIN doc that has no image. If Dojah
+      // auto-verified but returned no photo, we route the vendor to
+      // manual upload below instead of marking an empty doc as verified.
+      const hasUsablePhoto = !!result.returnedPhoto;
       vendorProfile.kycDocuments.forEach((doc) => {
         if (doc.type === 'NIN') {
-          doc.verificationStatus = 'verified';
-          doc.verifiedAt = new Date();
+          const url = ((doc as any).documentUrl || '').trim();
+          const hasImage = !!url && url !== 'nin-lookup';
+          if (hasImage) {
+            doc.verificationStatus = 'verified';
+            doc.verifiedAt = new Date();
+          }
         }
       });
+      // If we got here with no photo AND no pre-existing image, force
+      // manual upload rather than fake-verify.
+      if (!hasUsablePhoto && !existingUrl) {
+        (result as any).autoVerified = false;
+      }
+    }
+
+    if (result.autoVerified) {
       if (vendorProfile.verificationStatus !== VendorVerificationStatus.VERIFIED) {
         vendorProfile.verificationStatus = VendorVerificationStatus.VERIFIED;
         vendorProfile.verifiedAt = new Date();
