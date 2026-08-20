@@ -1753,6 +1753,10 @@ const markNinDocRejected = (vendor: any, reason: string): void => {
   }
 };
 
+// 5-day cooldown between re-upload emails to the same vendor. Prevents
+// admins from accidentally spamming the same vendor multiple times.
+const NIN_REUPLOAD_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000;
+
 /**
  * POST /admin/vendors/:id/request-nin-reupload
  * Emails the vendor asking them to upload their NIN document manually AND
@@ -1760,10 +1764,14 @@ const markNinDocRejected = (vendor: any, reason: string): void => {
  * upload flow. Prior to the reset, auto-verified vendors with no NIN image
  * saw "Account Verified" and couldn't upload anything — see session
  * 2026-08-20 for the diagnosis.
+ *
+ * Cooldown: rejects with 429 if the same vendor was emailed within
+ * NIN_REUPLOAD_COOLDOWN_MS. Pass ?force=true to override.
  */
 export const requestNinReupload = asyncHandler(
   async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
     const { id } = req.params;
+    const force = req.query.force === 'true';
 
     const vendor = await VendorProfile.findById(id).populate('user', 'email firstName lastName');
     if (!vendor) {
@@ -1778,21 +1786,45 @@ export const requestNinReupload = asyncHandler(
       return;
     }
 
+    // Cooldown check — reject unless force overridden.
+    const lastSentAt = vendor.ninVerification?.reuploadEmailLastSentAt;
+    if (!force && lastSentAt) {
+      const elapsed = Date.now() - new Date(lastSentAt).getTime();
+      if (elapsed < NIN_REUPLOAD_COOLDOWN_MS) {
+        const daysRemaining = Math.ceil((NIN_REUPLOAD_COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000));
+        res.status(429).json({
+          success: false,
+          message: `Already emailed this vendor ${Math.floor((Date.now() - new Date(lastSentAt).getTime()) / (24 * 60 * 60 * 1000))} day(s) ago. Try again in ${daysRemaining} day(s) or use force override.`,
+          data: {
+            lastSentAt,
+            daysRemaining,
+            cooldownDays: 5,
+          },
+        });
+        return;
+      }
+    }
+
     // Reset verification so the frontend allows upload again.
     const wasVerified = vendor.verificationStatus === VendorVerificationStatus.VERIFIED;
     vendor.verificationStatus = VendorVerificationStatus.PENDING;
     vendor.verifiedAt = undefined;
+    if (!vendor.ninVerification) vendor.ninVerification = {} as any;
     if (vendor.ninVerification) {
       vendor.ninVerification.autoVerified = false;
       vendor.ninVerification.adminOverride = false;
+      vendor.ninVerification.reuploadEmailLastSentAt = new Date();
+      vendor.ninVerification.reuploadEmailSentCount = (vendor.ninVerification.reuploadEmailSentCount || 0) + 1;
     }
     markNinDocRejected(vendor, 'NIN image missing — please upload a clear photo of your NIN slip or card');
     vendor.statusHistory.push({
-      action: 'admin_requested_nin_reupload',
+      action: force ? 'admin_forced_nin_reupload_resend' : 'admin_requested_nin_reupload',
       changedBy: req.user?.id,
       reason: wasVerified
         ? 'Was auto-verified without a stored NIN image — reset to pending for manual upload'
-        : 'Admin asked vendor to re-upload NIN',
+        : force
+          ? 'Force resend — admin overrode cooldown'
+          : 'Admin asked vendor to re-upload NIN',
       at: new Date(),
     });
     await vendor.save();
@@ -1816,8 +1848,16 @@ export const requestNinReupload = asyncHandler(
 
     res.json({
       success: true,
-      message: `Re-upload request emailed to ${email}`,
-      data: { verificationStatus: vendor.verificationStatus, resetFromVerified: wasVerified },
+      message: force
+        ? `Force-resent NIN re-upload email to ${email}`
+        : `Re-upload request emailed to ${email}`,
+      data: {
+        verificationStatus: vendor.verificationStatus,
+        resetFromVerified: wasVerified,
+        reuploadEmailLastSentAt: vendor.ninVerification?.reuploadEmailLastSentAt,
+        reuploadEmailSentCount: vendor.ninVerification?.reuploadEmailSentCount,
+        forced: force,
+      },
     });
   }
 );

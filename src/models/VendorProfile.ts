@@ -97,6 +97,11 @@ export interface IVendorProfile extends Document {
     returnedPhoto?: string;
     failureReason?: string;
     adminOverride?: boolean;
+    // When admin last emailed the vendor asking them to re-upload their NIN
+    // manually. Used to enforce a 5-day cooldown on the admin panel button so
+    // vendors don't get spammed. Force override is still available.
+    reuploadEmailLastSentAt?: Date;
+    reuploadEmailSentCount?: number;
   };
 }
 
@@ -293,6 +298,8 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     returnedPhoto: { type: String, select: false }, // base64 blob — hidden by default
     failureReason: String,
     adminOverride: Boolean,
+    reuploadEmailLastSentAt: Date,
+    reuploadEmailSentCount: { type: Number, default: 0 },
   },
 }, {
   timestamps: true,
