@@ -16,19 +16,26 @@ export class WebhookController {
     logger.info('📨 SHIPBUBBLE WEBHOOK RECEIVED');
     logger.info('📨 ============================================');
 
-    // Verify webhook authenticity — fail-closed: reject if secret not configured
+    // HOTFIX: fail-OPEN while we wait for ShipBubble to send us the webhook secret.
+    // Once SHIPBUBBLE_WEBHOOK_SECRET is set in the env, this block enforces signature
+    // verification. Until then, we accept unverified callbacks so orders keep advancing
+    // automatically instead of needing manual status updates. See memory:
+    //   shipbubble_webhook_secret_followup.md
     const webhookSecret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
-    if (!webhookSecret) {
-      logger.error('🚫 SHIPBUBBLE_WEBHOOK_SECRET not configured — rejecting webhook');
-      res.status(401).json({ success: false, message: 'Unauthorized' });
-      return;
-    }
-    const incoming = req.headers['x-shipbubble-signature'] || req.headers['authorization'];
-    const expected = `Bearer ${webhookSecret}`;
-    if (!incoming || !crypto.timingSafeEqual(Buffer.from(String(incoming)), Buffer.from(expected))) {
-      logger.warn('🚫 ShipBubble webhook rejected — invalid signature');
-      res.status(401).json({ success: false, message: 'Unauthorized' });
-      return;
+    if (webhookSecret) {
+      const incoming = req.headers['x-shipbubble-signature'] || req.headers['authorization'];
+      const incomingStr = incoming ? String(incoming) : '';
+      const expected = `Bearer ${webhookSecret}`;
+      const incomingBuf = Buffer.from(incomingStr);
+      const expectedBuf = Buffer.from(expected);
+      const matches =
+        incomingBuf.length === expectedBuf.length &&
+        crypto.timingSafeEqual(incomingBuf, expectedBuf);
+      if (!matches) {
+        logger.warn('🚫 ShipBubble webhook rejected — invalid signature');
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+      }
     }
 
     const webhookData = req.body;
