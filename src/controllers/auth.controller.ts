@@ -116,15 +116,22 @@ export class AuthController {
     });
   }
   /**
-   * Guest register - create account with just email
+   * Guest register - create account with email + phone
    */
   async guestRegister(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { email } = req.body;
+    const { email, phone } = req.body;
 
-    // Check if user exists
-    const existingUser = await User.findOne({ email });
+    // Normalize phone to +234 format so duplicate checks and storage are consistent
+    // (validation already ensured it matches /^(\+234|0)[789]\d{9}$/)
+    const normalizedPhone = phone.startsWith('0') ? `+234${phone.slice(1)}` : phone;
+
+    // Reject if either email or phone is already taken
+    const existingUser = await User.findOne({
+      $or: [{ email }, { phone: normalizedPhone }],
+    });
     if (existingUser) {
-      throw new AppError('Email already registered. Please sign in.', 400);
+      const takenField = existingUser.email === email ? 'Email' : 'Phone';
+      throw new AppError(`${takenField} already registered. Please sign in.`, 400);
     }
 
     // Generate random password
@@ -135,6 +142,7 @@ export class AuthController {
       firstName: 'Guest',
       lastName: 'User',
       email,
+      phone: normalizedPhone,
       password: randomPassword,
       role: UserRole.CUSTOMER,
       emailVerified: true,
@@ -168,6 +176,7 @@ export class AuthController {
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
+          phone: user.phone,
           role: user.role,
         },
         ...tokens,

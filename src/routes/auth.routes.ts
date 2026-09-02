@@ -53,6 +53,9 @@ const appleLoginValidation = [
 
 const guestRegisterValidation = [
   body('email').isEmail().withMessage('Valid email is required'),
+  body('phone')
+    .matches(/^(\+234|0)[789]\d{9}$/)
+    .withMessage('Valid Nigerian phone number is required (e.g. 08012345678 or +2348012345678)'),
 ];
 
 // Standard auth routes
