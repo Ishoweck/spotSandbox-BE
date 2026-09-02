@@ -16,6 +16,7 @@
   import { paystackService } from '../services/paystack.service';
   import { flutterwaveService } from '../services/flutterwave.service';
   import { shipBubbleService } from '../services/shipbubble.service';
+  import { logisticsShadowQueue } from '../queues/logistics-shadow.queue';
   import { sendOrderConfirmationEmail } from '../utils/email';
   import { enqueueEmail, EmailJobType } from '../utils/email-queue';
   import { generateReceiptPDF } from '../services/receipt.service';
@@ -591,6 +592,61 @@
 
           (result as any).requestToken = ratesResponse.data.request_token;
           result.success = true;
+
+          // ─── Shadow the quote against the new VendorSpot Logistics engine ────
+          // Fire-and-forget. Gated by LOGISTICS_SHADOW_ENABLED. NEVER throws.
+          // See vendorspot-logistics/PLAN.md Phase 3.
+          if (process.env.LOGISTICS_SHADOW_ENABLED === 'true') {
+            try {
+              const couriers = ratesResponse.data.couriers as Array<any>;
+              const cheapest = couriers.reduce(
+                (min, c) => Math.min(min, Number(c.total ?? c.rate_card_amount ?? Infinity)),
+                Infinity,
+              );
+              await logisticsShadowQueue.add('shadow-quote', {
+                vendorId: String(vendorGroup.vendorId),
+                vendorName: vendorGroup.vendorName,
+                sender: senderAddress,
+                receiver: receiverAddress,
+                packageItems,
+                logisticsRequest: {
+                  origin: {
+                    line1: pickupSrc.street,
+                    city: pickupSrc.city,
+                    state: pickupSrc.state,
+                    country: pickupSrc.country || 'Nigeria',
+                    countryCode: 'NG',
+                  },
+                  destination: {
+                    line1: destination.street,
+                    city: destination.city,
+                    state: destination.state,
+                    country: 'Nigeria',
+                    countryCode: 'NG',
+                  },
+                  packages: physicalItems.map((it) => ({
+                    description: it.productName,
+                    weightGrams: Math.max(1, Math.round(Number(it.weight) * 1000)),
+                    quantity: Number(it.quantity),
+                    declaredValueKobo: Math.round(Number(it.price) * 100),
+                  })),
+                },
+                shipbubble: {
+                  cheapestPriceNaira: Number.isFinite(cheapest) ? cheapest : 0,
+                  optionCount: couriers.length,
+                  couriers: couriers.map((c) => ({
+                    courier: String(c.courier_name ?? c.courier ?? 'unknown'),
+                    priceNaira: Number(c.total ?? c.rate_card_amount ?? 0),
+                    eta: String(c.delivery_eta ?? ''),
+                  })),
+                  durationMs: 0, // ShipBubble service doesn't expose timing right now
+                },
+              });
+            } catch (shadowErr: any) {
+              // NEVER let shadow enqueue break the real request
+              logger.warn(`[LogisticsShadow] enqueue failed: ${shadowErr?.message ?? shadowErr}`);
+            }
+          }
         } else {
           logger.warn(`⚠️ No courier data from ShipBubble`);
         }

@@ -18,6 +18,7 @@ import { connectRedis } from './config/redis';
 import { startNotificationWorkers } from './workers/notification.worker';
 import { startEmailWorker } from './workers/email.worker';
 import { startSlackWorker } from './workers/slack.worker';
+import { startLogisticsShadowWorker } from './workers/logistics-shadow.worker';
 import { setupDailyBackup } from './utils/backup';
 import { setupOrderAutoComplete } from './utils/order-autocomplete';
 import { setupPointsExpiryReminders } from './utils/points-expiry-reminder';
@@ -49,6 +50,9 @@ connectRedis().then(() => {
   startNotificationWorkers();
   startEmailWorker();
   startSlackWorker();
+  if (process.env.LOGISTICS_SHADOW_ENABLED === 'true') {
+    startLogisticsShadowWorker();
+  }
 }).catch((err) => {
   logger.warn('[Redis] Workers not started — notifications will use direct fallback:', err?.message);
 });
