@@ -25,6 +25,7 @@ import Dispute from '../models/Dispute';
 import Wallet from '../models/Wallet';
 import AccountDeletionRequest from '../models/AccountDeletionRequest';
 import PointsTransaction from '../models/PointsTransaction';
+import Cart from '../models/Cart';
 import {
   Coupon,
   AffiliateLink,
@@ -6191,4 +6192,261 @@ export const getChallengeLeaderboard = asyncHandler(
       },
     });
   }
+);
+
+// ================================================================
+// CART MANAGEMENT — support (follow up with users who left items in cart)
+// "Guest" carts belong to shadow accounts created by /auth/guest-register
+// (firstName='Guest'). They show up here just like normal user carts.
+// ================================================================
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * GET /admin/carts
+ * Filters: status=active|at_risk|abandoned|all, hasCoupon=true|false,
+ *          minTotal, maxTotal, search (matches user name/email/phone).
+ * Sort:    updatedAt | createdAt.
+ */
+export const getAllCarts = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const {
+      page = 1,
+      limit = 20,
+      status = 'all',
+      hasCoupon,
+      guestOnly,
+      registeredOnly,
+      minTotal,
+      maxTotal,
+      search,
+      sort = 'updatedAt',
+      order = 'desc',
+    } = req.query;
+
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.min(100, Math.max(1, Number(limit)));
+
+    const filter: any = { 'items.0': { $exists: true } };
+
+    const now = Date.now();
+    if (status === 'active') {
+      filter.updatedAt = { $gte: new Date(now - 24 * HOUR_MS) };
+    } else if (status === 'at_risk') {
+      filter.updatedAt = { $lt: new Date(now - 24 * HOUR_MS), $gte: new Date(now - 72 * HOUR_MS) };
+    } else if (status === 'abandoned') {
+      filter.updatedAt = { $lt: new Date(now - 72 * HOUR_MS) };
+    }
+
+    if (hasCoupon === 'true') {
+      filter.couponCode = { $exists: true, $ne: null };
+    } else if (hasCoupon === 'false') {
+      filter.$or = [{ couponCode: { $exists: false } }, { couponCode: null }];
+    }
+
+    // Guest = shadow account created by /auth/guest-register (firstName='Guest')
+    const userSubFilter: any = {};
+    if (guestOnly === 'true') userSubFilter.firstName = 'Guest';
+    else if (registeredOnly === 'true') userSubFilter.firstName = { $ne: 'Guest' };
+
+    if (search) {
+      const rx = { $regex: escapeRegex(search), $options: 'i' };
+      userSubFilter.$or = [{ email: rx }, { firstName: rx }, { lastName: rx }, { phone: rx }];
+    }
+
+    if (Object.keys(userSubFilter).length > 0) {
+      const matched = await User.find(userSubFilter).select('_id').lean();
+      filter.user = { $in: matched.map((u) => u._id) };
+    }
+
+    const allowedSort = new Set(['updatedAt', 'createdAt']);
+    const sortField = allowedSort.has(sort as string) ? (sort as string) : 'updatedAt';
+    const sortObj: any = { [sortField]: order === 'asc' ? 1 : -1 };
+
+    const [carts, total] = await Promise.all([
+      Cart.find(filter)
+        .populate({
+          path: 'user',
+          select: 'firstName lastName email phone avatar status createdAt lastLoginAt',
+        })
+        .populate({
+          path: 'items.product',
+          select: 'name slug price images status vendor',
+          populate: { path: 'vendor', select: 'firstName lastName' },
+        })
+        .sort(sortObj)
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum)
+        .lean(),
+      Cart.countDocuments(filter),
+    ]);
+
+    const min = minTotal !== undefined ? Number(minTotal) : undefined;
+    const max = maxTotal !== undefined ? Number(maxTotal) : undefined;
+
+    const enriched = carts
+      .map((c: any) => {
+        const items = c.items || [];
+        const subtotal = items.reduce(
+          (s: number, i: any) => s + Number(i.price || 0) * Number(i.quantity || 0),
+          0,
+        );
+        const discount = Number(c.discount || 0);
+        const cartTotal = Math.max(0, subtotal - discount);
+        const ageHours = (Date.now() - new Date(c.updatedAt).getTime()) / HOUR_MS;
+        let stage: 'active' | 'at_risk' | 'abandoned';
+        if (ageHours < 24) stage = 'active';
+        else if (ageHours < 72) stage = 'at_risk';
+        else stage = 'abandoned';
+        return {
+          _id: c._id,
+          user: c.user,
+          isGuest: c.user?.firstName === 'Guest',
+          items,
+          itemCount: items.length,
+          subtotal,
+          discount,
+          total: cartTotal,
+          couponCode: c.couponCode ?? null,
+          stage,
+          ageHours: Math.round(ageHours * 10) / 10,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+        };
+      })
+      .filter((c) => {
+        if (min !== undefined && c.total < min) return false;
+        if (max !== undefined && c.total > max) return false;
+        return true;
+      });
+
+    res.json({
+      success: true,
+      data: enriched,
+      meta: getPaginationMeta(total, pageNum, limitNum),
+    });
+  },
+);
+
+/**
+ * GET /admin/carts/:id
+ * Full cart + user contact + recent orders for context.
+ */
+export const getCartDetails = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ success: false, error: 'Invalid cart ID' });
+      return;
+    }
+
+    const cart = await Cart.findById(id)
+      .populate({
+        path: 'user',
+        select: 'firstName lastName email phone avatar status createdAt lastLoginAt',
+      })
+      .populate({
+        path: 'items.product',
+        select: 'name slug price images status quantity vendor',
+        populate: { path: 'vendor', select: 'firstName lastName email phone' },
+      })
+      .lean();
+
+    if (!cart) {
+      res.status(404).json({ success: false, error: 'Cart not found' });
+      return;
+    }
+
+    const items = (cart as any).items || [];
+    const subtotal = items.reduce(
+      (s: number, i: any) => s + Number(i.price || 0) * Number(i.quantity || 0),
+      0,
+    );
+    const discount = Number((cart as any).discount || 0);
+    const cartTotal = Math.max(0, subtotal - discount);
+    const ageHours = (Date.now() - new Date((cart as any).updatedAt).getTime()) / HOUR_MS;
+    let stage: 'active' | 'at_risk' | 'abandoned';
+    if (ageHours < 24) stage = 'active';
+    else if (ageHours < 72) stage = 'at_risk';
+    else stage = 'abandoned';
+
+    let recentOrders: any[] = [];
+    if ((cart as any).user?._id) {
+      recentOrders = await Order.find({ user: (cart as any).user._id })
+        .select('orderNumber status paymentStatus total createdAt')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean();
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...cart,
+        isGuest: (cart as any).user?.firstName === 'Guest',
+        subtotal,
+        total: cartTotal,
+        stage,
+        ageHours: Math.round(ageHours * 10) / 10,
+        recentOrders,
+      },
+    });
+  },
+);
+
+/**
+ * POST /admin/carts/:id/follow-up
+ * Reuses the existing CART_ABANDONED_24H email template for a manual nudge.
+ */
+export const sendCartFollowUp = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ success: false, error: 'Invalid cart ID' });
+      return;
+    }
+
+    const cart = await Cart.findById(id).populate<{
+      user: { _id: any; email: string; firstName: string; role: string };
+    }>('user', 'email firstName role');
+
+    if (!cart) {
+      res.status(404).json({ success: false, error: 'Cart not found' });
+      return;
+    }
+
+    if (!cart.user?.email) {
+      res.status(400).json({ success: false, error: 'User has no email on file' });
+      return;
+    }
+
+    if (!cart.items || cart.items.length === 0) {
+      res.status(400).json({ success: false, error: 'Cart is empty' });
+      return;
+    }
+
+    const total = cart.items.reduce(
+      (s: number, i: any) => s + Number(i.price || 0) * Number(i.quantity || 0),
+      0,
+    );
+
+    await enqueueEmail(
+      EmailJobType.CART_ABANDONED_24H,
+      cart.user.email,
+      cart.user.firstName,
+      0,
+      { itemCount: cart.items.length, cartTotal: total, manualByAdmin: true },
+    );
+
+    logger.info(
+      `[Admin] Cart follow-up email queued for ${cart.user.email} by admin ${req.user?.id}`,
+    );
+
+    res.json({
+      success: true,
+      message: `Follow-up email queued for ${cart.user.email}`,
+    });
+  },
 );

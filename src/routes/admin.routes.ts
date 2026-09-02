@@ -140,6 +140,11 @@ import {
 
   // Challenge Leaderboard
   getChallengeLeaderboard,
+
+  // Cart Management (support follow-up)
+  getAllCarts,
+  getCartDetails,
+  sendCartFollowUp,
 } from '../controllers/admin.controller';
 import { auditMiddleware } from '../middleware/audit';
 import { asyncHandler } from '../middleware/error';
@@ -277,6 +282,14 @@ router.post('/orders/:id/refund', authorize(SA, A, FA), processRefund);
 router.put('/orders/:id/note', authorize(SA, A, SPA), addAdminNote);
 router.post('/orders/:id/retry-shipment', authorize(SA, A, SPA), retryShipment);
 router.post('/orders/:id/sync-shipment', authorize(SA, A, SPA), asyncHandler(webhookController.syncOrderShipment.bind(webhookController)));
+
+// ================================================================
+// CART MANAGEMENT — support follow-up on abandoned/active carts
+// (registered users only — guest carts are client-side)
+// ================================================================
+router.get('/carts', authorize(...supportAdmins), getAllCarts);
+router.get('/carts/:id', authorize(...supportAdmins), getCartDetails);
+router.post('/carts/:id/follow-up', authorize(...supportAdmins), sendCartFollowUp);
 
 // ================================================================
 // FINANCIAL MANAGEMENT — financial + general
