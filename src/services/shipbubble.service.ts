@@ -635,7 +635,11 @@ export class ShipBubbleService {
         logger.error('⚠️ Errors:', error.response?.data?.errors);
       }
       
-      throw new Error('Failed to create shipment');
+      const shipbubbleMsg =
+        error.response?.data?.message ||
+        (Array.isArray(error.response?.data?.errors) && error.response?.data?.errors[0]?.message) ||
+        error.message;
+      throw new Error(`Shipbubble: ${shipbubbleMsg || 'failed to create shipment'}`);
     }
   }
 
