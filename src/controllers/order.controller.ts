@@ -2286,18 +2286,89 @@
 
         logger.info(`📦 Physical items: ${physicalItems.length}/${group.items.length}`);
 
-        // Re-fetch the order from DB to get the latest trackingNumber state.
-        // This prevents duplicate Shipbubble labels when the vendor hits confirm
-        // multiple times (each request saw an empty vendorShipments array and proceeded).
-        const freshOrder = await Order.findById(order._id).select('vendorShipments').lean();
-        const freshVS = (freshOrder as any)?.vendorShipments?.find((vs: any) => {
-          const vsId = typeof vs.vendor === 'object' ? vs.vendor._id?.toString() : vs.vendor?.toString();
-          return vsId === group.vendorId;
-        });
-        if (freshVS?.trackingNumber && freshVS.trackingNumber !== 'CREATING') {
-          logger.info(`⏭️ Shipment already exists for vendor ${group.vendorName} (${freshVS.trackingNumber}) — skipping`);
-          continue;
+        // ── Atomic reservation ────────────────────────────────────────────
+        // Race we're closing: two concurrent vendor-confirm requests (mobile
+        // retry-on-timeout, browser tap-tap, etc.) used to both see an empty
+        // trackingNumber and both call Shipbubble createShipment, producing
+        // two labels for one shipment.
+        //
+        // Fix: atomically set trackingNumber='CREATING' as a reservation
+        // sentinel. The MongoDB update is atomic per document, so only one
+        // request wins; the other sees the sentinel and bails.
+        const vendorObjectId = new mongoose.Types.ObjectId(group.vendorId);
+        let didReserve = false;
+
+        // Path A: an existing vendorShipments entry with an empty trackingNumber
+        const reservedExisting = await Order.findOneAndUpdate(
+          {
+            _id: order._id,
+            vendorShipments: {
+              $elemMatch: {
+                vendor: vendorObjectId,
+                $or: [
+                  { trackingNumber: { $exists: false } },
+                  { trackingNumber: null },
+                  { trackingNumber: '' },
+                ],
+              },
+            },
+          },
+          { $set: { 'vendorShipments.$.trackingNumber': 'CREATING' } },
+          { new: true }
+        );
+        if (reservedExisting) {
+          didReserve = true;
+        } else {
+          // Path B: no entry for this vendor yet. First check whether an entry
+          // already exists with a real (or CREATING) trackingNumber — that
+          // means another request already handled it, so we skip.
+          const snapshot = await Order.findById(order._id).select('vendorShipments').lean();
+          const existingEntry = (snapshot as any)?.vendorShipments?.find((vs: any) => {
+            const vid = typeof vs.vendor === 'object' ? vs.vendor._id?.toString() : vs.vendor?.toString();
+            return vid === group.vendorId;
+          });
+          if (existingEntry?.trackingNumber) {
+            logger.info(`⏭️  Duplicate suppressed for ${group.vendorName}: existing trackingNumber="${existingEntry.trackingNumber}"`);
+            continue;
+          }
+
+          // No entry at all — atomically push one with the sentinel. The
+          // $ne filter on vendorShipments.vendor prevents a double-push if a
+          // concurrent request wins the race by a microsecond.
+          const vendorAddress = (group as any).vendorAddress || {};
+          const pushed = await Order.findOneAndUpdate(
+            {
+              _id: order._id,
+              'vendorShipments.vendor': { $ne: vendorObjectId },
+            },
+            {
+              $push: {
+                vendorShipments: {
+                  vendor: vendorObjectId,
+                  vendorName: group.vendorName || 'Vendor',
+                  items: [],
+                  origin: {
+                    street:  vendorAddress.street  || '',
+                    city:    vendorAddress.city    || 'Unknown',
+                    state:   vendorAddress.state   || 'Unknown',
+                    country: vendorAddress.country || 'Nigeria',
+                  },
+                  shippingCost: 0,
+                  trackingNumber: 'CREATING',
+                  status: 'pending',
+                },
+              },
+            },
+            { new: true }
+          );
+          if (!pushed) {
+            logger.info(`⏭️  Duplicate suppressed for ${group.vendorName}: concurrent request reserved the slot`);
+            continue;
+          }
+          didReserve = true;
         }
+
+        logger.info(`🔒 Reserved shipment slot for ${group.vendorName} — proceeding with Shipbubble`);
 
         try {
           const vendor = await User.findById(group.vendorId);
@@ -2510,50 +2581,37 @@
                   courier: selectedCourier.courier_name,
                 });
 
-                // Update order with tracking info
-                const vendorShipment = order.vendorShipments.find(
-                  (vs: any) => {
-                    const vsId = typeof vs.vendor === 'object'
-                      ? vs.vendor._id?.toString()
-                      : vs.vendor?.toString();
-                    return vsId === group.vendorId;
+                // Atomically swap the CREATING sentinel for the real tracking
+                // info. Positional operator writes only the matching sub-doc,
+                // so this doesn't collide with anything else on the order.
+                await Order.updateOne(
+                  { _id: order._id, 'vendorShipments.vendor': vendorObjectId },
+                  {
+                    $set: {
+                      'vendorShipments.$.trackingNumber':   orderId,
+                      'vendorShipments.$.shipmentId':       shipment.data.shipment_id || orderId,
+                      'vendorShipments.$.courier':          selectedCourier.courier_name,
+                      'vendorShipments.$.status':           'created',
+                      ...(trackingUrl ? { 'vendorShipments.$.trackingUrl': trackingUrl } : {}),
+                    },
                   }
                 );
 
-                if (vendorShipment) {
-                  // Always save orderId so the no-tracking guard doesn't re-trigger
-                  vendorShipment.trackingNumber = orderId;
-                  vendorShipment.shipmentId = shipment.data.shipment_id || orderId;
-                  vendorShipment.courier = selectedCourier.courier_name;
-                  vendorShipment.status = 'created';
-                  if (trackingUrl) vendorShipment.trackingUrl = trackingUrl;
-
-                  logger.info('✅ Updated order with tracking info:', {
-                    trackingNumber: vendorShipment.trackingNumber,
-                    shipmentId: vendorShipment.shipmentId,
-                    courier: vendorShipment.courier,
-                    trackingUrl: vendorShipment.trackingUrl,
-                  });
-                } else {
-                  // No vendorShipment entry pre-created (e.g. old checkout flow or empty array).
-                  // Push a new entry so tracking is recorded and future calls are blocked.
-                  if (!order.vendorShipments) order.vendorShipments = [];
-                  order.vendorShipments.push({
-                    vendor: group.vendorId,
-                    vendorName: group.vendorName,
-                    items: [],
-                    origin: { street: '', city: '', state: '', country: 'Nigeria' },
-                    shippingCost: 0,
-                    trackingNumber: orderId,
-                    shipmentId: shipment.data.shipment_id || orderId,
-                    courier: selectedCourier.courier_name,
-                    status: 'created',
-                    ...(trackingUrl && { trackingUrl }),
-                  } as any);
-                  logger.warn(`⚠️ No vendorShipment entry found for ${group.vendorName} — pushed new entry with tracking ${orderId}`);
+                // Mirror onto the in-memory doc so the calling handler's HTTP
+                // response reflects the new tracking (updateOrderStatus returns
+                // { order } after this helper resolves).
+                const inMemVS = (order.vendorShipments || []).find((vs: any) => {
+                  const vid = typeof vs.vendor === 'object' ? vs.vendor._id?.toString() : vs.vendor?.toString();
+                  return vid === group.vendorId;
+                });
+                if (inMemVS) {
+                  inMemVS.trackingNumber = orderId;
+                  inMemVS.shipmentId = shipment.data.shipment_id || orderId;
+                  inMemVS.courier = selectedCourier.courier_name;
+                  inMemVS.status = 'created';
+                  if (trackingUrl) inMemVS.trackingUrl = trackingUrl;
                 }
 
-                await order.save();
                 logger.info(`✅ Shipment created for vendor ${group.vendorName}. Order ID: ${orderId}`);
               } else {
                 logger.error('❌ Missing order_id in shipment response:', {
@@ -2579,6 +2637,24 @@
             data: error.response?.data,
             stack: error.stack,
           });
+          // If we reserved a slot with the CREATING sentinel, clear it so the
+          // vendor can retry. No-op if this iteration failed before reservation.
+          if (didReserve) {
+            try {
+              await Order.updateOne(
+                {
+                  _id: order._id,
+                  vendorShipments: {
+                    $elemMatch: { vendor: vendorObjectId, trackingNumber: 'CREATING' },
+                  },
+                },
+                { $unset: { 'vendorShipments.$.trackingNumber': '' } }
+              );
+              logger.info(`🔓 Cleared CREATING sentinel for ${group.vendorName} — retry allowed`);
+            } catch (rollbackErr: any) {
+              logger.error(`❌ Failed to clear CREATING sentinel for ${group.vendorName}:`, rollbackErr.message);
+            }
+          }
         }
       }
 
