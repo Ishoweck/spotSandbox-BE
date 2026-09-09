@@ -5124,6 +5124,7 @@
       order, shipment,
       targetVendorId: shipmentVendorId!,
       resolvedVendorName,
+      senderOrigin,
       senderAddress, receiverAddress,
       packageItems, categoryId,
       storedSenderCode, storedReceiverCode,
@@ -5239,20 +5240,27 @@
       (s: any) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()) === targetVendorId
     );
     if (!freshShipment) {
-      // No existing entry — push a new one with the tracking we just booked
-      const originForShipment = params.senderAddress
-        ? {
-            street: (order.items as any[])[0]?.pickupAddress?.street || (params.storedSenderCode ? '' : ''),
-            city:   '',
-            state:  '',
-            country: 'Nigeria',
-          }
-        : { street: '', city: '', state: '', country: 'Nigeria' };
+      // No existing entry — push a new one with the tracking we just booked.
+      // origin.city + origin.state are required by the schema; senderOrigin
+      // was already resolved from the vendor's businessAddress (or the
+      // product's pickupAddress) in _buildReshipParams — reuse it directly.
+      const so = params.senderOrigin as any;
+      if (!so?.city || !so?.state) {
+        throw new AppError(
+          `Vendor "${resolvedVendorName}" has an incomplete origin address (missing city or state) — fix the vendor's businessAddress in the admin panel and rebook.`,
+          400
+        );
+      }
       (fresh as any).vendorShipments.push({
         vendor: targetVendorId,
         vendorName: resolvedVendorName,
         items: (fresh.items as any[]).filter((it) => it.vendor?.toString() === targetVendorId).map((it) => it.product),
-        origin: originForShipment,
+        origin: {
+          street:  so.street || '',
+          city:    so.city,
+          state:   so.state,
+          country: so.country || 'Nigeria',
+        },
         shippingCost: picked.total ?? picked.rate_card_amount ?? 0,
         courier: picked.courier_name,
         requestedCourier: picked.courier_name,
