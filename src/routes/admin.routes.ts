@@ -58,6 +58,8 @@ import {
   processRefund,
   addAdminNote,
   retryShipment,
+  listReshipCouriers,
+  rebookShipment,
 
   // Financial Management
   getFinancialOverview,
@@ -282,6 +284,8 @@ router.post('/orders/:id/refund', authorize(SA, A, FA), processRefund);
 router.put('/orders/:id/note', authorize(SA, A, SPA), addAdminNote);
 router.post('/orders/:id/retry-shipment', authorize(SA, A, SPA), retryShipment);
 router.post('/orders/:id/sync-shipment', authorize(SA, A, SPA), asyncHandler(webhookController.syncOrderShipment.bind(webhookController)));
+router.get('/orders/:id/reship-couriers', authorize(SA, A, SPA), listReshipCouriers);
+router.post('/orders/:id/rebook-shipment', authorize(SA, A, SPA), rebookShipment);
 
 // ================================================================
 // CART MANAGEMENT — support follow-up on abandoned/active carts

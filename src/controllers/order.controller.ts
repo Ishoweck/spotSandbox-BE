@@ -4984,6 +4984,308 @@
     res.send(pdfBuffer);
   }
 
+  /**
+   * Admin: silently rebook a Shipbubble shipment onto a different courier.
+   *
+   * Detaches the old trackingNumber+shipmentId first so an incoming Shipbubble
+   * cancel webhook can't match this order (see webhook.controller.ts:63-79 —
+   * lookup misses, exits, no notification fires). Then fetches fresh rates and
+   * creates a new shipment with the requested courier. Writes the new tracking
+   * back onto the same vendorShipments[] entry. Does NOT change order.status,
+   * does NOT fire any notification.
+   */
+  private async _buildReshipParams(orderId: string, vendorId?: string) {
+    const order = await Order.findById(orderId)
+      .populate('user')
+      .populate('items.product');
+    if (!order) throw new AppError('Order not found', 404);
+
+    if ([OrderStatus.DELIVERED, OrderStatus.REFUNDED, OrderStatus.CANCELLED].includes(order.status as any)) {
+      throw new AppError(`Cannot rebook — order is ${order.status}`, 400);
+    }
+
+    const shipments: any[] = (order as any).vendorShipments || [];
+
+    // Resolve the target vendor. Prefer an existing shipment, else fall back to
+    // deriving from items[].vendor — this handles orders where the initial
+    // createVendorShipments call errored out and left vendorShipments empty.
+    let shipment: any = null;
+    let shipmentVendorId: string | undefined;
+
+    if (shipments.length > 0) {
+      if (vendorId) {
+        shipment = shipments.find((s: any) => {
+          const sid = typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString();
+          return sid === vendorId;
+        });
+        if (!shipment) throw new AppError('No shipment on this order for that vendor', 404);
+      } else {
+        if (shipments.length > 1) throw new AppError('Multi-vendor order — pass vendorId', 400);
+        shipment = shipments[0];
+      }
+      shipmentVendorId = typeof shipment.vendor === 'object' ? shipment.vendor._id?.toString() : shipment.vendor?.toString();
+      if (shipment.status === 'delivered') throw new AppError('Shipment already delivered', 400);
+    } else {
+      // No vendorShipments — derive vendor from order.items
+      const vendorIds = Array.from(
+        new Set((order.items as any[]).map((it) => it.vendor?.toString()).filter(Boolean))
+      );
+      if (vendorIds.length === 0) throw new AppError('Order has no items with a vendor', 400);
+      if (vendorId) {
+        if (!vendorIds.includes(vendorId)) throw new AppError('That vendor has no items on this order', 400);
+        shipmentVendorId = vendorId;
+      } else {
+        if (vendorIds.length > 1) throw new AppError('Multi-vendor order (no shipments yet) — pass vendorId', 400);
+        shipmentVendorId = vendorIds[0];
+      }
+    }
+
+    const [vendor, vendorProfile] = await Promise.all([
+      User.findById(shipmentVendorId),
+      VendorProfile.findOne({ user: shipmentVendorId }),
+    ]);
+    if (!vendor) throw new AppError('Vendor not found', 400);
+    const resolvedVendorName =
+      vendorProfile?.businessName ||
+      shipment?.vendorName ||
+      `${vendor.firstName || ''} ${vendor.lastName || ''}`.trim() ||
+      'Vendor';
+
+    const customer: any = order.user;
+    if (!customer || !order.shippingAddress) throw new AppError('Order missing customer or shippingAddress', 400);
+
+    const usingPickup = !!shipment?.origin?.street;
+    const senderOrigin = usingPickup
+      ? shipment.origin
+      : vendorProfile?.businessAddress
+      ? {
+          street: vendorProfile.businessAddress.street || '',
+          city: vendorProfile.businessAddress.city,
+          state: vendorProfile.businessAddress.state,
+          country: vendorProfile.businessAddress.country,
+        }
+      : null;
+    if (!senderOrigin) throw new AppError('No sender address available', 400);
+
+    const senderFull = `${senderOrigin.street || 'Store Address'}, ${senderOrigin.city}, ${senderOrigin.state}, ${senderOrigin.country}`;
+    const receiverFull = `${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.state}, ${order.shippingAddress.country || 'Nigeria'}`;
+
+    const shipSafeName = (preferred: string, fallback: string): string => {
+      const clean = (s: string) => (s || '').replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cp = clean(preferred);
+      if (cp.split(' ').filter(Boolean).length >= 2) return cp;
+      const cf = clean(fallback);
+      if (cf.split(' ').filter(Boolean).length >= 2) return cf;
+      return `${cp || cf || 'Store'} Vendor`;
+    };
+    const ownerFull = vendor.firstName && vendor.lastName ? `${vendor.firstName} ${vendor.lastName}` : vendor.firstName || vendor.lastName || '';
+    const senderName = shipSafeName(resolvedVendorName, ownerFull);
+    const receiverFallback = (order.shippingAddress as any).fullName || `${customer.firstName || ''} ${customer.lastName || ''}`;
+    const receiverName = shipSafeName(receiverFallback, `${customer.firstName || ''} ${customer.lastName || ''}`);
+
+    const senderAddress = {
+      name: senderName,
+      phone: vendorProfile?.businessPhone || vendor.phone || '+2348000000000',
+      email: vendorProfile?.businessEmail || vendor.email || 'sender@store.com',
+      address: senderFull,
+    };
+    const receiverAddress = {
+      name: receiverName,
+      phone: order.shippingAddress.phone || customer.phone || '+2348000000000',
+      email: customer.email,
+      address: receiverFull,
+    };
+
+    const shipmentVendorIdStr = shipmentVendorId;
+    const physicalItems = (order.items as any[]).filter((it) => {
+      const belongsToVendor = it.vendor?.toString() === shipmentVendorIdStr;
+      if (!belongsToVendor) return false;
+      const p = it.product as any;
+      const ptype = (p?.productType || it.productType || '').toString().toUpperCase();
+      return ptype !== 'DIGITAL' && ptype !== 'SERVICE';
+    });
+    if (physicalItems.length === 0) throw new AppError('No physical items for this vendor', 400);
+
+    const packageItems = physicalItems.map((it: any) => ({
+      name: it.productName,
+      description: it.productName,
+      unit_weight: ((it.product as any)?.weight ?? 0.5).toString(),
+      unit_amount: it.price.toString(),
+      quantity: it.quantity.toString(),
+    }));
+    const categoryId = this.determineCategoryForItems(physicalItems);
+
+    const storedSenderCode = usingPickup
+      ? (shipment?.origin as any)?.shipBubble?.addressCode
+      : (vendorProfile?.businessAddress as any)?.shipBubble?.addressCode;
+    const storedReceiverCode = (order.shippingAddress as any)?.shipBubble?.addressCode;
+
+    return {
+      order, shipment,
+      targetVendorId: shipmentVendorId!,
+      resolvedVendorName,
+      senderAddress, receiverAddress,
+      packageItems, categoryId,
+      storedSenderCode, storedReceiverCode,
+    };
+  }
+
+  async adminListReshipCouriers(orderId: string, vendorId?: string) {
+    const params = await this._buildReshipParams(orderId, vendorId);
+    const rates = await shipBubbleService.getDeliveryRates(
+      params.senderAddress,
+      params.receiverAddress,
+      params.packageItems,
+      undefined,
+      params.categoryId,
+      params.storedSenderCode,
+      params.storedReceiverCode
+    );
+    if (rates.status !== 'success' || !rates.data?.request_token) {
+      throw new AppError(`Shipbubble rates failed: ${rates.message || 'unknown'}`, 502);
+    }
+    const couriers = (rates.data.couriers || []).map((c: any) => ({
+      courierId:   c.courier_id,
+      courierName: c.courier_name,
+      serviceCode: c.service_code,
+      serviceType: c.service_type,
+      price:       c.total ?? c.rate_card_amount,
+      eta:         c.delivery_eta || null,
+      pickupEta:   c.pickup_eta || null,
+      isCheapest:  rates.data.cheapest_courier?.courier_id === c.courier_id,
+      isFastest:   rates.data.fastest_courier?.courier_id === c.courier_id,
+    }));
+    return {
+      orderNumber: params.order.orderNumber,
+      vendor: { id: params.targetVendorId, name: params.resolvedVendorName },
+      currentShipment: params.shipment
+        ? {
+            courier:        params.shipment.courier || null,
+            trackingNumber: params.shipment.trackingNumber || null,
+            shipmentId:     params.shipment.shipmentId || null,
+            status:         params.shipment.status,
+            shippingCost:   params.shipment.shippingCost || 0,
+          }
+        : null,
+      couriers,
+    };
+  }
+
+  async adminRebookShipment(orderId: string, courierName: string, vendorId?: string) {
+    if (!courierName) throw new AppError('courierName is required', 400);
+
+    const params = await this._buildReshipParams(orderId, vendorId);
+    const { order, shipment, targetVendorId, resolvedVendorName } = params;
+
+    const rates = await shipBubbleService.getDeliveryRates(
+      params.senderAddress,
+      params.receiverAddress,
+      params.packageItems,
+      undefined,
+      params.categoryId,
+      params.storedSenderCode,
+      params.storedReceiverCode
+    );
+    if (rates.status !== 'success' || !rates.data?.request_token) {
+      throw new AppError(`Shipbubble rates failed: ${rates.message || 'unknown'}`, 502);
+    }
+
+    const needle = courierName.toLowerCase();
+    const picked = (rates.data.couriers || []).find(
+      (c: any) => c.courier_name?.toLowerCase().includes(needle) || needle.includes(c.courier_name?.toLowerCase())
+    );
+    if (!picked) throw new AppError(`No courier matches "${courierName}"`, 400);
+
+    const oldTracking   = shipment?.trackingNumber || null;
+    const oldShipmentId = shipment?.shipmentId || null;
+    const oldCourier    = shipment?.courier || null;
+
+    const audit = shipment
+      ? `[${new Date().toISOString()}] Silent rebook by admin: courier "${oldCourier || '-'}" → "${picked.courier_name}", old tracking "${oldTracking || '-'}"`
+      : `[${new Date().toISOString()}] Silent first-book by admin: courier "${picked.courier_name}" (no prior shipment on record)`;
+    (order as any).adminNote = ((order as any).adminNote ? (order as any).adminNote + '\n' : '') + audit;
+
+    if (shipment) {
+      shipment.trackingNumber = undefined;
+      shipment.shipmentId = undefined;
+      shipment.trackingUrl = undefined;
+      if ((order as any).trackingNumber && (order as any).trackingNumber === oldTracking) {
+        (order as any).trackingNumber = undefined;
+        (order as any).shipmentId = undefined;
+      }
+    }
+    await order.save();
+
+    const created = await shipBubbleService.createShipment(
+      rates.data.request_token,
+      picked.courier_id,
+      picked.service_code,
+      false
+    );
+    const newOrderId = created?.data?.order_id;
+    if (!newOrderId) {
+      throw new AppError('Shipbubble did not return an order_id — retry the rebook', 502);
+    }
+    const newShipmentId = created?.data?.shipment_id || newOrderId;
+    const newTrackingUrl = created?.data?.tracking_url;
+
+    // Re-read the order so we mutate a fresh instance (the earlier populate
+    // pulled product/user docs we don't want to persist).
+    const fresh = await Order.findById(order._id);
+    if (!fresh) throw new AppError('Order disappeared during rebook — inspect DB', 500);
+    const freshShipments: any[] = (fresh as any).vendorShipments || [];
+
+    let freshShipment: any = freshShipments.find(
+      (s: any) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()) === targetVendorId
+    );
+    if (!freshShipment) {
+      // No existing entry — push a new one with the tracking we just booked
+      const originForShipment = params.senderAddress
+        ? {
+            street: (order.items as any[])[0]?.pickupAddress?.street || (params.storedSenderCode ? '' : ''),
+            city:   '',
+            state:  '',
+            country: 'Nigeria',
+          }
+        : { street: '', city: '', state: '', country: 'Nigeria' };
+      (fresh as any).vendorShipments.push({
+        vendor: targetVendorId,
+        vendorName: resolvedVendorName,
+        items: (fresh.items as any[]).filter((it) => it.vendor?.toString() === targetVendorId).map((it) => it.product),
+        origin: originForShipment,
+        shippingCost: picked.total ?? picked.rate_card_amount ?? 0,
+        courier: picked.courier_name,
+        requestedCourier: picked.courier_name,
+        trackingNumber: newOrderId,
+        shipmentId: newShipmentId,
+        trackingUrl: newTrackingUrl || undefined,
+        status: 'created',
+      });
+    } else {
+      freshShipment.trackingNumber = newOrderId;
+      freshShipment.shipmentId = newShipmentId;
+      freshShipment.courier = picked.courier_name;
+      freshShipment.requestedCourier = picked.courier_name;
+      if (newTrackingUrl) freshShipment.trackingUrl = newTrackingUrl;
+      if (!freshShipment.status || freshShipment.status === 'pending' || freshShipment.status === 'cancelled') {
+        freshShipment.status = 'created';
+      }
+    }
+    await fresh.save();
+
+    return {
+      orderNumber: fresh.orderNumber,
+      courier: picked.courier_name,
+      trackingNumber: newOrderId,
+      shipmentId: newShipmentId,
+      trackingUrl: newTrackingUrl || null,
+      previous: { courier: oldCourier, trackingNumber: oldTracking, shipmentId: oldShipmentId },
+      createdNewShipmentEntry: !freshShipments.find(
+        (s: any) => (typeof s.vendor === 'object' ? s.vendor._id?.toString() : s.vendor?.toString()) === targetVendorId
+      ),
+    };
+  }
+
   } // end OrderController
 
   export const orderController = new OrderController();

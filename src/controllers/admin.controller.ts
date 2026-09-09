@@ -2808,6 +2808,44 @@ export const retryShipment = asyncHandler(
 );
 
 /**
+ * GET /admin/orders/:id/reship-couriers
+ * List fresh Shipbubble courier options for silently rebooking this order.
+ * Optional query: ?vendorId=... (required for multi-vendor orders).
+ */
+export const listReshipCouriers = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const vendorId = typeof req.query.vendorId === 'string' ? req.query.vendorId : undefined;
+    const data = await orderController.adminListReshipCouriers(id, vendorId);
+    res.json({ success: true, data });
+  }
+);
+
+/**
+ * POST /admin/orders/:id/rebook-shipment
+ * Silently detach the old Shipbubble tracking and book a fresh shipment with
+ * the chosen courier. No customer/vendor notification is emitted.
+ * Body: { courierName: string, vendorId?: string }
+ */
+export const rebookShipment = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const { id } = req.params;
+    const { courierName, vendorId } = req.body || {};
+    if (!courierName) {
+      res.status(400).json({ success: false, message: 'courierName is required' });
+      return;
+    }
+    logger.info(`[Admin] Silent rebook for order ${id} by admin ${req.user?.id} → ${courierName}`);
+    const data = await orderController.adminRebookShipment(id, courierName, vendorId);
+    res.json({
+      success: true,
+      message: `Rebooked with ${data.courier}. New tracking: ${data.trackingNumber}`,
+      data,
+    });
+  }
+);
+
+/**
  * POST /admin/orders/:id/refund
  * Process order refund
  */
