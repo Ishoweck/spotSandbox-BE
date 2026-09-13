@@ -626,6 +626,38 @@ export async function handlePaystackWebhook(req: Request, res: Response): Promis
     return;
   }
 
+  // Logistics-tagged events belong to the vendorspot-logistics service.
+  // Same Paystack business = same secret, so the signature re-verifies downstream.
+  // Ack Paystack immediately, forward in the background.
+  const eventBody = req.body as any;
+  if (eventBody?.data?.metadata?.source === 'logistics') {
+    res.status(200).json({ received: true, forwarded: 'logistics' });
+    const logisticsUrl = process.env.LOGISTICS_SERVICE_URL;
+    if (!logisticsUrl) {
+      logger.error('[Paystack Webhook] Logistics-tagged event but LOGISTICS_SERVICE_URL is not set');
+      return;
+    }
+    void fetch(`${logisticsUrl}/webhooks/paystack`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-paystack-signature': signature,
+      },
+      body: (rawBody ?? Buffer.from(JSON.stringify(req.body))) as any,
+    })
+      .then((r) => {
+        if (r.ok) {
+          logger.info(`[Paystack Webhook] Forwarded logistics event: ${eventBody.event}`);
+        } else {
+          logger.warn(`[Paystack Webhook] Forward to logistics failed: ${r.status}`);
+        }
+      })
+      .catch((e: any) => {
+        logger.error('[Paystack Webhook] Forward to logistics threw:', e.message);
+      });
+    return;
+  }
+
   // Acknowledge immediately so Paystack doesn't retry due to timeout
   res.status(200).json({ received: true });
 
