@@ -104,6 +104,112 @@ async function computeVendorResponseStats(
   return { responseRate, responseSpeed };
 }
 
+const ALLOWED_DELIVERY_MODES = ['VENDORSPOT_DELIVERY', 'SELF_DELIVERY', 'PICKUP'] as const;
+type DeliveryMode = typeof ALLOWED_DELIVERY_MODES[number];
+
+interface DeliveryModeInput {
+  deliveryModes?: string[];
+  selfDeliveryFee?: number;
+  selfDeliveryAccepted?: boolean;
+  pickupAccepted?: boolean;
+  pickupAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    landmark?: string;
+    instructions?: string;
+  };
+  // Set to true when merging into an already-approved pickup address so we
+  // don't reset status back to PENDING (e.g., only self-delivery fee changed).
+  preserveExistingPickup?: boolean;
+  existingPickup?: any;
+  existingSelfAcceptedAt?: Date;
+  existingPickupAcceptedAt?: Date;
+}
+
+function resolveDeliveryModeInput(input: DeliveryModeInput): {
+  modes: DeliveryMode[];
+  feeToStore: number;
+  selfAcceptedAt?: Date;
+  pickupAcceptedAt?: Date;
+  pickupAddressDoc?: any;
+} {
+  const rawModes = input.deliveryModes;
+  const modes: DeliveryMode[] = (Array.isArray(rawModes) && rawModes.length > 0
+    ? rawModes
+    : ['VENDORSPOT_DELIVERY']
+  ).filter((m): m is DeliveryMode => (ALLOWED_DELIVERY_MODES as readonly string[]).includes(m));
+
+  if (modes.length === 0) {
+    throw new AppError('At least one delivery mode is required', 400);
+  }
+
+  const wantsSelf = modes.includes('SELF_DELIVERY');
+  const wantsPickup = modes.includes('PICKUP');
+
+  const feeToStore = wantsSelf ? Math.max(0, Number(input.selfDeliveryFee) || 0) : 0;
+
+  if (wantsSelf && input.selfDeliveryAccepted !== true && !input.existingSelfAcceptedAt) {
+    throw new AppError('You must accept the Deliver-yourself terms & conditions', 400);
+  }
+  if (wantsPickup && input.pickupAccepted !== true && !input.existingPickupAcceptedAt) {
+    throw new AppError('You must accept the Accept-pickup terms & conditions', 400);
+  }
+
+  const selfAcceptedAt = wantsSelf
+    ? (input.selfDeliveryAccepted ? new Date() : input.existingSelfAcceptedAt)
+    : undefined;
+  const pickupAcceptedAtOut = wantsPickup
+    ? (input.pickupAccepted ? new Date() : input.existingPickupAcceptedAt)
+    : undefined;
+
+  let pickupAddressDoc: any = undefined;
+  if (wantsPickup) {
+    const incoming = input.pickupAddress;
+    const hasIncoming = incoming && (incoming.street || incoming.city || incoming.state);
+
+    if (hasIncoming) {
+      const existing = input.existingPickup || {};
+      const streetChanged = (incoming!.street || '') !== (existing.street || '');
+      const cityChanged = (incoming!.city || '') !== (existing.city || '');
+      const stateChanged = (incoming!.state || '') !== (existing.state || '');
+      const materialChange = streetChanged || cityChanged || stateChanged;
+      const alreadyApproved = existing.status === 'APPROVED';
+      const status = materialChange || !alreadyApproved ? 'PENDING' : 'APPROVED';
+
+      pickupAddressDoc = {
+        street: incoming!.street || existing.street,
+        city: incoming!.city || existing.city,
+        state: incoming!.state || existing.state,
+        country: incoming!.country || existing.country || 'Nigeria',
+        landmark: incoming!.landmark ?? existing.landmark,
+        instructions: incoming!.instructions ?? existing.instructions,
+        status,
+        rejectionReason: status === 'PENDING' ? undefined : existing.rejectionReason,
+        submittedAt: status === 'PENDING' ? new Date() : existing.submittedAt,
+        reviewedAt: status === 'APPROVED' ? existing.reviewedAt : undefined,
+        reviewedBy: status === 'APPROVED' ? existing.reviewedBy : undefined,
+      };
+    } else if (input.existingPickup) {
+      pickupAddressDoc = input.existingPickup;
+    } else {
+      throw new AppError('Pickup address is required when enabling Accept-pickup', 400);
+    }
+  } else if (input.existingPickup && input.preserveExistingPickup) {
+    // Vendor toggled PICKUP off — keep the address on file but it won't be used
+    pickupAddressDoc = input.existingPickup;
+  }
+
+  return {
+    modes,
+    feeToStore,
+    selfAcceptedAt,
+    pickupAcceptedAt: pickupAcceptedAtOut,
+    pickupAddressDoc,
+  };
+}
+
 export class VendorController {
   /**
    * Get top vendors (Public - for home screen)
@@ -423,6 +529,11 @@ export class VendorController {
       businessPhone,
       businessEmail,
       businessWebsite,
+      deliveryModes,
+      selfDeliveryFee,
+      selfDeliveryAccepted,
+      pickupAccepted,
+      pickupAddress,
     } = req.body;
 
     const existingProfile = await VendorProfile.findOne({ user: req.user?.id });
@@ -431,6 +542,15 @@ export class VendorController {
     }
 
     const slug = await buildUniqueVendorSlug(businessName);
+
+    const { modes, feeToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
+      resolveDeliveryModeInput({
+        deliveryModes,
+        selfDeliveryFee,
+        selfDeliveryAccepted,
+        pickupAccepted,
+        pickupAddress,
+      });
 
     const vendorProfile = await VendorProfile.create({
       user: req.user?.id,
@@ -442,6 +562,11 @@ export class VendorController {
       businessEmail,
       businessWebsite,
       followers: [],
+      deliveryModes: modes,
+      selfDeliveryFee: feeToStore,
+      selfDeliveryAcceptedAt: selfAcceptedAt,
+      pickupAcceptedAt: pickupAcceptedAt,
+      pickupAddress: pickupAddressDoc,
     });
 
     await User.findByIdAndUpdate(req.user?.id, {
@@ -544,9 +669,12 @@ export class VendorController {
     const sensitiveFields = ['businessName', 'businessAddress', 'businessPhone', 'businessEmail'];
     // Cosmetic fields: always allowed, no rate-limit, no re-review
     const cosmeticFields = ['businessDescription', 'businessLogo', 'businessBanner', 'businessWebsite', 'storefront', 'socialMedia'];
+    // Delivery mode fields: allowed anytime, no re-review, handled by shared helper
+    const deliveryFields = ['deliveryModes', 'selfDeliveryFee', 'selfDeliveryAccepted', 'pickupAccepted', 'pickupAddress'];
 
     const incomingKeys = Object.keys(req.body);
     const touchesSensitive = sensitiveFields.some((f) => incomingKeys.includes(f));
+    const touchesDelivery = deliveryFields.some((f) => incomingKeys.includes(f));
 
     // Rate-limit only applies when identity-sensitive fields are being changed
     if (touchesSensitive && vendorProfile.businessDetailsLastUpdated) {
@@ -568,6 +696,36 @@ export class VendorController {
         (vendorProfile as any).businessAddress = freshAddress;
       } else {
         (vendorProfile as any)[key] = req.body[key];
+      }
+    }
+
+    if (touchesDelivery) {
+      const nextModes = Array.isArray(req.body.deliveryModes)
+        ? req.body.deliveryModes
+        : vendorProfile.deliveryModes;
+      const nextFee = req.body.selfDeliveryFee !== undefined
+        ? req.body.selfDeliveryFee
+        : vendorProfile.selfDeliveryFee;
+
+      const { modes, feeToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
+        resolveDeliveryModeInput({
+          deliveryModes: nextModes as string[],
+          selfDeliveryFee: nextFee,
+          selfDeliveryAccepted: req.body.selfDeliveryAccepted,
+          pickupAccepted: req.body.pickupAccepted,
+          pickupAddress: req.body.pickupAddress,
+          preserveExistingPickup: true,
+          existingPickup: vendorProfile.pickupAddress,
+          existingSelfAcceptedAt: vendorProfile.selfDeliveryAcceptedAt,
+          existingPickupAcceptedAt: vendorProfile.pickupAcceptedAt,
+        });
+
+      vendorProfile.deliveryModes = modes;
+      vendorProfile.selfDeliveryFee = feeToStore;
+      vendorProfile.selfDeliveryAcceptedAt = selfAcceptedAt;
+      vendorProfile.pickupAcceptedAt = pickupAcceptedAt;
+      if (pickupAddressDoc !== undefined) {
+        vendorProfile.pickupAddress = pickupAddressDoc;
       }
     }
 
@@ -1988,6 +2146,135 @@ export class VendorController {
         logger.error('Failed to generate/send vendor statement:', err);
       }
     })();
+  }
+
+  /**
+   * PUT /vendor/profile/pickup-address
+   * Vendor updates their pickup location. Any material change resets status
+   * to PENDING so admin re-approves before it goes live at buyer checkout.
+   */
+  async updatePickupAddress(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const vendorProfile = await VendorProfile.findOne({ user: req.user?.id });
+    if (!vendorProfile) {
+      throw new AppError('Vendor profile not found', 404);
+    }
+
+    const { pickupAddress, pickupAccepted } = req.body;
+    if (!pickupAddress || !pickupAddress.street || !pickupAddress.city || !pickupAddress.state) {
+      throw new AppError('Street, city and state are required', 400);
+    }
+
+    const alreadyEnabled = vendorProfile.deliveryModes?.includes('PICKUP');
+    const modes = alreadyEnabled
+      ? vendorProfile.deliveryModes
+      : ([...(vendorProfile.deliveryModes || []), 'PICKUP'] as ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[]);
+
+    const { pickupAddressDoc, pickupAcceptedAt } = resolveDeliveryModeInput({
+      deliveryModes: modes,
+      selfDeliveryFee: vendorProfile.selfDeliveryFee,
+      selfDeliveryAccepted: false,
+      pickupAccepted: pickupAccepted === true,
+      pickupAddress,
+      existingPickup: vendorProfile.pickupAddress,
+      existingSelfAcceptedAt: vendorProfile.selfDeliveryAcceptedAt,
+      existingPickupAcceptedAt: vendorProfile.pickupAcceptedAt,
+    });
+
+    vendorProfile.deliveryModes = modes;
+    vendorProfile.pickupAddress = pickupAddressDoc;
+    vendorProfile.pickupAcceptedAt = pickupAcceptedAt;
+    await vendorProfile.save();
+
+    res.json({
+      success: true,
+      message: 'Pickup address submitted for review',
+      data: { pickupAddress: vendorProfile.pickupAddress },
+    });
+  }
+
+  /**
+   * POST /vendor/admin/pickup-address/:vendorId/approve
+   * Admin approves a vendor's submitted pickup location.
+   */
+  async approvePickupAddress(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { vendorId } = req.params;
+    const vendorProfile = await VendorProfile.findOne({ user: vendorId });
+    if (!vendorProfile) throw new AppError('Vendor not found', 404);
+    if (!vendorProfile.pickupAddress || !vendorProfile.pickupAddress.street) {
+      throw new AppError('Vendor has not submitted a pickup address', 400);
+    }
+
+    vendorProfile.pickupAddress.status = 'APPROVED';
+    vendorProfile.pickupAddress.reviewedAt = new Date();
+    vendorProfile.pickupAddress.reviewedBy = req.user?.id as any;
+    vendorProfile.pickupAddress.rejectionReason = undefined;
+    await vendorProfile.save();
+
+    try {
+      await notificationService.send({
+        userId: vendorId,
+        type: NotificationType.ACCOUNT,
+        title: 'Pickup address approved',
+        message: 'Your pickup location is live. Buyers can now choose to collect orders from your store.',
+        link: '/vendor/profile',
+        referenceId: `pickup_approved:${vendorId}`,
+      });
+    } catch (_) { /* non-critical */ }
+
+    res.json({ success: true, message: 'Pickup address approved', data: { pickupAddress: vendorProfile.pickupAddress } });
+  }
+
+  /**
+   * POST /vendor/admin/pickup-address/:vendorId/reject
+   * Body: { reason: string }
+   */
+  async rejectPickupAddress(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { vendorId } = req.params;
+    const { reason } = req.body;
+    if (!reason || typeof reason !== 'string') {
+      throw new AppError('Rejection reason is required', 400);
+    }
+
+    const vendorProfile = await VendorProfile.findOne({ user: vendorId });
+    if (!vendorProfile) throw new AppError('Vendor not found', 404);
+    if (!vendorProfile.pickupAddress || !vendorProfile.pickupAddress.street) {
+      throw new AppError('Vendor has not submitted a pickup address', 400);
+    }
+
+    vendorProfile.pickupAddress.status = 'REJECTED';
+    vendorProfile.pickupAddress.rejectionReason = reason;
+    vendorProfile.pickupAddress.reviewedAt = new Date();
+    vendorProfile.pickupAddress.reviewedBy = req.user?.id as any;
+    await vendorProfile.save();
+
+    try {
+      await notificationService.send({
+        userId: vendorId,
+        type: NotificationType.ACCOUNT,
+        title: 'Pickup address needs updates',
+        message: `We couldn't approve your pickup location: ${reason}`,
+        link: '/vendor/profile',
+        referenceId: `pickup_rejected:${vendorId}`,
+      });
+    } catch (_) { /* non-critical */ }
+
+    res.json({ success: true, message: 'Pickup address rejected', data: { pickupAddress: vendorProfile.pickupAddress } });
+  }
+
+  /**
+   * GET /vendor/admin/pickup-addresses/pending
+   * Returns vendors whose pickup address is awaiting review.
+   */
+  async listPendingPickupAddresses(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const pending = await VendorProfile.find({
+      'pickupAddress.status': 'PENDING',
+    })
+      .select('user businessName businessPhone businessEmail pickupAddress createdAt')
+      .populate('user', 'firstName lastName email phone')
+      .sort({ 'pickupAddress.submittedAt': 1 })
+      .lean();
+
+    res.json({ success: true, data: { vendors: pending } });
   }
 }
 

@@ -22,6 +22,16 @@ export interface IVendorShipment {
   trackingUrl?: string;
   paidAt?: Date;
   status: 'pending' | 'confirmed' | 'processing' | 'created' | 'shipped' | 'in_transit' | 'delivered' | 'cancelled';
+  deliveryMode: 'VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP';
+  pickupAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    landmark?: string;
+    instructions?: string;
+  };
+  buyerConfirmedAt?: Date;
 }
 
 export interface IOrder extends Document {
@@ -167,6 +177,20 @@ const vendorShipmentSchema = new Schema<IVendorShipment>({
     enum: ['pending', 'confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered', 'cancelled'],
     default: 'pending',
   },
+  deliveryMode: {
+    type: String,
+    enum: ['VENDORSPOT_DELIVERY', 'SELF_DELIVERY', 'PICKUP'],
+    default: 'VENDORSPOT_DELIVERY',
+  },
+  pickupAddress: {
+    street: String,
+    city: String,
+    state: String,
+    country: String,
+    landmark: String,
+    instructions: String,
+  },
+  buyerConfirmedAt: Date,
 }, { _id: false });
 
 const orderSchema = new Schema<IOrder>({

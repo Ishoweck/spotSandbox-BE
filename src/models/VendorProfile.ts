@@ -103,6 +103,23 @@ export interface IVendorProfile extends Document {
     reuploadEmailLastSentAt?: Date;
     reuploadEmailSentCount?: number;
   };
+  deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
+  selfDeliveryFee: number;
+  selfDeliveryAcceptedAt?: Date;
+  pickupAcceptedAt?: Date;
+  pickupAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    landmark?: string;
+    instructions?: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    rejectionReason?: string;
+    submittedAt?: Date;
+    reviewedAt?: Date;
+    reviewedBy?: Types.ObjectId;
+  };
 }
 
 const vendorProfileSchema = new Schema<IVendorProfile>({
@@ -300,6 +317,40 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     adminOverride: Boolean,
     reuploadEmailLastSentAt: Date,
     reuploadEmailSentCount: { type: Number, default: 0 },
+  },
+  deliveryModes: {
+    type: [{
+      type: String,
+      enum: ['VENDORSPOT_DELIVERY', 'SELF_DELIVERY', 'PICKUP'],
+    }],
+    default: ['VENDORSPOT_DELIVERY'],
+    validate: {
+      validator: (arr: string[]) => Array.isArray(arr) && arr.length > 0,
+      message: 'At least one delivery mode is required',
+    },
+  },
+  selfDeliveryFee: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  selfDeliveryAcceptedAt: Date,
+  pickupAcceptedAt: Date,
+  pickupAddress: {
+    street: String,
+    city: String,
+    state: String,
+    country: { type: String, default: 'Nigeria' },
+    landmark: String,
+    instructions: String,
+    status: {
+      type: String,
+      enum: ['PENDING', 'APPROVED', 'REJECTED'],
+    },
+    rejectionReason: String,
+    submittedAt: Date,
+    reviewedAt: Date,
+    reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
 }, {
   timestamps: true,

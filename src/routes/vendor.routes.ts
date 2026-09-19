@@ -141,6 +141,15 @@ router.put(
   asyncHandler(vendorController.updateVendorProfile.bind(vendorController))
 );
 
+/**
+ * PUT /api/v1/vendor/profile/pickup-address
+ * Vendor submits or updates their pickup location for admin review.
+ */
+router.put(
+  '/profile/pickup-address',
+  asyncHandler(vendorController.updatePickupAddress.bind(vendorController))
+);
+
 // ============================================================
 // KYC AND PAYOUT
 // ============================================================
@@ -279,6 +288,35 @@ router.put(
   '/admin/toggle-status/:vendorId',
   authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
   asyncHandler(vendorController.toggleVendorStatus.bind(vendorController))
+);
+
+/**
+ * GET /api/v1/vendor/admin/pickup-addresses/pending
+ * List vendors whose pickup address is awaiting review.
+ */
+router.get(
+  '/admin/pickup-addresses/pending',
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  asyncHandler(vendorController.listPendingPickupAddresses.bind(vendorController))
+);
+
+/**
+ * POST /api/v1/vendor/admin/pickup-address/:vendorId/approve
+ */
+router.post(
+  '/admin/pickup-address/:vendorId/approve',
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  asyncHandler(vendorController.approvePickupAddress.bind(vendorController))
+);
+
+/**
+ * POST /api/v1/vendor/admin/pickup-address/:vendorId/reject
+ * Body: { reason: string }
+ */
+router.post(
+  '/admin/pickup-address/:vendorId/reject',
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  asyncHandler(vendorController.rejectPickupAddress.bind(vendorController))
 );
 
 /**

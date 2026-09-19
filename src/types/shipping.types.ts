@@ -26,6 +26,19 @@ export interface VendorGroup {
       longitude?: number;
     };
   };
+  // Vendor-configured delivery options (setup screen). Only these modes are
+  // shown to the buyer at checkout for items in this group.
+  deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
+  selfDeliveryFee: number;
+  vendorPickupAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    country: string;
+    landmark?: string;
+    instructions?: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  };
   items: {
     productId: string;
     productName: string;
@@ -44,6 +57,7 @@ export interface VendorRateGroup {
   vendorName: string;
   vendorLogo?: string;
   isVerified?: boolean;
+  pickupCity?: string | null;
   products: {
     productId: string;
     name: string;
@@ -62,6 +76,20 @@ export interface VendorRateGroup {
     courier: string;
     logo?: string;
   }[];
+  // Delivery modes the vendor supports and are ready to be picked at checkout.
+  deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
+  // Flat fee charged when the buyer picks Vendor-to-deliver
+  selfDeliveryFee: number;
+  // Present only when PICKUP mode is offered AND the vendor's location is admin-approved.
+  vendorPickupAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    country: string;
+    landmark?: string;
+    instructions?: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  };
 }
 
 export interface VendorDeliveryRate {

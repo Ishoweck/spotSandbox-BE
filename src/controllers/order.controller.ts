@@ -381,6 +381,13 @@
               courier: r.courier,
               logo: r.logo,
             }));
+          // Which delivery modes the buyer can pick from for this vendor.
+          // PICKUP is only surfaced when the vendor's pickup address is APPROVED.
+          const vendorModes = (group?.deliveryModes || ['VENDORSPOT_DELIVERY']).filter((m) => {
+            if (m === 'PICKUP') return !!group?.vendorPickupAddress;
+            if (m === 'SELF_DELIVERY') return true;
+            return true;
+          });
           return {
             vendorId: vr.vendorId,
             vendorName: vr.vendorName,
@@ -396,6 +403,9 @@
               quantity: item.quantity,
             })),
             rates: filteredRates,
+            deliveryModes: vendorModes,
+            selfDeliveryFee: group?.selfDeliveryFee || 0,
+            vendorPickupAddress: group?.vendorPickupAddress,
           };
         });
 
@@ -708,6 +718,12 @@
           const vendorName = vendorProfile?.businessName ||
                             `${product.vendor.firstName} ${product.vendor.lastName}`;
 
+          const deliveryModes = Array.isArray(vendorProfile?.deliveryModes) && vendorProfile.deliveryModes.length > 0
+            ? vendorProfile.deliveryModes
+            : ['VENDORSPOT_DELIVERY'];
+          const vendorPickup = vendorProfile?.pickupAddress;
+          const pickupAvailable = deliveryModes.includes('PICKUP') && vendorPickup?.status === 'APPROVED';
+
           groups.set(groupKey, {
             vendorId,
             vendorName,
@@ -715,6 +731,17 @@
             isVerified: vendorProfile?.verificationStatus === 'verified',
             vendorAddress,
             pickupAddress: hasPickup ? pa : undefined,
+            deliveryModes,
+            selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
+            vendorPickupAddress: pickupAvailable ? {
+              street: vendorPickup.street || '',
+              city: vendorPickup.city || '',
+              state: vendorPickup.state || '',
+              country: vendorPickup.country || 'Nigeria',
+              landmark: vendorPickup.landmark,
+              instructions: vendorPickup.instructions,
+              status: vendorPickup.status,
+            } : undefined,
             items: [],
             totalWeight: 0,
           });
@@ -939,20 +966,50 @@
           const physicalItems = group.items.filter(item => item.isPhysical);
           if (physicalItems.length === 0) continue;
           const vd = vendorDeliveries.find((v: any) => v.vendorId === group.vendorId);
-          // Use ?? not || so a price of 0 (digital bundled) is respected
-          const shippingCost = vd != null ? (vd.price ?? 0) : this.getDefaultRate(deliveryType);
+
+          const requestedMode: 'VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP' =
+            (vd?.mode as any) || 'VENDORSPOT_DELIVERY';
+          if (!group.deliveryModes.includes(requestedMode)) {
+            throw new AppError(
+              `${group.vendorName} does not offer ${requestedMode.replace('_', ' ').toLowerCase()}. Please pick a different delivery option.`,
+              400
+            );
+          }
+          if (requestedMode === 'PICKUP' && !group.vendorPickupAddress) {
+            throw new AppError(
+              `${group.vendorName}'s pickup location is not yet approved. Please pick a different delivery option.`,
+              400
+            );
+          }
+
+          let shippingCost = 0;
+          let courierLabel: string | undefined = undefined;
+          if (requestedMode === 'VENDORSPOT_DELIVERY') {
+            // Use ?? not || so a price of 0 (digital bundled) is respected
+            shippingCost = vd != null ? (vd.price ?? 0) : this.getDefaultRate(deliveryType);
+            courierLabel = vd?.courier || selectedCourier;
+          } else if (requestedMode === 'SELF_DELIVERY') {
+            shippingCost = group.selfDeliveryFee;
+            courierLabel = 'Vendor delivery';
+          } else if (requestedMode === 'PICKUP') {
+            shippingCost = 0;
+            courierLabel = 'Pickup';
+          }
           totalShippingCost += shippingCost;
+
           vendorShipments.push({
             vendor: group.vendorId,
             vendorName: group.vendorName,
             items: group.items.filter(item => item.isPhysical).map(item => item.productId),
             origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
             shippingCost,
-            courier: vd?.courier || selectedCourier,
-            requestedCourier: vd?.courier || selectedCourier,
-            status: 'pending',
+            courier: courierLabel,
+            requestedCourier: courierLabel,
+            status: requestedMode === 'VENDORSPOT_DELIVERY' ? 'pending' : 'confirmed',
+            deliveryMode: requestedMode,
+            pickupAddress: requestedMode === 'PICKUP' ? group.vendorPickupAddress : undefined,
           });
-          logger.info(`✅ Shipping for ${group.vendorName}: ₦${shippingCost} (${vd?.courier})`);
+          logger.info(`✅ ${group.vendorName}: ${requestedMode} — ₦${shippingCost} (${courierLabel || 'n/a'})`);
         }
       }
       // ✅ USE SELECTED PRICE FROM CHECKOUT (legacy)
@@ -1827,17 +1884,47 @@
             const physicalItems = group.items.filter(item => item.isPhysical);
             if (physicalItems.length === 0) continue;
             const vd = snapshotVendorDeliveries.find((v: any) => v.vendorId === group.vendorId);
-            const shippingCost = vd != null ? (vd.price ?? 0) : this.getDefaultRate(deliveryType);
+
+            const requestedMode: 'VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP' =
+              (vd?.mode as any) || 'VENDORSPOT_DELIVERY';
+            if (!group.deliveryModes.includes(requestedMode)) {
+              throw new AppError(
+                `${group.vendorName} does not offer ${requestedMode.replace('_', ' ').toLowerCase()}. Please pick a different delivery option.`,
+                400
+              );
+            }
+            if (requestedMode === 'PICKUP' && !group.vendorPickupAddress) {
+              throw new AppError(
+                `${group.vendorName}'s pickup location is not yet approved. Please pick a different delivery option.`,
+                400
+              );
+            }
+
+            let shippingCost = 0;
+            let courierLabel: string | undefined = undefined;
+            if (requestedMode === 'VENDORSPOT_DELIVERY') {
+              shippingCost = vd != null ? (vd.price ?? 0) : this.getDefaultRate(deliveryType);
+              courierLabel = vd?.courier || selectedCourier;
+            } else if (requestedMode === 'SELF_DELIVERY') {
+              shippingCost = group.selfDeliveryFee;
+              courierLabel = 'Vendor delivery';
+            } else if (requestedMode === 'PICKUP') {
+              shippingCost = 0;
+              courierLabel = 'Pickup';
+            }
             totalShippingCost += shippingCost;
+
             vendorShipments.push({
               vendor: group.vendorId,
               vendorName: group.vendorName,
               items: group.items.filter(item => item.isPhysical).map(item => item.productId),
               origin: (() => { const o = (group as any).pickupAddress?.street ? (group as any).pickupAddress : group.vendorAddress; return { street: o.street || '', city: o.city, state: o.state, country: o.country }; })(),
               shippingCost,
-              courier: vd?.courier || selectedCourier,
-              requestedCourier: vd?.courier || selectedCourier,
-              status: 'pending',
+              courier: courierLabel,
+              requestedCourier: courierLabel,
+              status: requestedMode === 'VENDORSPOT_DELIVERY' ? 'pending' : 'confirmed',
+              deliveryMode: requestedMode,
+              pickupAddress: requestedMode === 'PICKUP' ? group.vendorPickupAddress : undefined,
             });
           }
         } else if (selectedDeliveryPrice !== undefined && selectedDeliveryPrice !== null) {
@@ -2281,6 +2368,18 @@
 
         if (physicalItems.length === 0) {
           logger.info(`⏭️ Skipping ${group.vendorName} - no physical items`);
+          continue;
+        }
+
+        // Skip vendors whose selected mode isn't Vendorspot delivery — they
+        // handle fulfillment themselves. The vendorShipments entry was already
+        // created up-front in createOrder/confirmPayment with the correct mode.
+        const existingEntryForMode = (order.vendorShipments || []).find((vs: any) => {
+          const vid = typeof vs.vendor === 'object' ? vs.vendor._id?.toString() : vs.vendor?.toString();
+          return vid === group.vendorId;
+        });
+        if (existingEntryForMode?.deliveryMode && existingEntryForMode.deliveryMode !== 'VENDORSPOT_DELIVERY') {
+          logger.info(`⏭️ Skipping Shipbubble for ${group.vendorName} — deliveryMode=${existingEntryForMode.deliveryMode}`);
           continue;
         }
 
@@ -4292,6 +4391,8 @@
               state: vendorShipment.origin.state,
               country: vendorShipment.origin.country,
             } : undefined,
+            deliveryModes: (vendorProfile?.deliveryModes as any) || ['VENDORSPOT_DELIVERY'],
+            selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
             items: vendorItems.map((item: any) => {
               const product = item.product as any;
               const productType = product?.productType?.toUpperCase() || item.productType?.toUpperCase();
@@ -4376,6 +4477,18 @@
       const { id } = req.params;
       const userId = req.user!.id;
 
+      // Non-Vendorspot fulfillment (self-deliver / pickup) skips the courier
+      // status pipeline, so buyers must be able to confirm receipt directly
+      // from CONFIRMED/PROCESSING too. Detect that up-front so the guard
+      // below matches the right status set.
+      const preOrder = await Order.findById(id).select('user status paymentStatus fundsReleased vendorShipments').lean() as any;
+      if (!preOrder) throw new AppError('Order not found', 404);
+      const allNonVendorspot = Array.isArray(preOrder.vendorShipments) && preOrder.vendorShipments.length > 0
+        && preOrder.vendorShipments.every((vs: any) => vs.deliveryMode && vs.deliveryMode !== 'VENDORSPOT_DELIVERY');
+      const allowedStatuses: OrderStatus[] = allNonVendorspot
+        ? [OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED]
+        : [OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED];
+
       // Atomic: set fundsReleased=true in one operation — prevents double vendor payout
       // from concurrent customer clicks OR race with the 24-hour auto-complete job
       const order = await Order.findOneAndUpdate(
@@ -4383,7 +4496,7 @@
           _id: id,
           user: userId,
           fundsReleased: { $ne: true },
-          status: { $in: [OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED] },
+          status: { $in: allowedStatuses },
           paymentStatus: PaymentStatus.COMPLETED,
         },
         {
@@ -4403,7 +4516,10 @@
           return;
         }
         if (existing.paymentStatus !== PaymentStatus.COMPLETED) throw new AppError('Payment not completed', 400);
-        throw new AppError(`Order cannot be completed from status "${existing.status}". Must be shipped or further.`, 400);
+        const reason = allNonVendorspot
+          ? 'Must be at least confirmed for vendor-fulfilled orders.'
+          : 'Must be shipped or further.';
+        throw new AppError(`Order cannot be completed from status "${existing.status}". ${reason}`, 400);
       }
 
       // Credit vendor wallets with their earnings
@@ -4949,6 +5065,8 @@
               country: vs.origin.country,
             }
           : undefined,
+        deliveryModes: (vendorProfile?.deliveryModes as any) || ['VENDORSPOT_DELIVERY'],
+        selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
         items: vendorItems.map((item: any) => {
           const product = item.product as any;
           const productType =
