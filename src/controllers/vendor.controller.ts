@@ -126,6 +126,14 @@ interface DeliveryModeInput {
   existingPickup?: any;
   existingSelfAcceptedAt?: Date;
   existingPickupAcceptedAt?: Date;
+  // Used when the vendor enables PICKUP without supplying a dedicated pickup
+  // address — we auto-copy the business address as PENDING for admin review.
+  fallbackBusinessAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+  };
 }
 
 function resolveDeliveryModeInput(input: DeliveryModeInput): {
@@ -193,6 +201,16 @@ function resolveDeliveryModeInput(input: DeliveryModeInput): {
       };
     } else if (input.existingPickup) {
       pickupAddressDoc = input.existingPickup;
+    } else if (input.fallbackBusinessAddress && input.fallbackBusinessAddress.street) {
+      const fb = input.fallbackBusinessAddress;
+      pickupAddressDoc = {
+        street: fb.street,
+        city: fb.city,
+        state: fb.state,
+        country: fb.country || 'Nigeria',
+        status: 'PENDING',
+        submittedAt: new Date(),
+      };
     } else {
       throw new AppError('Pickup address is required when enabling Accept-pickup', 400);
     }
@@ -550,6 +568,7 @@ export class VendorController {
         selfDeliveryAccepted,
         pickupAccepted,
         pickupAddress,
+        fallbackBusinessAddress: businessAddress,
       });
 
     const vendorProfile = await VendorProfile.create({
@@ -718,6 +737,7 @@ export class VendorController {
           existingPickup: vendorProfile.pickupAddress,
           existingSelfAcceptedAt: vendorProfile.selfDeliveryAcceptedAt,
           existingPickupAcceptedAt: vendorProfile.pickupAcceptedAt,
+          fallbackBusinessAddress: vendorProfile.businessAddress as any,
         });
 
       vendorProfile.deliveryModes = modes;
