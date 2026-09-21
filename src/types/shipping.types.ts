@@ -30,6 +30,9 @@ export interface VendorGroup {
   // shown to the buyer at checkout for items in this group.
   deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
   selfDeliveryFee: number;
+  // Nigerian states the vendor is willing to self-deliver to. Filtered
+  // against the buyer's shipping state when surfacing SELF_DELIVERY.
+  selfDeliveryStates: string[];
   vendorPickupAddress?: {
     street: string;
     city: string;
@@ -77,6 +80,8 @@ export interface VendorRateGroup {
     logo?: string;
   }[];
   // Delivery modes the vendor supports and are ready to be picked at checkout.
+  // Already filtered against the buyer's shipping state — SELF_DELIVERY is
+  // dropped when the buyer is outside the vendor's service area.
   deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
   // Flat fee charged when the buyer picks Vendor-to-deliver
   selfDeliveryFee: number;

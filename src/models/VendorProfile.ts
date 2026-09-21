@@ -105,6 +105,11 @@ export interface IVendorProfile extends Document {
   };
   deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
   selfDeliveryFee: number;
+  // Nigerian states the vendor is willing to self-deliver to. Empty array
+  // means SELF_DELIVERY isn't offered anywhere (defensive) — the controller
+  // seeds this with [businessAddress.state] when the mode is enabled without
+  // an explicit list.
+  selfDeliveryStates: string[];
   selfDeliveryAcceptedAt?: Date;
   pickupAcceptedAt?: Date;
   pickupAddress?: {
@@ -333,6 +338,10 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     type: Number,
     default: 0,
     min: 0,
+  },
+  selfDeliveryStates: {
+    type: [String],
+    default: [],
   },
   selfDeliveryAcceptedAt: Date,
   pickupAcceptedAt: Date,

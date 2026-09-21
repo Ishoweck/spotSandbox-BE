@@ -383,9 +383,15 @@
             }));
           // Which delivery modes the buyer can pick from for this vendor.
           // PICKUP is only surfaced when the vendor's pickup address is APPROVED.
+          // SELF_DELIVERY is dropped when the buyer's shipping state falls
+          // outside the vendor's self-delivery service area.
+          const buyerState = String(state).trim().toLowerCase();
+          const inServiceArea = (group?.selfDeliveryStates || []).some(
+            (s) => String(s).trim().toLowerCase() === buyerState,
+          );
           const vendorModes = (group?.deliveryModes || ['VENDORSPOT_DELIVERY']).filter((m) => {
             if (m === 'PICKUP') return !!group?.vendorPickupAddress;
-            if (m === 'SELF_DELIVERY') return true;
+            if (m === 'SELF_DELIVERY') return inServiceArea;
             return true;
           });
           return {
@@ -723,6 +729,9 @@
             : ['VENDORSPOT_DELIVERY'];
           const vendorPickup = vendorProfile?.pickupAddress;
           const pickupAvailable = deliveryModes.includes('PICKUP') && vendorPickup?.status === 'APPROVED';
+          const selfDeliveryStates = Array.isArray(vendorProfile?.selfDeliveryStates)
+            ? vendorProfile.selfDeliveryStates
+            : [];
 
           groups.set(groupKey, {
             vendorId,
@@ -733,6 +742,7 @@
             pickupAddress: hasPickup ? pa : undefined,
             deliveryModes,
             selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
+            selfDeliveryStates,
             vendorPickupAddress: pickupAvailable ? {
               street: vendorPickup.street || '',
               city: vendorPickup.city || '',
@@ -980,6 +990,18 @@
               `${group.vendorName}'s pickup location is not yet approved. Please pick a different delivery option.`,
               400
             );
+          }
+          if (requestedMode === 'SELF_DELIVERY') {
+            const buyerState = String(shippingAddress?.state || '').trim().toLowerCase();
+            const inServiceArea = (group.selfDeliveryStates || []).some(
+              (s: string) => String(s).trim().toLowerCase() === buyerState,
+            );
+            if (!inServiceArea) {
+              throw new AppError(
+                `${group.vendorName} does not self-deliver to ${shippingAddress?.state || 'your state'}. Please pick a different delivery option.`,
+                400
+              );
+            }
           }
 
           let shippingCost = 0;
@@ -4393,6 +4415,7 @@
             } : undefined,
             deliveryModes: (vendorProfile?.deliveryModes as any) || ['VENDORSPOT_DELIVERY'],
             selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
+            selfDeliveryStates: Array.isArray(vendorProfile?.selfDeliveryStates) ? vendorProfile.selfDeliveryStates : [],
             items: vendorItems.map((item: any) => {
               const product = item.product as any;
               const productType = product?.productType?.toUpperCase() || item.productType?.toUpperCase();
@@ -5067,6 +5090,7 @@
           : undefined,
         deliveryModes: (vendorProfile?.deliveryModes as any) || ['VENDORSPOT_DELIVERY'],
         selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
+        selfDeliveryStates: Array.isArray(vendorProfile?.selfDeliveryStates) ? vendorProfile.selfDeliveryStates : [],
         items: vendorItems.map((item: any) => {
           const product = item.product as any;
           const productType =

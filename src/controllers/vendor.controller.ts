@@ -110,6 +110,7 @@ type DeliveryMode = typeof ALLOWED_DELIVERY_MODES[number];
 interface DeliveryModeInput {
   deliveryModes?: string[];
   selfDeliveryFee?: number;
+  selfDeliveryStates?: string[];
   selfDeliveryAccepted?: boolean;
   pickupAccepted?: boolean;
   pickupAddress?: {
@@ -126,8 +127,11 @@ interface DeliveryModeInput {
   existingPickup?: any;
   existingSelfAcceptedAt?: Date;
   existingPickupAcceptedAt?: Date;
+  existingSelfDeliveryStates?: string[];
   // Used when the vendor enables PICKUP without supplying a dedicated pickup
   // address — we auto-copy the business address as PENDING for admin review.
+  // The state is also used to seed selfDeliveryStates when self-delivery is
+  // enabled without an explicit service-area list.
   fallbackBusinessAddress?: {
     street?: string;
     city?: string;
@@ -139,6 +143,7 @@ interface DeliveryModeInput {
 function resolveDeliveryModeInput(input: DeliveryModeInput): {
   modes: DeliveryMode[];
   feeToStore: number;
+  selfDeliveryStatesToStore: string[];
   selfAcceptedAt?: Date;
   pickupAcceptedAt?: Date;
   pickupAddressDoc?: any;
@@ -157,6 +162,27 @@ function resolveDeliveryModeInput(input: DeliveryModeInput): {
   const wantsPickup = modes.includes('PICKUP');
 
   const feeToStore = wantsSelf ? Math.max(0, Number(input.selfDeliveryFee) || 0) : 0;
+
+  // Service-area list — only meaningful when SELF_DELIVERY is enabled. Prefer
+  // an explicit list from the client, fall back to what's already stored,
+  // otherwise seed with the business-address state so a vendor can't
+  // accidentally offer to self-deliver nationwide at a Lagos-only flat fee.
+  let selfDeliveryStatesToStore: string[] = [];
+  if (wantsSelf) {
+    const incomingStates = Array.isArray(input.selfDeliveryStates)
+      ? input.selfDeliveryStates.map((s) => String(s).trim()).filter(Boolean)
+      : undefined;
+    if (incomingStates && incomingStates.length > 0) {
+      selfDeliveryStatesToStore = Array.from(new Set(incomingStates));
+    } else if (input.existingSelfDeliveryStates && input.existingSelfDeliveryStates.length > 0) {
+      selfDeliveryStatesToStore = input.existingSelfDeliveryStates;
+    } else if (input.fallbackBusinessAddress?.state) {
+      selfDeliveryStatesToStore = [String(input.fallbackBusinessAddress.state).trim()].filter(Boolean);
+    }
+    if (selfDeliveryStatesToStore.length === 0) {
+      throw new AppError('Pick at least one state you can self-deliver to', 400);
+    }
+  }
 
   if (wantsSelf && input.selfDeliveryAccepted !== true && !input.existingSelfAcceptedAt) {
     throw new AppError('You must accept the Deliver-yourself terms & conditions', 400);
@@ -222,6 +248,7 @@ function resolveDeliveryModeInput(input: DeliveryModeInput): {
   return {
     modes,
     feeToStore,
+    selfDeliveryStatesToStore,
     selfAcceptedAt,
     pickupAcceptedAt: pickupAcceptedAtOut,
     pickupAddressDoc,
@@ -549,6 +576,7 @@ export class VendorController {
       businessWebsite,
       deliveryModes,
       selfDeliveryFee,
+      selfDeliveryStates,
       selfDeliveryAccepted,
       pickupAccepted,
       pickupAddress,
@@ -561,10 +589,11 @@ export class VendorController {
 
     const slug = await buildUniqueVendorSlug(businessName);
 
-    const { modes, feeToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
+    const { modes, feeToStore, selfDeliveryStatesToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
       resolveDeliveryModeInput({
         deliveryModes,
         selfDeliveryFee,
+        selfDeliveryStates,
         selfDeliveryAccepted,
         pickupAccepted,
         pickupAddress,
@@ -583,6 +612,7 @@ export class VendorController {
       followers: [],
       deliveryModes: modes,
       selfDeliveryFee: feeToStore,
+      selfDeliveryStates: selfDeliveryStatesToStore,
       selfDeliveryAcceptedAt: selfAcceptedAt,
       pickupAcceptedAt: pickupAcceptedAt,
       pickupAddress: pickupAddressDoc,
@@ -689,7 +719,7 @@ export class VendorController {
     // Cosmetic fields: always allowed, no rate-limit, no re-review
     const cosmeticFields = ['businessDescription', 'businessLogo', 'businessBanner', 'businessWebsite', 'storefront', 'socialMedia'];
     // Delivery mode fields: allowed anytime, no re-review, handled by shared helper
-    const deliveryFields = ['deliveryModes', 'selfDeliveryFee', 'selfDeliveryAccepted', 'pickupAccepted', 'pickupAddress'];
+    const deliveryFields = ['deliveryModes', 'selfDeliveryFee', 'selfDeliveryStates', 'selfDeliveryAccepted', 'pickupAccepted', 'pickupAddress'];
 
     const incomingKeys = Object.keys(req.body);
     const touchesSensitive = sensitiveFields.some((f) => incomingKeys.includes(f));
@@ -726,10 +756,11 @@ export class VendorController {
         ? req.body.selfDeliveryFee
         : vendorProfile.selfDeliveryFee;
 
-      const { modes, feeToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
+      const { modes, feeToStore, selfDeliveryStatesToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
         resolveDeliveryModeInput({
           deliveryModes: nextModes as string[],
           selfDeliveryFee: nextFee,
+          selfDeliveryStates: req.body.selfDeliveryStates,
           selfDeliveryAccepted: req.body.selfDeliveryAccepted,
           pickupAccepted: req.body.pickupAccepted,
           pickupAddress: req.body.pickupAddress,
@@ -737,11 +768,13 @@ export class VendorController {
           existingPickup: vendorProfile.pickupAddress,
           existingSelfAcceptedAt: vendorProfile.selfDeliveryAcceptedAt,
           existingPickupAcceptedAt: vendorProfile.pickupAcceptedAt,
+          existingSelfDeliveryStates: vendorProfile.selfDeliveryStates,
           fallbackBusinessAddress: vendorProfile.businessAddress as any,
         });
 
       vendorProfile.deliveryModes = modes;
       vendorProfile.selfDeliveryFee = feeToStore;
+      vendorProfile.selfDeliveryStates = selfDeliveryStatesToStore;
       vendorProfile.selfDeliveryAcceptedAt = selfAcceptedAt;
       vendorProfile.pickupAcceptedAt = pickupAcceptedAt;
       if (pickupAddressDoc !== undefined) {
