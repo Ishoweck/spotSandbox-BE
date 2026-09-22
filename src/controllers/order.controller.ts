@@ -13,6 +13,7 @@
   import { Wallet, AffiliateLink } from '../models/Additional';
   import { AppError } from '../middleware/error';
   import { generateOrderNumber } from '../utils/helpers';
+  import { readSelfDeliveryPricing, findFeeForState } from '../utils/selfDeliveryPricing';
   import { paystackService } from '../services/paystack.service';
   import { flutterwaveService } from '../services/flutterwave.service';
   import { shipBubbleService } from '../services/shipbubble.service';
@@ -383,15 +384,13 @@
             }));
           // Which delivery modes the buyer can pick from for this vendor.
           // PICKUP is only surfaced when the vendor's pickup address is APPROVED.
-          // SELF_DELIVERY is dropped when the buyer's shipping state falls
-          // outside the vendor's self-delivery service area.
-          const buyerState = String(state).trim().toLowerCase();
-          const inServiceArea = (group?.selfDeliveryStates || []).some(
-            (s) => String(s).trim().toLowerCase() === buyerState,
-          );
+          // SELF_DELIVERY is dropped when the buyer's shipping state has no
+          // entry in the vendor's per-state pricing map. The fee we expose is
+          // the entry's fee for that state (0 is valid — "FREE").
+          const buyerSelfDeliveryFee = findFeeForState(group?.selfDeliveryPricing || [], state as string);
           const vendorModes = (group?.deliveryModes || ['VENDORSPOT_DELIVERY']).filter((m) => {
             if (m === 'PICKUP') return !!group?.vendorPickupAddress;
-            if (m === 'SELF_DELIVERY') return inServiceArea;
+            if (m === 'SELF_DELIVERY') return buyerSelfDeliveryFee !== null;
             return true;
           });
           return {
@@ -410,7 +409,7 @@
             })),
             rates: filteredRates,
             deliveryModes: vendorModes,
-            selfDeliveryFee: group?.selfDeliveryFee || 0,
+            selfDeliveryFee: buyerSelfDeliveryFee ?? 0,
             vendorPickupAddress: group?.vendorPickupAddress,
           };
         });
@@ -729,9 +728,7 @@
             : ['VENDORSPOT_DELIVERY'];
           const vendorPickup = vendorProfile?.pickupAddress;
           const pickupAvailable = deliveryModes.includes('PICKUP') && vendorPickup?.status === 'APPROVED';
-          const selfDeliveryStates = Array.isArray(vendorProfile?.selfDeliveryStates)
-            ? vendorProfile.selfDeliveryStates
-            : [];
+          const selfDeliveryPricing = readSelfDeliveryPricing(vendorProfile);
 
           groups.set(groupKey, {
             vendorId,
@@ -741,8 +738,7 @@
             vendorAddress,
             pickupAddress: hasPickup ? pa : undefined,
             deliveryModes,
-            selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
-            selfDeliveryStates,
+            selfDeliveryPricing,
             vendorPickupAddress: pickupAvailable ? {
               street: vendorPickup.street || '',
               city: vendorPickup.city || '',
@@ -991,12 +987,10 @@
               400
             );
           }
+          let selfDeliveryFeeForBuyer: number | null = null;
           if (requestedMode === 'SELF_DELIVERY') {
-            const buyerState = String(shippingAddress?.state || '').trim().toLowerCase();
-            const inServiceArea = (group.selfDeliveryStates || []).some(
-              (s: string) => String(s).trim().toLowerCase() === buyerState,
-            );
-            if (!inServiceArea) {
+            selfDeliveryFeeForBuyer = findFeeForState(group.selfDeliveryPricing || [], shippingAddress?.state || '');
+            if (selfDeliveryFeeForBuyer === null) {
               throw new AppError(
                 `${group.vendorName} does not self-deliver to ${shippingAddress?.state || 'your state'}. Please pick a different delivery option.`,
                 400
@@ -1011,7 +1005,7 @@
             shippingCost = vd != null ? (vd.price ?? 0) : this.getDefaultRate(deliveryType);
             courierLabel = vd?.courier || selectedCourier;
           } else if (requestedMode === 'SELF_DELIVERY') {
-            shippingCost = group.selfDeliveryFee;
+            shippingCost = selfDeliveryFeeForBuyer ?? 0;
             courierLabel = 'Vendor delivery';
           } else if (requestedMode === 'PICKUP') {
             shippingCost = 0;
@@ -1921,6 +1915,16 @@
                 400
               );
             }
+            let selfDeliveryFeeForBuyer: number | null = null;
+            if (requestedMode === 'SELF_DELIVERY') {
+              selfDeliveryFeeForBuyer = findFeeForState(group.selfDeliveryPricing || [], shippingAddress?.state || '');
+              if (selfDeliveryFeeForBuyer === null) {
+                throw new AppError(
+                  `${group.vendorName} does not self-deliver to ${shippingAddress?.state || 'your state'}. Please pick a different delivery option.`,
+                  400
+                );
+              }
+            }
 
             let shippingCost = 0;
             let courierLabel: string | undefined = undefined;
@@ -1928,7 +1932,7 @@
               shippingCost = vd != null ? (vd.price ?? 0) : this.getDefaultRate(deliveryType);
               courierLabel = vd?.courier || selectedCourier;
             } else if (requestedMode === 'SELF_DELIVERY') {
-              shippingCost = group.selfDeliveryFee;
+              shippingCost = selfDeliveryFeeForBuyer ?? 0;
               courierLabel = 'Vendor delivery';
             } else if (requestedMode === 'PICKUP') {
               shippingCost = 0;
@@ -4414,8 +4418,7 @@
               country: vendorShipment.origin.country,
             } : undefined,
             deliveryModes: (vendorProfile?.deliveryModes as any) || ['VENDORSPOT_DELIVERY'],
-            selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
-            selfDeliveryStates: Array.isArray(vendorProfile?.selfDeliveryStates) ? vendorProfile.selfDeliveryStates : [],
+            selfDeliveryPricing: readSelfDeliveryPricing(vendorProfile),
             items: vendorItems.map((item: any) => {
               const product = item.product as any;
               const productType = product?.productType?.toUpperCase() || item.productType?.toUpperCase();
@@ -5089,8 +5092,7 @@
             }
           : undefined,
         deliveryModes: (vendorProfile?.deliveryModes as any) || ['VENDORSPOT_DELIVERY'],
-        selfDeliveryFee: Number(vendorProfile?.selfDeliveryFee) || 0,
-        selfDeliveryStates: Array.isArray(vendorProfile?.selfDeliveryStates) ? vendorProfile.selfDeliveryStates : [],
+        selfDeliveryPricing: readSelfDeliveryPricing(vendorProfile),
         items: vendorItems.map((item: any) => {
           const product = item.product as any;
           const productType =

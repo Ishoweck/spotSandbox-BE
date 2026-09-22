@@ -104,12 +104,15 @@ export interface IVendorProfile extends Document {
     reuploadEmailSentCount?: number;
   };
   deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
-  selfDeliveryFee: number;
-  // Nigerian states the vendor is willing to self-deliver to. Empty array
-  // means SELF_DELIVERY isn't offered anywhere (defensive) — the controller
-  // seeds this with [businessAddress.state] when the mode is enabled without
-  // an explicit list.
-  selfDeliveryStates: string[];
+  // Per-state self-delivery pricing. Each entry is a Nigerian state the vendor
+  // is willing to self-deliver to and the flat fee for that state. Empty
+  // array means SELF_DELIVERY isn't offered anywhere yet.
+  selfDeliveryPricing: { state: string; fee: number }[];
+  // Legacy flat fee + state list kept on the schema so historical documents
+  // still translate cleanly to the new pricing map at read time. Do not read
+  // these directly outside the migration helper.
+  selfDeliveryFee?: number;
+  selfDeliveryStates?: string[];
   selfDeliveryAcceptedAt?: Date;
   pickupAcceptedAt?: Date;
   pickupAddress?: {
@@ -334,6 +337,15 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
       message: 'At least one delivery mode is required',
     },
   },
+  selfDeliveryPricing: {
+    type: [{
+      _id: false,
+      state: { type: String, required: true },
+      fee: { type: Number, required: true, min: 0 },
+    }],
+    default: [],
+  },
+  // Legacy fields — kept for read-time backward compat. New writes zero these.
   selfDeliveryFee: {
     type: Number,
     default: 0,

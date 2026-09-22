@@ -29,10 +29,9 @@ export interface VendorGroup {
   // Vendor-configured delivery options (setup screen). Only these modes are
   // shown to the buyer at checkout for items in this group.
   deliveryModes: ('VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP')[];
-  selfDeliveryFee: number;
-  // Nigerian states the vendor is willing to self-deliver to. Filtered
-  // against the buyer's shipping state when surfacing SELF_DELIVERY.
-  selfDeliveryStates: string[];
+  // Per-state self-delivery pricing. SELF_DELIVERY is only offered when the
+  // buyer's state appears here; the fee shown at checkout is the entry's fee.
+  selfDeliveryPricing: { state: string; fee: number }[];
   vendorPickupAddress?: {
     street: string;
     city: string;

@@ -19,6 +19,7 @@ import { notificationService } from '../services/notification.service';
 import { gatherStatementData, generateStatementPDF } from '../services/statement.service';
 import { sendEmail } from '../utils/email';
 import { generateSlug } from '../utils/helpers';
+import { readSelfDeliveryPricing } from '../utils/selfDeliveryPricing';
 import { verifyNINWithSelfie } from '../services/dojah.service';
 import { trackEvent, SlackEvent } from '../utils/slack-events';
 
@@ -109,8 +110,7 @@ type DeliveryMode = typeof ALLOWED_DELIVERY_MODES[number];
 
 interface DeliveryModeInput {
   deliveryModes?: string[];
-  selfDeliveryFee?: number;
-  selfDeliveryStates?: string[];
+  selfDeliveryPricing?: Array<{ state?: string; fee?: number | string }>;
   selfDeliveryAccepted?: boolean;
   pickupAccepted?: boolean;
   pickupAddress?: {
@@ -127,11 +127,9 @@ interface DeliveryModeInput {
   existingPickup?: any;
   existingSelfAcceptedAt?: Date;
   existingPickupAcceptedAt?: Date;
-  existingSelfDeliveryStates?: string[];
+  existingSelfDeliveryPricing?: Array<{ state: string; fee: number }>;
   // Used when the vendor enables PICKUP without supplying a dedicated pickup
   // address — we auto-copy the business address as PENDING for admin review.
-  // The state is also used to seed selfDeliveryStates when self-delivery is
-  // enabled without an explicit service-area list.
   fallbackBusinessAddress?: {
     street?: string;
     city?: string;
@@ -142,8 +140,7 @@ interface DeliveryModeInput {
 
 function resolveDeliveryModeInput(input: DeliveryModeInput): {
   modes: DeliveryMode[];
-  feeToStore: number;
-  selfDeliveryStatesToStore: string[];
+  selfDeliveryPricingToStore: Array<{ state: string; fee: number }>;
   selfAcceptedAt?: Date;
   pickupAcceptedAt?: Date;
   pickupAddressDoc?: any;
@@ -161,26 +158,27 @@ function resolveDeliveryModeInput(input: DeliveryModeInput): {
   const wantsSelf = modes.includes('SELF_DELIVERY');
   const wantsPickup = modes.includes('PICKUP');
 
-  const feeToStore = wantsSelf ? Math.max(0, Number(input.selfDeliveryFee) || 0) : 0;
-
-  // Service-area list — only meaningful when SELF_DELIVERY is enabled. Prefer
-  // an explicit list from the client, fall back to what's already stored,
-  // otherwise seed with the business-address state so a vendor can't
-  // accidentally offer to self-deliver nationwide at a Lagos-only flat fee.
-  let selfDeliveryStatesToStore: string[] = [];
+  // Per-state pricing map — only meaningful when SELF_DELIVERY is enabled.
+  // We allow an empty list at save time so a vendor can opt into the mode
+  // during onboarding and configure prices later in settings. The rate-quote
+  // filter is the actual gate that decides whether SELF_DELIVERY is offered
+  // to a given buyer.
+  let selfDeliveryPricingToStore: Array<{ state: string; fee: number }> = [];
   if (wantsSelf) {
-    const incomingStates = Array.isArray(input.selfDeliveryStates)
-      ? input.selfDeliveryStates.map((s) => String(s).trim()).filter(Boolean)
-      : undefined;
-    if (incomingStates && incomingStates.length > 0) {
-      selfDeliveryStatesToStore = Array.from(new Set(incomingStates));
-    } else if (input.existingSelfDeliveryStates && input.existingSelfDeliveryStates.length > 0) {
-      selfDeliveryStatesToStore = input.existingSelfDeliveryStates;
-    } else if (input.fallbackBusinessAddress?.state) {
-      selfDeliveryStatesToStore = [String(input.fallbackBusinessAddress.state).trim()].filter(Boolean);
-    }
-    if (selfDeliveryStatesToStore.length === 0) {
-      throw new AppError('Pick at least one state you can self-deliver to', 400);
+    const rawIncoming = Array.isArray(input.selfDeliveryPricing) ? input.selfDeliveryPricing : undefined;
+    if (rawIncoming) {
+      const seen = new Set<string>();
+      for (const row of rawIncoming) {
+        const state = String(row?.state || '').trim();
+        if (!state) continue;
+        const fee = Math.max(0, Number(row?.fee) || 0);
+        const key = state.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        selfDeliveryPricingToStore.push({ state, fee });
+      }
+    } else if (input.existingSelfDeliveryPricing && input.existingSelfDeliveryPricing.length > 0) {
+      selfDeliveryPricingToStore = input.existingSelfDeliveryPricing;
     }
   }
 
@@ -247,13 +245,13 @@ function resolveDeliveryModeInput(input: DeliveryModeInput): {
 
   return {
     modes,
-    feeToStore,
-    selfDeliveryStatesToStore,
+    selfDeliveryPricingToStore,
     selfAcceptedAt,
     pickupAcceptedAt: pickupAcceptedAtOut,
     pickupAddressDoc,
   };
 }
+
 
 export class VendorController {
   /**
@@ -575,8 +573,7 @@ export class VendorController {
       businessEmail,
       businessWebsite,
       deliveryModes,
-      selfDeliveryFee,
-      selfDeliveryStates,
+      selfDeliveryPricing,
       selfDeliveryAccepted,
       pickupAccepted,
       pickupAddress,
@@ -589,11 +586,10 @@ export class VendorController {
 
     const slug = await buildUniqueVendorSlug(businessName);
 
-    const { modes, feeToStore, selfDeliveryStatesToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
+    const { modes, selfDeliveryPricingToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
       resolveDeliveryModeInput({
         deliveryModes,
-        selfDeliveryFee,
-        selfDeliveryStates,
+        selfDeliveryPricing,
         selfDeliveryAccepted,
         pickupAccepted,
         pickupAddress,
@@ -611,8 +607,11 @@ export class VendorController {
       businessWebsite,
       followers: [],
       deliveryModes: modes,
-      selfDeliveryFee: feeToStore,
-      selfDeliveryStates: selfDeliveryStatesToStore,
+      selfDeliveryPricing: selfDeliveryPricingToStore,
+      // Zero the legacy fields on any new-shape write so stale data can't
+      // leak back into a subsequent read via the legacy fallback path.
+      selfDeliveryFee: 0,
+      selfDeliveryStates: [],
       selfDeliveryAcceptedAt: selfAcceptedAt,
       pickupAcceptedAt: pickupAcceptedAt,
       pickupAddress: pickupAddressDoc,
@@ -719,7 +718,7 @@ export class VendorController {
     // Cosmetic fields: always allowed, no rate-limit, no re-review
     const cosmeticFields = ['businessDescription', 'businessLogo', 'businessBanner', 'businessWebsite', 'storefront', 'socialMedia'];
     // Delivery mode fields: allowed anytime, no re-review, handled by shared helper
-    const deliveryFields = ['deliveryModes', 'selfDeliveryFee', 'selfDeliveryStates', 'selfDeliveryAccepted', 'pickupAccepted', 'pickupAddress'];
+    const deliveryFields = ['deliveryModes', 'selfDeliveryPricing', 'selfDeliveryAccepted', 'pickupAccepted', 'pickupAddress'];
 
     const incomingKeys = Object.keys(req.body);
     const touchesSensitive = sensitiveFields.some((f) => incomingKeys.includes(f));
@@ -752,15 +751,15 @@ export class VendorController {
       const nextModes = Array.isArray(req.body.deliveryModes)
         ? req.body.deliveryModes
         : vendorProfile.deliveryModes;
-      const nextFee = req.body.selfDeliveryFee !== undefined
-        ? req.body.selfDeliveryFee
-        : vendorProfile.selfDeliveryFee;
 
-      const { modes, feeToStore, selfDeliveryStatesToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
+      // Use the read-time translator so legacy vendors (flat fee + state list)
+      // seamlessly become per-state pricing on their next save.
+      const existingPricing = readSelfDeliveryPricing(vendorProfile);
+
+      const { modes, selfDeliveryPricingToStore, selfAcceptedAt, pickupAcceptedAt, pickupAddressDoc } =
         resolveDeliveryModeInput({
           deliveryModes: nextModes as string[],
-          selfDeliveryFee: nextFee,
-          selfDeliveryStates: req.body.selfDeliveryStates,
+          selfDeliveryPricing: req.body.selfDeliveryPricing,
           selfDeliveryAccepted: req.body.selfDeliveryAccepted,
           pickupAccepted: req.body.pickupAccepted,
           pickupAddress: req.body.pickupAddress,
@@ -768,13 +767,14 @@ export class VendorController {
           existingPickup: vendorProfile.pickupAddress,
           existingSelfAcceptedAt: vendorProfile.selfDeliveryAcceptedAt,
           existingPickupAcceptedAt: vendorProfile.pickupAcceptedAt,
-          existingSelfDeliveryStates: vendorProfile.selfDeliveryStates,
+          existingSelfDeliveryPricing: existingPricing,
           fallbackBusinessAddress: vendorProfile.businessAddress as any,
         });
 
       vendorProfile.deliveryModes = modes;
-      vendorProfile.selfDeliveryFee = feeToStore;
-      vendorProfile.selfDeliveryStates = selfDeliveryStatesToStore;
+      vendorProfile.selfDeliveryPricing = selfDeliveryPricingToStore as any;
+      vendorProfile.selfDeliveryFee = 0;
+      vendorProfile.selfDeliveryStates = [];
       vendorProfile.selfDeliveryAcceptedAt = selfAcceptedAt;
       vendorProfile.pickupAcceptedAt = pickupAcceptedAt;
       if (pickupAddressDoc !== undefined) {
@@ -2224,7 +2224,7 @@ export class VendorController {
 
     const { pickupAddressDoc, pickupAcceptedAt } = resolveDeliveryModeInput({
       deliveryModes: modes,
-      selfDeliveryFee: vendorProfile.selfDeliveryFee,
+      selfDeliveryPricing: readSelfDeliveryPricing(vendorProfile),
       selfDeliveryAccepted: false,
       pickupAccepted: pickupAccepted === true,
       pickupAddress,
