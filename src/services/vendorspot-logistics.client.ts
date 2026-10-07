@@ -55,6 +55,9 @@ export interface LogisticsQuoteRequest {
 export interface LogisticsQuoteOption {
   id: string;
   carrierId: string;
+  carrierCode: string;
+  carrierName: string;
+  carrierLogoUrl: string | null;
   service: string;
   subCarrier: string | null;
   priceKobo: number;
@@ -66,6 +69,43 @@ export interface LogisticsQuoteResponse {
   expiresAt: string;
   options: LogisticsQuoteOption[];
   unavailable: Array<{ carrier: string; reason: string }>;
+}
+
+export interface LogisticsContact {
+  name: string;
+  phone: string;
+  email?: string;
+  altPhone?: string;
+}
+
+export interface LogisticsShipmentRequest {
+  quoteId: string;
+  selectedOptionId: string;
+  sender: LogisticsContact;
+  recipient: LogisticsContact;
+  externalReference?: string;
+  notes?: string;
+  idempotencyKey: string;
+}
+
+export interface LogisticsShipmentResponse {
+  id: string;
+  status: string;
+  carrierShipmentId: string | null;
+  carrierTrackingNumber: string | null;
+  labelUrl: string | null;
+  externalReference: string | null;
+  quotedPriceKobo: number;
+  chargedToMerchantKobo: number;
+  createdAt: string;
+}
+
+export interface ShipmentResult {
+  ok: boolean;
+  data?: LogisticsShipmentResponse;
+  error?: string;
+  category?: 'timeout' | 'network' | 'http' | 'config' | 'other';
+  durationMs: number;
 }
 
 // Single-shape result (parent repo has strictNullChecks off, so discriminated
@@ -125,6 +165,69 @@ export class VendorSpotLogisticsClient {
       }
       // Never re-throw — shadow path must be safe
       logger.warn('[LogisticsClient] Unexpected error:', err);
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        category: 'other',
+        durationMs,
+      };
+    }
+  }
+
+  // Book a shipment against a prior quote + selected option. Unlike getQuote,
+  // this one COSTS money (debits the merchant wallet in VSL and places a real
+  // order with the carrier), so callers must only invoke it after payment
+  // success. idempotencyKey is required by the server; reuse the same key on
+  // retries to avoid double-booking.
+  async createShipment(
+    req: LogisticsShipmentRequest,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  ): Promise<ShipmentResult> {
+    if (!LOGISTICS_MERCHANT_ID) {
+      return {
+        ok: false,
+        error: 'LOGISTICS_SHADOW_MERCHANT_ID env var is not set',
+        category: 'config',
+        durationMs: 0,
+      };
+    }
+
+    const { idempotencyKey, ...body } = req;
+    const start = Date.now();
+    try {
+      const res = await axios.post<LogisticsShipmentResponse>(
+        `${LOGISTICS_SERVICE_URL}/v1/shipments`,
+        body,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Merchant-Id': LOGISTICS_MERCHANT_ID,
+            'Idempotency-Key': idempotencyKey,
+          },
+          timeout: timeoutMs,
+          validateStatus: () => true,
+        },
+      );
+      const durationMs = Date.now() - start;
+      if (res.status >= 200 && res.status < 300) {
+        return { ok: true, data: res.data, durationMs };
+      }
+      return {
+        ok: false,
+        error: `HTTP ${res.status}: ${extractErrorMessage(res.data)}`,
+        category: 'http',
+        durationMs,
+      };
+    } catch (err) {
+      const durationMs = Date.now() - start;
+      if (axios.isAxiosError(err)) {
+        const axErr = err as AxiosError;
+        if (axErr.code === 'ECONNABORTED' || axErr.message.includes('timeout')) {
+          return { ok: false, error: `timeout after ${timeoutMs}ms`, category: 'timeout', durationMs };
+        }
+        return { ok: false, error: axErr.message, category: 'network', durationMs };
+      }
+      logger.warn('[LogisticsClient] createShipment unexpected error:', err);
       return {
         ok: false,
         error: err instanceof Error ? err.message : String(err),

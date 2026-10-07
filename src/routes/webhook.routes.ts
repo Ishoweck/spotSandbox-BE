@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { webhookController, handleResendWebhook, handlePaystackWebhook, handleFlutterwaveWebhook } from '../controllers/webhook.controller';
 import { adminWebhookController } from '../controllers/admin-webhook.controller';
+import { handleVslWebhook } from '../controllers/vendorspot-logistics-webhook.controller';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../utils/ayncHandler';
 import { UserRole } from '../types';
@@ -23,6 +24,9 @@ router.post(
   '/shipbubble',
   asyncHandler(webhookController.handleShipBubbleWebhook.bind(webhookController))
 );
+
+// VendorSpot Logistics (our own aggregator) delivery status updates — HMAC-signed
+router.post('/vsl', asyncHandler(handleVslWebhook));
 
 // Resend email delivery status updates (delivered, bounced, complained)
 router.post(

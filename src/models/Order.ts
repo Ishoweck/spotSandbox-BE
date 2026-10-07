@@ -32,6 +32,16 @@ export interface IVendorShipment {
     instructions?: string;
   };
   buyerConfirmedAt?: Date;
+
+  // VendorSpot Logistics (VSL) — our own aggregator. Populated when VSL_FORCE=true
+  // bypasses ShipBubble, or when running the shadow-create loop. Status is updated
+  // by inbound webhooks from the VSL service, independent of ShipBubble's own status.
+  vslQuoteId?: string;
+  vslQuoteOptionId?: string;
+  vslShipmentId?: string;
+  vslTrackingNumber?: string;
+  vslStatus?: 'pending' | 'confirmed' | 'picked_up' | 'in_transit' | 'delivered' | 'cancelled' | 'failed';
+  vslStatusAt?: Date;
 }
 
 export interface IOrder extends Document {
@@ -191,6 +201,17 @@ const vendorShipmentSchema = new Schema<IVendorShipment>({
     instructions: String,
   },
   buyerConfirmedAt: Date,
+
+  // VSL (VendorSpot Logistics) parallel fields — see IVendorShipment above
+  vslQuoteId: String,
+  vslQuoteOptionId: String,
+  vslShipmentId: String,
+  vslTrackingNumber: String,
+  vslStatus: {
+    type: String,
+    enum: ['pending', 'confirmed', 'picked_up', 'in_transit', 'delivered', 'cancelled', 'failed'],
+  },
+  vslStatusAt: Date,
 }, { _id: false });
 
 const orderSchema = new Schema<IOrder>({
@@ -325,6 +346,7 @@ orderSchema.index({ trackingNumber: 1 });
 orderSchema.index({ shipmentId: 1 });
 orderSchema.index({ 'vendorShipments.vendor': 1 });
 orderSchema.index({ 'vendorShipments.trackingNumber': 1 });
+orderSchema.index({ 'vendorShipments.vslShipmentId': 1 }); // VSL webhook lookup
 orderSchema.index({ isDigital: 1 }); // ✅ ADDED index
 
 const Order = mongoose.model<IOrder>('Order', orderSchema);

@@ -17,6 +17,7 @@
   import { paystackService } from '../services/paystack.service';
   import { flutterwaveService } from '../services/flutterwave.service';
   import { shipBubbleService } from '../services/shipbubble.service';
+  import { vendorSpotLogisticsClient } from '../services/vendorspot-logistics.client';
   import { logisticsShadowQueue } from '../queues/logistics-shadow.queue';
   import { sendOrderConfirmationEmail } from '../utils/email';
   import { enqueueEmail, EmailJobType } from '../utils/email-queue';
@@ -479,6 +480,72 @@
 
         const vendorProfile = await VendorProfile.findOne({ user: vendorGroup.vendorId });
         const vendor = await User.findById(vendorGroup.vendorId);
+
+        // ─── VSL_FORCE branch — bypass ShipBubble entirely ────────────────────
+        // When VSL_FORCE=true, route this vendor's quote through our own
+        // logistics engine. Returns rates in the same DeliveryRateResponse
+        // shape so the frontend doesn't need to change. The booking step
+        // (createOrder/verifyPayment) re-quotes to get fresh prices + a new
+        // selectedOptionId at order-creation time, matching how ShipBubble
+        // works today.
+        if (process.env.VSL_FORCE === 'true') {
+          const pickup = vendorGroup.pickupAddress || vendorProfile?.businessAddress;
+          if (!pickup?.city || !pickup?.state) {
+            logger.warn(`[VSL_FORCE] Vendor ${vendorGroup.vendorName} has no usable pickup address — fallback`);
+            result.rates.push(...this.getVendorFallbackRates());
+            return result;
+          }
+          const totalWeightGrams = Math.max(
+            100,
+            physicalItems.reduce((sum, i) => sum + Math.round((i.weight || 0.5) * 1000) * (i.quantity || 1), 0),
+          );
+          const totalValueKobo = Math.max(
+            100,
+            physicalItems.reduce((sum, i) => sum + Math.round((i.price || 0) * 100) * (i.quantity || 1), 0),
+          );
+          const vslQuote = await vendorSpotLogisticsClient.getQuote({
+            origin: {
+              line1: pickup.street || `${pickup.city} area`,
+              city: pickup.city,
+              state: pickup.state,
+              country: pickup.country || 'Nigeria',
+              countryCode: 'NG',
+            },
+            destination: {
+              line1: destination.street || `${destination.city} area`,
+              city: destination.city,
+              state: destination.state,
+              country: 'Nigeria',
+              countryCode: 'NG',
+            },
+            packages: [{
+              description: physicalItems.map((i) => i.productName).join(', ').slice(0, 500) || 'Order items',
+              weightGrams: totalWeightGrams,
+              quantity: 1,
+              declaredValueKobo: totalValueKobo,
+            }],
+          });
+          if (vslQuote.ok && vslQuote.data?.options?.length) {
+            logger.info(`[VSL_FORCE] ✓ Got ${vslQuote.data.options.length} VSL options in ${vslQuote.durationMs}ms`);
+            vslQuote.data.options.forEach((opt, idx) => {
+              result.rates.push({
+                type: `vsl_${opt.carrierCode}_${idx}`,
+                name: opt.carrierName,
+                description: opt.etaHours ? `~${opt.etaHours}h delivery` : 'Standard delivery',
+                price: opt.priceKobo / 100,
+                estimatedDays: opt.etaHours ? `~${opt.etaHours}h` : '1-3 days',
+                courier: opt.carrierName,
+                logo: opt.carrierLogoUrl || undefined,
+              });
+            });
+            result.success = true;
+            return result;
+          }
+          logger.warn(`[VSL_FORCE] VSL quote failed: ${vslQuote.error || 'no options'} — falling back`);
+          result.rates.push(...this.getVendorFallbackRates());
+          return result;
+        }
+        // ─── end VSL_FORCE branch ─────────────────────────────────────────────
 
         // Prefer the product-level pickup address; fall back to vendor business address
         const productPickup = vendorGroup.pickupAddress;
@@ -2586,6 +2653,100 @@
 
           // ✅ FIX: Determine category for ShipBubble
           const categoryId = this.determineCategoryForItems(physicalItems);
+
+          // ─── VSL_FORCE branch — bypass ShipBubble, book via our own aggregator ──
+          // Does the full quote → createShipment round-trip in one go. If it
+          // throws, the outer catch at the end of this iteration clears the
+          // reservation sentinel so the vendor can be retried. We `continue`
+          // on success — the ShipBubble code below is skipped entirely.
+          if (process.env.VSL_FORCE === 'true') {
+            const vslQuoteRes = await vendorSpotLogisticsClient.getQuote({
+              origin: {
+                line1: senderOrigin.street || `${senderOrigin.city} area`,
+                city: senderOrigin.city,
+                state: senderOrigin.state,
+                country: senderOrigin.country || 'Nigeria',
+                countryCode: 'NG',
+              },
+              destination: {
+                line1: order.shippingAddress.street || `${order.shippingAddress.city} area`,
+                city: order.shippingAddress.city,
+                state: order.shippingAddress.state,
+                country: order.shippingAddress.country || 'Nigeria',
+                countryCode: 'NG',
+              },
+              packages: [{
+                description: physicalItems.map((i: any) => i.productName).join(', ').slice(0, 500) || 'Order items',
+                weightGrams: Math.max(100, physicalItems.reduce((s: number, i: any) => s + Math.round((i.weight || 0.5) * 1000) * (i.quantity || 1), 0)),
+                quantity: 1,
+                declaredValueKobo: Math.max(100, physicalItems.reduce((s: number, i: any) => s + Math.round((i.price || 0) * 100) * (i.quantity || 1), 0)),
+              }],
+            });
+            if (!vslQuoteRes.ok || !vslQuoteRes.data?.options?.length) {
+              throw new Error(`[VSL_FORCE] quote failed: ${vslQuoteRes.error || 'no options'}`);
+            }
+            const picked = vslQuoteRes.data.options.reduce(
+              (min, o) => (o.priceKobo < min.priceKobo ? o : min),
+              vslQuoteRes.data.options[0],
+            );
+            logger.info(`[VSL_FORCE] Picked ${picked.carrierName} ₦${picked.priceKobo / 100} for ${group.vendorName}`);
+
+            const vslShip = await vendorSpotLogisticsClient.createShipment({
+              quoteId: vslQuoteRes.data.id,
+              selectedOptionId: picked.id,
+              sender: {
+                name: senderAddress.name,
+                phone: senderAddress.phone,
+                email: senderAddress.email,
+              },
+              recipient: {
+                name: receiverAddress.name,
+                phone: receiverAddress.phone,
+                email: receiverAddress.email,
+              },
+              externalReference: `${order.orderNumber}:${group.vendorId}`,
+              idempotencyKey: `${order._id}:${group.vendorId}`,
+            });
+            if (!vslShip.ok || !vslShip.data) {
+              throw new Error(`[VSL_FORCE] shipment create failed: ${vslShip.error || 'unknown'}`);
+            }
+            logger.info(`[VSL_FORCE] ✓ Shipment ${vslShip.data.id} created for ${group.vendorName}`);
+
+            const trackingNumber = vslShip.data.carrierTrackingNumber || vslShip.data.id;
+            await Order.updateOne(
+              { _id: order._id, 'vendorShipments.vendor': vendorObjectId },
+              {
+                $set: {
+                  'vendorShipments.$.trackingNumber':    trackingNumber,
+                  'vendorShipments.$.shipmentId':        vslShip.data.id,
+                  'vendorShipments.$.courier':           picked.carrierName,
+                  'vendorShipments.$.status':            'created',
+                  'vendorShipments.$.shippingCost':      picked.priceKobo / 100,
+                  'vendorShipments.$.vslQuoteId':        vslQuoteRes.data.id,
+                  'vendorShipments.$.vslQuoteOptionId':  picked.id,
+                  'vendorShipments.$.vslShipmentId':     vslShip.data.id,
+                  'vendorShipments.$.vslTrackingNumber': vslShip.data.carrierTrackingNumber,
+                },
+              },
+            );
+            const inMemVS = (order.vendorShipments || []).find((vs: any) => {
+              const vid = typeof vs.vendor === 'object' ? vs.vendor._id?.toString() : vs.vendor?.toString();
+              return vid === group.vendorId;
+            });
+            if (inMemVS) {
+              inMemVS.trackingNumber    = trackingNumber;
+              inMemVS.shipmentId        = vslShip.data.id;
+              inMemVS.courier           = picked.carrierName;
+              inMemVS.status            = 'created';
+              inMemVS.shippingCost      = picked.priceKobo / 100;
+              inMemVS.vslQuoteId        = vslQuoteRes.data.id;
+              inMemVS.vslQuoteOptionId  = picked.id;
+              inMemVS.vslShipmentId     = vslShip.data.id;
+              inMemVS.vslTrackingNumber = vslShip.data.carrierTrackingNumber;
+            }
+            continue;
+          }
+          // ─── end VSL_FORCE branch ──────────────────────────────────────────
 
           // Use stored ShipBubble address codes when available — skips redundant validation
           // and avoids re-hitting name-format errors on already-validated addresses.

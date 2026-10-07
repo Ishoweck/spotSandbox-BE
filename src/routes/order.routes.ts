@@ -55,7 +55,7 @@ const createOrderValidation = [
     .optional()
     .custom((value) => {
       const valid = ['standard', 'express', 'same_day', 'pickup', 'digital'];
-      if (valid.includes(value) || /^courier_.+$/.test(value)) return true;
+      if (valid.includes(value) || /^courier_.+$/.test(value) || /^vsl_.+$/.test(value)) return true;
       throw new Error('Invalid delivery type');
     }),
 ];
@@ -70,7 +70,7 @@ const initializePaymentValidation = [
     .optional()
     .custom((value) => {
       const valid = ['standard', 'express', 'same_day', 'pickup', 'digital'];
-      if (valid.includes(value) || /^courier_.+$/.test(value)) return true;
+      if (valid.includes(value) || /^courier_.+$/.test(value) || /^vsl_.+$/.test(value)) return true;
       throw new Error('Invalid delivery type');
     }),
 ];
