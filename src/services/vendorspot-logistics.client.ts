@@ -9,14 +9,34 @@
 //   the real ShipBubble flow, no matter what happens on our end.
 // - Tight timeout (default 5s) so a slow logistics service doesn't drag out
 //   the worker.
-// - Auth is by X-Merchant-Id header; VendorSpot has a single merchant record
-//   on the logistics side (id set via LOGISTICS_SHADOW_MERCHANT_ID env var).
+// - Auth: in prod we send `Authorization: Bearer ${VSL_API_KEY}` (Phase 7 API
+//   key path — the key itself identifies the merchant on VSL's side). In local
+//   dev / shadow mode where no API key exists we fall back to the legacy
+//   `X-Merchant-Id` header driven by LOGISTICS_SHADOW_MERCHANT_ID.
 
 import axios, { AxiosError } from 'axios';
 import { logger } from '../utils/logger';
 
 const LOGISTICS_SERVICE_URL = process.env.LOGISTICS_SERVICE_URL || 'http://localhost:4000';
 const LOGISTICS_MERCHANT_ID = process.env.LOGISTICS_SHADOW_MERCHANT_ID || '';
+const VSL_API_KEY = process.env.VSL_API_KEY || '';
+
+function buildAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const base: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+  if (VSL_API_KEY) {
+    base.Authorization = `Bearer ${VSL_API_KEY}`;
+    return base;
+  }
+  if (LOGISTICS_MERCHANT_ID) {
+    base['X-Merchant-Id'] = LOGISTICS_MERCHANT_ID;
+    return base;
+  }
+  return base;
+}
+
+function hasAuth(): boolean {
+  return Boolean(VSL_API_KEY || LOGISTICS_MERCHANT_ID);
+}
 // 5s was too tight — a real quote fans out to Fez + Kwik + other adapters,
 // each with their own network round-trip to a Nigerian sandbox. Cold-path
 // requests are ~4-5s at the p50, so 5s would timeout on any jitter. 12s gives
@@ -121,10 +141,10 @@ export interface QuoteResult {
 
 export class VendorSpotLogisticsClient {
   async getQuote(req: LogisticsQuoteRequest, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<QuoteResult> {
-    if (!LOGISTICS_MERCHANT_ID) {
+    if (!hasAuth()) {
       return {
         ok: false,
-        error: 'LOGISTICS_SHADOW_MERCHANT_ID env var is not set',
+        error: 'Neither VSL_API_KEY nor LOGISTICS_SHADOW_MERCHANT_ID is set',
         category: 'config',
         durationMs: 0,
       };
@@ -136,10 +156,7 @@ export class VendorSpotLogisticsClient {
         `${LOGISTICS_SERVICE_URL}/v1/quotes`,
         req,
         {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Merchant-Id': LOGISTICS_MERCHANT_ID,
-          },
+          headers: buildAuthHeaders(),
           timeout: timeoutMs,
           validateStatus: () => true, // handle all statuses ourselves
         },
@@ -183,10 +200,10 @@ export class VendorSpotLogisticsClient {
     req: LogisticsShipmentRequest,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
   ): Promise<ShipmentResult> {
-    if (!LOGISTICS_MERCHANT_ID) {
+    if (!hasAuth()) {
       return {
         ok: false,
-        error: 'LOGISTICS_SHADOW_MERCHANT_ID env var is not set',
+        error: 'Neither VSL_API_KEY nor LOGISTICS_SHADOW_MERCHANT_ID is set',
         category: 'config',
         durationMs: 0,
       };
@@ -199,11 +216,7 @@ export class VendorSpotLogisticsClient {
         `${LOGISTICS_SERVICE_URL}/v1/shipments`,
         body,
         {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Merchant-Id': LOGISTICS_MERCHANT_ID,
-            'Idempotency-Key': idempotencyKey,
-          },
+          headers: buildAuthHeaders({ 'Idempotency-Key': idempotencyKey }),
           timeout: timeoutMs,
           validateStatus: () => true,
         },
