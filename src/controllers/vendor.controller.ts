@@ -223,7 +223,15 @@ function resolveDeliveryModeInput(input: DeliveryModeInput): {
         reviewedAt: status === 'APPROVED' ? existing.reviewedAt : undefined,
         reviewedBy: status === 'APPROVED' ? existing.reviewedBy : undefined,
       };
-    } else if (input.existingPickup) {
+    } else if (
+      input.existingPickup &&
+      (input.existingPickup.street || input.existingPickup.city || input.existingPickup.state)
+    ) {
+      // Treat an existing pickup as meaningful only when it actually carries a
+      // physical address. A bare `{ country: 'Nigeria' }` subdoc (produced by
+      // the VendorProfile schema's country default) must NOT be reused — fall
+      // through to the business-address fallback below so a real address gets
+      // written with status: 'PENDING'.
       pickupAddressDoc = input.existingPickup;
     } else if (input.fallbackBusinessAddress && input.fallbackBusinessAddress.street) {
       const fb = input.fallbackBusinessAddress;
