@@ -2316,18 +2316,32 @@ export class VendorController {
 
   /**
    * GET /vendor/admin/pickup-addresses/pending
-   * Returns vendors whose pickup address is awaiting review.
+   * Returns vendors with PICKUP enabled, optionally filtered by status.
+   * Query: ?status=pending|approved|rejected|all (default: pending)
+   * When status=all, also includes vendors who ticked PICKUP but have no
+   * pickupAddress on record — so admins can spot broken save paths.
    */
   async listPendingPickupAddresses(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const pending = await VendorProfile.find({
-      'pickupAddress.status': 'PENDING',
-    })
-      .select('user businessName businessPhone businessEmail pickupAddress createdAt')
+    const statusParam = String(req.query.status || 'pending').toUpperCase();
+    const validStatuses = ['PENDING', 'APPROVED', 'REJECTED'];
+
+    let query: any;
+    if (statusParam === 'ALL') {
+      // Any vendor who opted into PICKUP, regardless of address state.
+      query = { deliveryModes: 'PICKUP' };
+    } else if (validStatuses.includes(statusParam)) {
+      query = { 'pickupAddress.status': statusParam };
+    } else {
+      query = { 'pickupAddress.status': 'PENDING' };
+    }
+
+    const vendors = await VendorProfile.find(query)
+      .select('user businessName businessPhone businessEmail businessAddress deliveryModes pickupAddress pickupAcceptedAt createdAt')
       .populate('user', 'firstName lastName email phone')
-      .sort({ 'pickupAddress.submittedAt': 1 })
+      .sort({ 'pickupAddress.submittedAt': -1, createdAt: -1 })
       .lean();
 
-    res.json({ success: true, data: { vendors: pending } });
+    res.json({ success: true, data: { vendors } });
   }
 }
 
