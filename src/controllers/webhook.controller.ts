@@ -600,6 +600,7 @@ import { Notification, Wallet } from '../models/Additional';
 import Cart from '../models/Cart';
 import Product from '../models/Product';
 import User from '../models/User';
+import VendorProfile from '../models/VendorProfile';
 import { PendingPayment } from '../models/PendingPayment';
 import { paystackService } from '../services/paystack.service';
 import { emitNewOrder } from '../services/notification.service';
@@ -756,9 +757,18 @@ async function _fulfillOrder(reference: string, paidAmountNaira: number, metadat
     logger.warn(`[Paystack Webhook] Cart ${snapshot.cartId} empty/missing for ${reference} — creating partial order`);
   }
 
-  // Build vendorShipments from snapshot delivery data
+  // Build vendorShipments from snapshot delivery data.
+  // Only skip entirely for digital-only orders — the legacy `deliveryType === 'pickup'`
+  // short-circuit was for VS-HQ pickup and now wrongly kills shipments for
+  // vendor-selectable PICKUP orders. Per-vendor PICKUP is handled below via vd.mode.
   const vendorShipments: any[] = [];
-  if (!isDigitalOnly && snapshot.deliveryType !== 'pickup' && orderItems.length > 0) {
+  if (!isDigitalOnly && orderItems.length > 0) {
+    // Preload vendor profiles so we can snapshot their pickup address + business
+    // address, matching what createOrder/confirmPayment do.
+    const uniqueVendorIds = [...new Set(orderItems.map((i: any) => i.vendor.toString()))];
+    const vendorProfiles = await VendorProfile.find({ user: { $in: uniqueVendorIds } }).lean();
+    const profileByVendorId = new Map(vendorProfiles.map((vp: any) => [vp.user.toString(), vp]));
+
     const vendorItemMap = new Map<string, any[]>();
     for (const item of orderItems) {
       const vid = item.vendor.toString();
@@ -772,15 +782,52 @@ async function _fulfillOrder(reference: string, paidAmountNaira: number, metadat
       const vd = deliveries.find((v: any) => v.vendorId === vendorId)
              || breakdown.find((v: any) => v.vendorId === vendorId);
 
+      // Prefer explicit mode from the per-vendor payload. If missing, infer:
+      // when the whole order is pickup (deliveryType==='pickup') default to PICKUP,
+      // otherwise VENDORSPOT_DELIVERY. Never leave the field unset.
+      const requestedMode: 'VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP' =
+        (vd?.mode as any) ||
+        (snapshot.deliveryType === 'pickup' ? 'PICKUP' : 'VENDORSPOT_DELIVERY');
+
+      const vp: any = profileByVendorId.get(vendorId);
+      const business = vp?.businessAddress || {};
+      const pickup = vp?.pickupAddress || {};
+      const pickupApproved = requestedMode === 'PICKUP' && pickup?.status === 'APPROVED' && pickup?.street;
+
       vendorShipments.push({
         vendor:           vendorId,
-        vendorName:       '',
+        vendorName:       vp?.businessName || '',
         items:            productIds,
-        origin:           { street: '', city: '', state: '', country: 'Nigeria' },
-        shippingCost:     vd?.price ?? snapshot.selectedDeliveryPrice ?? 0,
-        courier:          vd?.courier || snapshot.selectedCourier || 'Standard',
-        requestedCourier: vd?.courier || snapshot.selectedCourier || 'Standard',
-        status:           'pending',
+        origin:           {
+          street:  business.street || '',
+          city:    business.city || '',
+          state:   business.state || '',
+          country: business.country || 'Nigeria',
+        },
+        shippingCost:     requestedMode === 'PICKUP' ? 0 : (vd?.price ?? snapshot.selectedDeliveryPrice ?? 0),
+        courier:          requestedMode === 'PICKUP'
+                            ? 'Pickup'
+                            : requestedMode === 'SELF_DELIVERY'
+                              ? 'Vendor delivery'
+                              : (vd?.courier || snapshot.selectedCourier || 'Standard'),
+        requestedCourier: requestedMode === 'PICKUP'
+                            ? 'Pickup'
+                            : requestedMode === 'SELF_DELIVERY'
+                              ? 'Vendor delivery'
+                              : (vd?.courier || snapshot.selectedCourier || 'Standard'),
+        // VENDORSPOT shipments wait for the vendor to confirm. Non-Vendorspot
+        // skips the courier step so we jump straight to 'confirmed' which the
+        // vendor can then advance via the mode-specific status flow.
+        status:           requestedMode === 'VENDORSPOT_DELIVERY' ? 'pending' : 'confirmed',
+        deliveryMode:     requestedMode,
+        pickupAddress:    pickupApproved ? {
+          street:       pickup.street,
+          city:         pickup.city,
+          state:        pickup.state,
+          country:      pickup.country || 'Nigeria',
+          landmark:     pickup.landmark,
+          instructions: pickup.instructions,
+        } : undefined,
       });
     }
   }
