@@ -92,7 +92,7 @@ const cancelOrderValidation = [
 ];
 
 const updateStatusValidation = [
-  body('status').isIn(['pending', 'confirmed', 'processing', 'shipped', 'in_transit', 'delivered', 'cancelled'])
+  body('status').isIn(['pending', 'confirmed', 'processing', 'shipped', 'in_transit', 'out_for_delivery', 'picked_up', 'delivered', 'cancelled'])
     .withMessage('Invalid status'),
 ];
 
