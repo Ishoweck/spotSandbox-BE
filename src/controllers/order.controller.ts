@@ -1025,11 +1025,15 @@
       }));
 
 
-      // Calculate shipping (skip for digital-only)
+      // Calculate shipping. Only skip entirely for digital-only orders. The
+      // legacy `deliveryType === 'pickup'` branch (which short-circuited the
+      // whole block) was for VS-HQ pickup and is no longer used — the new
+      // vendor-selectable PICKUP mode is handled per-vendor inside the loop,
+      // with shippingCost=0 and deliveryMode='PICKUP'.
     let totalShippingCost = 0;
     const vendorShipments = [];
 
-    if (!isDigitalOnly && deliveryType !== 'pickup') {
+    if (!isDigitalOnly) {
       logger.info('📦 Calculating shipping costs...');
 
       // ✅ NEW: Per-vendor delivery selections from new checkout UI
@@ -1965,7 +1969,10 @@
       let totalShippingCost = 0;
       const vendorShipments: any[] = [];
 
-      if (!isDigitalOnly && deliveryType !== 'pickup') {
+      // Only skip the shipping block for digital-only orders. The legacy
+      // `deliveryType === 'pickup'` short-circuit was for VS-HQ pickup — the
+      // new vendor-selectable PICKUP mode is handled per-vendor below.
+      if (!isDigitalOnly) {
         // ✅ NEW: per-vendor deliveries from new checkout UI
         if (snapshotVendorDeliveries && snapshotVendorDeliveries.length > 0) {
           for (const group of vendorGroups) {
