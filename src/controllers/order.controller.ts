@@ -1126,6 +1126,9 @@
               courier: vendorShipping?.courier || selectedCourier,
               requestedCourier: vendorShipping?.courier || selectedCourier,
               status: 'pending',
+              // Legacy path: defaults to Vendorspot courier. Non-Vendorspot modes
+              // must come through the vendorDeliveries payload above.
+              deliveryMode: 'VENDORSPOT_DELIVERY',
             });
 
             logger.info(`✅ Shipping for ${group.vendorName}: ₦${shippingCost} (${vendorShipping?.courier || selectedCourier})`);
@@ -1153,16 +1156,17 @@
               courier: selectedCourier,
               requestedCourier: selectedCourier,
               status: 'pending',
+              deliveryMode: 'VENDORSPOT_DELIVERY',
             });
 
             logger.info(`✅ Shipping for ${group.vendorName}: ₦${selectedDeliveryPrice} (${selectedCourier})`);
           }
         }
-      } 
+      }
       // ✅ FALLBACK ONLY IF NO PRICE PROVIDED
       else {
         logger.warn('⚠️ No delivery price provided - using fallback rates');
-        
+
         for (const group of vendorGroups) {
           const physicalItems = group.items.filter(item => item.isPhysical);
           if (physicalItems.length === 0) {
@@ -1182,6 +1186,7 @@
             courier: selectedCourier || 'Standard Courier',
             requestedCourier: selectedCourier || 'Standard Courier',
             status: 'pending',
+            deliveryMode: 'VENDORSPOT_DELIVERY',
           });
 
           logger.info(`⚠️ Using fallback for ${group.vendorName}: ₦${fallbackCost}`);
@@ -2041,6 +2046,7 @@
                 courier: vendorShipping?.courier || selectedCourier,
                 requestedCourier: vendorShipping?.courier || selectedCourier,
                 status: 'pending',
+                deliveryMode: 'VENDORSPOT_DELIVERY',
               });
             }
           } else {
@@ -2058,6 +2064,7 @@
                 courier: selectedCourier,
                 requestedCourier: selectedCourier,
                 status: 'pending',
+                deliveryMode: 'VENDORSPOT_DELIVERY',
               });
             }
           }
@@ -2076,6 +2083,7 @@
               courier: selectedCourier || 'Standard Courier',
               requestedCourier: selectedCourier || 'Standard Courier',
               status: 'pending',
+              deliveryMode: 'VENDORSPOT_DELIVERY',
             });
           }
         }
@@ -4093,8 +4101,8 @@
       if (shipment.status === 'cancelled') {
         throw new AppError('This shipment is already cancelled', 400);
       }
-      if (['shipped', 'in_transit', 'delivered'].includes(shipment.status)) {
-        throw new AppError('This shipment cannot be cancelled — it has already been shipped', 400);
+      if (['shipped', 'in_transit', 'out_for_delivery', 'picked_up', 'delivered'].includes(shipment.status)) {
+        throw new AppError('This shipment cannot be cancelled — it has already been shipped or received', 400);
       }
 
       // Mark the shipment cancelled
@@ -4419,6 +4427,13 @@
         if (vendorShipmentsList && vendorShipmentsList.length === 1) {
           (vendorShipmentsList[0] as any).status = status;
         }
+      }
+
+      // Stamp deliveredAt when the order reaches a terminal "buyer has goods"
+      // state. The 24-hour auto-complete job keys off this timestamp — without
+      // it, SELF_DELIVERY and PICKUP orders would never auto-release funds.
+      if (['delivered', 'picked_up'].includes(order.status) && !(order as any).deliveredAt) {
+        (order as any).deliveredAt = new Date();
       }
 
       await order.save();
@@ -5008,8 +5023,10 @@
         logger.error('Error crediting vendor wallet on vendor shipment completion:', walletError);
       }
 
-      // Check if all vendor shipments are now delivered
-      const allDelivered = shipments.every((s: any) => s.status === 'delivered' || s.status === 'cancelled');
+      // Check if all vendor shipments are now in a terminal state.
+      // 'picked_up' is the PICKUP mode terminal (buyer confirmed receipt),
+      // 'delivered' is the terminal for VENDORSPOT and SELF_DELIVERY.
+      const allDelivered = shipments.every((s: any) => ['delivered', 'picked_up', 'cancelled'].includes(s.status));
       if (allDelivered) {
         order.status = OrderStatus.DELIVERED;
         (order as any).deliveredAt = (order as any).deliveredAt || new Date();
@@ -5216,9 +5233,10 @@
 
     const allShipments = (order as any).vendorShipments || [];
 
-    // force=true: retry even when tracking exists (e.g. stale test-mode labels)
+    // force=true: retry even when tracking exists (e.g. stale test-mode labels).
+    // Treat picked_up and delivered as terminal — don't try to rebook a received shipment.
     const stuckShipments = force
-      ? allShipments.filter((vs: any) => vs.status !== 'delivered' && vs.status !== 'cancelled')
+      ? allShipments.filter((vs: any) => !['delivered', 'picked_up', 'cancelled'].includes(vs.status))
       : allShipments.filter((vs: any) => !vs.trackingNumber);
 
     if (stuckShipments.length === 0) {
@@ -5419,7 +5437,7 @@
       .populate('items.product');
     if (!order) throw new AppError('Order not found', 404);
 
-    if ([OrderStatus.DELIVERED, OrderStatus.REFUNDED, OrderStatus.CANCELLED].includes(order.status as any)) {
+    if ([OrderStatus.DELIVERED, OrderStatus.PICKED_UP, OrderStatus.REFUNDED, OrderStatus.CANCELLED].includes(order.status as any)) {
       throw new AppError(`Cannot rebook — order is ${order.status}`, 400);
     }
 
@@ -5443,7 +5461,7 @@
         shipment = shipments[0];
       }
       shipmentVendorId = typeof shipment.vendor === 'object' ? shipment.vendor._id?.toString() : shipment.vendor?.toString();
-      if (shipment.status === 'delivered') throw new AppError('Shipment already delivered', 400);
+      if (['delivered', 'picked_up'].includes(shipment.status)) throw new AppError('Shipment already received', 400);
     } else {
       // No vendorShipments — derive vendor from order.items
       const vendorIds = Array.from(

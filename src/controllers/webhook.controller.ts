@@ -266,12 +266,21 @@ export class WebhookController {
     const allStatuses = shipments.map((s: any) => s.status as string);
     const active = allStatuses.filter(s => s !== 'cancelled');
 
+    // 'picked_up' is the PICKUP terminal, 'out_for_delivery' sits between
+    // in_transit and delivered for SELF_DELIVERY. Treat both as late-stage
+    // so mixed-mode multi-vendor orders ladder correctly.
+    const terminal = ['delivered', 'picked_up'];
+    const inTransitOrLater = ['in_transit', 'out_for_delivery', ...terminal];
+    const shippedOrLater = ['shipped', ...inTransitOrLater];
+    const processingOrLater = ['processing', 'created', ...shippedOrLater];
+    const confirmedOrLater = ['confirmed', ...processingOrLater];
+
     if (allStatuses.every(s => s === 'cancelled')) return OrderStatus.CANCELLED;
-    if (active.every(s => s === 'delivered')) return OrderStatus.DELIVERED;
-    if (active.every(s => ['in_transit', 'delivered'].includes(s))) return OrderStatus.IN_TRANSIT;
-    if (active.every(s => ['shipped', 'in_transit', 'delivered'].includes(s))) return OrderStatus.SHIPPED;
-    if (active.every(s => ['processing', 'created', 'shipped', 'in_transit', 'delivered'].includes(s))) return OrderStatus.PROCESSING;
-    if (active.every(s => ['confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered'].includes(s))) return OrderStatus.CONFIRMED;
+    if (active.every(s => terminal.includes(s))) return OrderStatus.DELIVERED;
+    if (active.every(s => inTransitOrLater.includes(s))) return OrderStatus.IN_TRANSIT;
+    if (active.every(s => shippedOrLater.includes(s))) return OrderStatus.SHIPPED;
+    if (active.every(s => processingOrLater.includes(s))) return OrderStatus.PROCESSING;
+    if (active.every(s => confirmedOrLater.includes(s))) return OrderStatus.CONFIRMED;
     return OrderStatus.PENDING;
   }
 

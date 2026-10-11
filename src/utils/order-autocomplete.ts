@@ -20,8 +20,11 @@ async function getCommissionRate(vendorId: string): Promise<number> {
 async function runAutoComplete(): Promise<void> {
   const twentyFourHoursAgo = new Date(Date.now() - TWENTY_FOUR_HOURS_MS);
 
+  // Both DELIVERED and PICKED_UP are terminal "buyer has the goods" states;
+  // single-vendor PICKUP orders keep order.status === 'picked_up' so including
+  // it here lets the 24-hour funds-release still fire on pickup orders.
   const orders = await Order.find({
-    status: OrderStatus.DELIVERED,
+    status: { $in: [OrderStatus.DELIVERED, OrderStatus.PICKED_UP] },
     paymentStatus: PaymentStatus.COMPLETED,
     fundsReleased: { $ne: true },
     deliveredAt: { $lte: twentyFourHoursAgo },
