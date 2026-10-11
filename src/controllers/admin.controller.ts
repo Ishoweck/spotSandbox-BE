@@ -689,7 +689,13 @@ export const getAllUsers = asyncHandler(
       ];
     }
 
-    const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
+    // Default sort bumps users with unseen sensitive changes to the top.
+    // Clients that pass an explicit sort= still get what they asked for, but
+    // the "modified" flag always wins on top first.
+    const explicitSort = typeof req.query.sort === 'string' && req.query.sort.length > 0;
+    const sortObj: any = explicitSort
+      ? { [sort as string]: order === 'asc' ? 1 : -1 }
+      : { sensitiveChangesSeen: 1, sensitiveChangesAt: -1, createdAt: -1 };
 
     const [users, total] = await Promise.all([
       User.find(filter)
@@ -800,6 +806,12 @@ export const getUserDetails = asyncHandler(
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
+    }
+
+    // Admin viewed this user — clear the "unseen changes" flag so the
+    // Modified badge disappears from the users list on the next load.
+    if ((user as any).sensitiveChangesSeen === false) {
+      await User.updateOne({ _id: id }, { $set: { sensitiveChangesSeen: true } });
     }
 
     // Referral info: who referred this user + how many they've referred
@@ -1088,7 +1100,11 @@ export const getAllVendors = asyncHandler(
       ];
     }
 
-    const sortObj: any = { [sort as string]: order === 'asc' ? 1 : -1 };
+    // Default sort bumps vendors with unseen sensitive changes to the top.
+    const explicitSort = typeof req.query.sort === 'string' && req.query.sort.length > 0;
+    const sortObj: any = explicitSort
+      ? { [sort as string]: order === 'asc' ? 1 : -1 }
+      : { sensitiveChangesSeen: 1, sensitiveChangesAt: -1, createdAt: -1 };
 
     const [vendors, total] = await Promise.all([
       VendorProfile.find(filter)
@@ -1154,6 +1170,11 @@ export const getVendorDetails = asyncHandler(
     if (!vendor) {
       res.status(404).json({ success: false, message: 'Vendor not found' });
       return;
+    }
+
+    // Admin viewed this vendor — clear the "unseen changes" flag.
+    if ((vendor as any).sensitiveChangesSeen === false) {
+      await VendorProfile.updateOne({ _id: vendor._id }, { $set: { sensitiveChangesSeen: true } });
     }
 
     const vendorUserId = vendor.user._id;

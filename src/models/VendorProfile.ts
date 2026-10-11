@@ -83,6 +83,14 @@ export interface IVendorProfile extends Document {
       createdAt: Date;
     }[];
   };
+  sensitiveChanges?: Array<{
+    field: string;
+    oldValue?: any;
+    newValue?: any;
+    at: Date;
+  }>;
+  sensitiveChangesSeen?: boolean;
+  sensitiveChangesAt?: Date;
   ninVerification?: {
     nin?: string;
     provider?: 'dojah' | 'manual';
@@ -373,6 +381,20 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     reviewedAt: Date,
     reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
+  // Rolling log of recent changes to sensitive/identity fields. Admin UI
+  // bubbles vendors with sensitiveChangesSeen=false to the top and shows what
+  // changed. Cleared when an admin opens the vendor detail.
+  sensitiveChanges: {
+    type: [{
+      field: { type: String, required: true },
+      oldValue: Schema.Types.Mixed,
+      newValue: Schema.Types.Mixed,
+      at: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
+  sensitiveChangesSeen: { type: Boolean, default: true },
+  sensitiveChangesAt: Date,
 }, {
   timestamps: true,
 });

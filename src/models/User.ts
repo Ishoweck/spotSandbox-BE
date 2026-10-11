@@ -195,6 +195,20 @@ const userSchema = new Schema<IUserDocument>(
         enabled: { type: Boolean, default: true },
       }],
     },
+    // Rolling log of recent changes to sensitive/identity fields. Admin UI
+    // bubbles users with sensitiveChangesSeen=false to the top of the list and
+    // shows what changed. Cleared when an admin opens the user detail.
+    sensitiveChanges: {
+      type: [{
+        field: { type: String, required: true },
+        oldValue: Schema.Types.Mixed,
+        newValue: Schema.Types.Mixed,
+        at: { type: Date, default: Date.now },
+      }],
+      default: [],
+    },
+    sensitiveChangesSeen: { type: Boolean, default: true },
+    sensitiveChangesAt: Date,
   },
   {
     timestamps: true,

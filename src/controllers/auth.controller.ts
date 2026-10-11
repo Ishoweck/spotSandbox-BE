@@ -829,10 +829,34 @@ async forgotPassword(req: AuthRequest, res: Response<ApiResponse>): Promise<void
       throw new AppError('User not found', 404);
     }
 
+    // Track changes to identity fields so admins get a "Modified" flag on the
+    // user list. Avatar is cosmetic — not tracked.
+    const tracked: Array<[string, string | undefined, string | undefined]> = [
+      ['firstName', firstName, user.firstName],
+      ['lastName', lastName, user.lastName],
+      ['phone', phone, user.phone],
+    ];
+    const diffs = tracked
+      .filter(([_, next, prev]) => next !== undefined && next !== prev)
+      .map(([field, next, prev]) => ({
+        field,
+        oldValue: prev,
+        newValue: next,
+        at: new Date(),
+      }));
+
     if (firstName) user.firstName = firstName;
     if (lastName) user.lastName = lastName;
     if (phone) user.phone = phone;
     if (avatar) user.avatar = avatar;
+
+    if (diffs.length > 0) {
+      // Rolling cap at 20 entries so the array doesn't grow unboundedly.
+      const existing = (user as any).sensitiveChanges || [];
+      (user as any).sensitiveChanges = [...existing, ...diffs].slice(-20);
+      (user as any).sensitiveChangesSeen = false;
+      (user as any).sensitiveChangesAt = new Date();
+    }
 
     await user.save();
 

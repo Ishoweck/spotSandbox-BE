@@ -745,6 +745,20 @@ export class VendorController {
 
     const wasVerified = vendorProfile.verificationStatus === VendorVerificationStatus.VERIFIED;
 
+    // Snapshot sensitive-field values BEFORE the assignment loop so we can
+    // build a diff for the admin "Modified" flag. Addresses get flattened to
+    // "street, city, state" so the diff is readable.
+    const serializeField = (field: string, value: any): any => {
+      if (field === 'businessAddress' && value && typeof value === 'object') {
+        return [value.street, value.city, value.state].filter(Boolean).join(', ');
+      }
+      return value;
+    };
+    const previousValues: Record<string, any> = {};
+    for (const field of sensitiveFields) {
+      previousValues[field] = serializeField(field, (vendorProfile as any)[field]);
+    }
+
     for (const key of incomingKeys) {
       if (!allowedUpdates.includes(key)) continue;
       if (key === 'businessAddress') {
@@ -753,6 +767,24 @@ export class VendorController {
       } else {
         (vendorProfile as any)[key] = req.body[key];
       }
+    }
+
+    // Diff the sensitive fields and append to the rolling changelog
+    const diffs: Array<{ field: string; oldValue: any; newValue: any; at: Date }> = [];
+    const now = new Date();
+    for (const field of sensitiveFields) {
+      if (!incomingKeys.includes(field)) continue;
+      const next = serializeField(field, (vendorProfile as any)[field]);
+      const prev = previousValues[field];
+      if (next !== prev) {
+        diffs.push({ field, oldValue: prev, newValue: next, at: now });
+      }
+    }
+    if (diffs.length > 0) {
+      const existing = (vendorProfile as any).sensitiveChanges || [];
+      (vendorProfile as any).sensitiveChanges = [...existing, ...diffs].slice(-20);
+      (vendorProfile as any).sensitiveChangesSeen = false;
+      (vendorProfile as any).sensitiveChangesAt = now;
     }
 
     if (touchesDelivery) {
