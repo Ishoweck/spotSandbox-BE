@@ -21,7 +21,7 @@ export interface IVendorShipment {
   estimatedDelivery?: Date;
   trackingUrl?: string;
   paidAt?: Date;
-  status: 'pending' | 'confirmed' | 'processing' | 'created' | 'shipped' | 'in_transit' | 'delivered' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'processing' | 'created' | 'shipped' | 'in_transit' | 'out_for_delivery' | 'picked_up' | 'delivered' | 'cancelled';
   deliveryMode: 'VENDORSPOT_DELIVERY' | 'SELF_DELIVERY' | 'PICKUP';
   pickupAddress?: {
     street?: string;
@@ -184,7 +184,7 @@ const vendorShipmentSchema = new Schema<IVendorShipment>({
   paidAt: Date,
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'processing', 'created', 'shipped', 'in_transit', 'delivered', 'cancelled'],
+    enum: ['pending', 'confirmed', 'processing', 'created', 'shipped', 'in_transit', 'out_for_delivery', 'picked_up', 'delivered', 'cancelled'],
     default: 'pending',
   },
   deliveryMode: {

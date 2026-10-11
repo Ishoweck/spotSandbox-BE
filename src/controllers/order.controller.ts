@@ -4308,7 +4308,11 @@
       logger.info('✅ Vendor has items in order');
 
       // Once ShipBubble has a tracking number, statuses beyond 'processing' are
-      // driven by ShipBubble webhooks — block manual overrides to avoid conflicts
+      // driven by ShipBubble webhooks — block manual overrides to avoid conflicts.
+      // This guard ONLY applies to VENDORSPOT_DELIVERY shipments; self-delivery
+      // and pickup shipments never go through ShipBubble, so the vendor owns
+      // the full status progression (processing -> out_for_delivery -> delivered,
+      // or processing -> picked_up).
       const vendorShipmentForGuard = (order as any).vendorShipments?.find((s: any) => {
         const vid = typeof s.vendor === 'object'
           ? (s.vendor._id?.toString() ?? s.vendor.toString())
@@ -4316,8 +4320,30 @@
         return vid === req.user?.id;
       });
 
+      const shipmentMode = vendorShipmentForGuard?.deliveryMode || 'VENDORSPOT_DELIVERY';
+
+      // Mode-specific status validation.
+      if (status === 'picked_up' && shipmentMode !== 'PICKUP') {
+        res.status(400).json({
+          success: false,
+          message: `"Picked up" is only valid for pickup orders. This shipment uses ${shipmentMode}.`,
+        });
+        return;
+      }
+      if (status === 'out_for_delivery' && shipmentMode !== 'SELF_DELIVERY') {
+        res.status(400).json({
+          success: false,
+          message: `"Out for delivery" is only valid for self-delivery orders. This shipment uses ${shipmentMode}.`,
+        });
+        return;
+      }
+
       const shipbubbleOwnedStatuses = ['shipped', 'in_transit', 'delivered'];
-      if (vendorShipmentForGuard?.trackingNumber && shipbubbleOwnedStatuses.includes(status)) {
+      if (
+        shipmentMode === 'VENDORSPOT_DELIVERY' &&
+        vendorShipmentForGuard?.trackingNumber &&
+        shipbubbleOwnedStatuses.includes(status)
+      ) {
         res.status(400).json({
           success: false,
           message: 'This shipment is now tracked by ShipBubble. Status updates beyond processing are automatic.',
@@ -4359,21 +4385,28 @@
 
         // Derive the overall order status from all vendor shipments.
         // Uses minimum-progress: the order only advances when ALL active vendors reach that stage.
+        // 'picked_up' and 'out_for_delivery' are treated as late-stage (post in_transit,
+        // pre-delivered) for mixed-mode orders, so progress ladders don't stall on them.
         const allShipmentStatuses = vendorShipmentsList.map((s: any) => s.status as string);
         const activeStatuses = allShipmentStatuses.filter(s => s !== 'cancelled');
+        const terminalDelivered = ['delivered', 'picked_up'];
+        const inTransitOrLater = ['in_transit', 'out_for_delivery', 'picked_up', 'delivered'];
+        const shippedOrLater = ['shipped', ...inTransitOrLater];
+        const processingOrLater = ['processing', ...shippedOrLater];
+        const confirmedOrLater = ['confirmed', ...processingOrLater];
 
         if (allShipmentStatuses.every(s => s === 'cancelled')) {
           order.status = OrderStatus.CANCELLED;
-        } else if (activeStatuses.every(s => s === 'delivered')) {
-          // All active vendors delivered (also covers some-cancelled + rest-delivered)
+        } else if (activeStatuses.every(s => terminalDelivered.includes(s))) {
+          // All active vendors reached a terminal "handed over to buyer" state
           order.status = OrderStatus.DELIVERED;
-        } else if (activeStatuses.every(s => ['in_transit', 'delivered'].includes(s))) {
+        } else if (activeStatuses.every(s => inTransitOrLater.includes(s))) {
           order.status = OrderStatus.IN_TRANSIT;
-        } else if (activeStatuses.every(s => ['shipped', 'in_transit', 'delivered'].includes(s))) {
+        } else if (activeStatuses.every(s => shippedOrLater.includes(s))) {
           order.status = OrderStatus.SHIPPED;
-        } else if (activeStatuses.every(s => ['processing', 'shipped', 'in_transit', 'delivered'].includes(s))) {
+        } else if (activeStatuses.every(s => processingOrLater.includes(s))) {
           order.status = OrderStatus.PROCESSING;
-        } else if (activeStatuses.every(s => ['confirmed', 'processing', 'shipped', 'in_transit', 'delivered'].includes(s))) {
+        } else if (activeStatuses.every(s => confirmedOrLater.includes(s))) {
           order.status = OrderStatus.CONFIRMED;
         } else {
           order.status = OrderStatus.PENDING;
@@ -4673,7 +4706,7 @@
       const allNonVendorspot = Array.isArray(preOrder.vendorShipments) && preOrder.vendorShipments.length > 0
         && preOrder.vendorShipments.every((vs: any) => vs.deliveryMode && vs.deliveryMode !== 'VENDORSPOT_DELIVERY');
       const allowedStatuses: OrderStatus[] = allNonVendorspot
-        ? [OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED]
+        ? [OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.PICKED_UP, OrderStatus.DELIVERED]
         : [OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED];
 
       // Atomic: set fundsReleased=true in one operation — prevents double vendor payout
@@ -4905,8 +4938,13 @@
       if (!shipment) throw new AppError('Vendor shipment not found in this order', 404);
       if (shipment.paidAt) throw new AppError('This shipment has already been received and payment released', 400);
 
-      shipment.status = 'delivered';
-      (shipment as any).paidAt = new Date();
+      // Terminal label depends on the mode. For PICKUP, 'picked_up' is the
+      // accurate end-state (buyer collected it). For VENDORSPOT and SELF_DELIVERY
+      // the goods were handed over at buyer's doorstep, so 'delivered' fits.
+      const now = new Date();
+      shipment.status = shipment.deliveryMode === 'PICKUP' ? 'picked_up' : 'delivered';
+      (shipment as any).paidAt = now;
+      (shipment as any).buyerConfirmedAt = now;
 
       // Credit this vendor's wallet
       const vendorItems = order.items.filter((item: any) => {

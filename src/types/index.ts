@@ -46,6 +46,8 @@ export enum OrderStatus {
   PROCESSING = 'processing',
   SHIPPED = 'shipped',
   IN_TRANSIT = 'in_transit',
+  OUT_FOR_DELIVERY = 'out_for_delivery',
+  PICKED_UP = 'picked_up',
   DELIVERED = 'delivered',
   CANCELLED = 'cancelled',
   REFUNDED = 'refunded',
@@ -409,6 +411,15 @@ export interface IUserDocument extends Document {
       createdAt: Date;
     }[];
   };
+
+  sensitiveChanges?: Array<{
+    field: string;
+    oldValue?: any;
+    newValue?: any;
+    at: Date;
+  }>;
+  sensitiveChangesSeen?: boolean;
+  sensitiveChangesAt?: Date;
 
   // Methods
   comparePassword(candidatePassword: string): Promise<boolean>;
