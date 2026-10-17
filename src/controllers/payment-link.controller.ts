@@ -329,7 +329,7 @@ export class PaymentLinkController {
 
     const payment = await PaymentLinkPayment.findOne({ reference }).populate('link', 'title code');
     const vendorProfile = payment
-      ? await VendorProfile.findOne({ user: payment.vendor }).select('businessName')
+      ? await VendorProfile.findOne({ user: payment.vendor }).select('businessName slug businessLogo')
       : null;
 
     res.json({
@@ -341,6 +341,8 @@ export class PaymentLinkController {
         amount: payment?.amount ?? pending.amount,
         title: (payment?.link as any)?.title,
         vendorName: vendorProfile?.businessName,
+        vendorSlug: vendorProfile?.slug,
+        vendorLogo: vendorProfile?.businessLogo,
         paidAt: payment?.paidAt,
       },
     });
