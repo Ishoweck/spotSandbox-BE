@@ -18,6 +18,7 @@ const createAddressValidation = [
   body('city').notEmpty().withMessage('City is required'),
   body('state').notEmpty().withMessage('State is required'),
   body('label').optional().isIn(['Home', 'Office', 'Other']).withMessage('Invalid label'),
+  body('applyToAllProducts').optional().isBoolean().withMessage('applyToAllProducts must be boolean'),
 ];
 
 const updateAddressValidation = [
@@ -47,6 +48,9 @@ router.post(
   validate(validateAddressValidation),
   asyncHandler(addressController.validateAddress.bind(addressController))
 );
+
+// Count vendor products shipping from this address
+router.get('/:id/product-count', asyncHandler(addressController.getAddressProductCount.bind(addressController)));
 
 // Get single address
 router.get('/:id', asyncHandler(addressController.getAddress.bind(addressController)));

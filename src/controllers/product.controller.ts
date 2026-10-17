@@ -150,7 +150,7 @@ async createProduct(req: AuthRequest, res: Response<ApiResponse>): Promise<void>
       const vendor = await User.findById(req.user?.id).select('addresses');
       const matched = vendor?.addresses?.find((a: any) => a._id.toString() === addressId);
       productData.pickupAddress = matched
-        ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
+        ? { addressId: matched._id, street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
         : undefined;
     }
 
@@ -1092,7 +1092,7 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       const vendor = await User.findById(req.user?.id).select('addresses');
       const matched = vendor?.addresses?.find((a: any) => a._id.toString() === addressId);
       req.body.pickupAddress = matched
-        ? { street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
+        ? { addressId: matched._id, street: matched.street, city: matched.city, state: matched.state, country: matched.country || 'Nigeria', fullName: matched.fullName || '', phone: matched.phone || '', shipBubble: matched.shipBubble }
         : undefined;
     }
 

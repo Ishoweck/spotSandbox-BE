@@ -33,6 +33,9 @@ export interface IProduct extends Document {
     height: number;
   };
   pickupAddress?: {
+    // _id of the vendor's saved address this snapshot was copied from, so
+    // edits/deletes in the address book can resync the product.
+    addressId?: Types.ObjectId;
     street: string;
     city: string;
     state: string;
@@ -203,6 +206,7 @@ const productSchema = new Schema<IProduct>({
     height: Number,
   },
   pickupAddress: {
+    addressId: Schema.Types.ObjectId,
     street: String,
     city: String,
     state: String,

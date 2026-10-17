@@ -2,10 +2,64 @@
 import { Response } from 'express';
 import { AuthRequest, ApiResponse } from '../types';
 import User from '../models/User';
+import Product from '../models/Product';
 import { AppError } from '../middleware/error';
 import { shipBubbleService } from '../services/shipbubble.service';
 import { logger } from '../utils/logger';
 import mongoose from 'mongoose';
+
+/**
+ * Products store a frozen snapshot of the vendor's chosen pickup address, and
+ * that snapshot is what ShipBubble uses as the sender. Re-point every product
+ * that was copied from `source` at `target` (or clear it so the product falls
+ * back to the vendor's business address when `target` is null).
+ *
+ * Snapshots created before addressId was recorded are matched on
+ * street/city/state of the source address instead.
+ */
+function pickupSnapshotFilter(
+  vendorId: any,
+  source: { _id?: any; street?: string; city?: string; state?: string },
+) {
+  return {
+    vendor: vendorId,
+    $or: [
+      { 'pickupAddress.addressId': source._id },
+      {
+        'pickupAddress.addressId': { $exists: false },
+        'pickupAddress.street': source.street,
+        'pickupAddress.city': source.city,
+        'pickupAddress.state': source.state,
+      },
+    ],
+  };
+}
+
+function pickupSnapshotFrom(address: any) {
+  return {
+    addressId: address._id,
+    street: address.street,
+    city: address.city,
+    state: address.state,
+    country: address.country || 'Nigeria',
+    fullName: address.fullName || '',
+    phone: address.phone || '',
+    shipBubble: address.shipBubble,
+  };
+}
+
+async function syncProductPickupSnapshots(
+  vendorId: any,
+  source: { _id?: any; street?: string; city?: string; state?: string },
+  target: any | null,
+): Promise<number> {
+  const update = target
+    ? { $set: { pickupAddress: pickupSnapshotFrom(target) } }
+    : { $unset: { pickupAddress: 1 } };
+
+  const result = await Product.updateMany(pickupSnapshotFilter(vendorId, source), update);
+  return result.modifiedCount;
+}
 
 export class AddressController {
   /**
@@ -55,7 +109,7 @@ export class AddressController {
    * Create new address with ShipBubble validation
    */
   async createAddress(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { label, fullName, phone, street, city, state, country, postalCode, isDefault } = req.body;
+    const { label, fullName, phone, street, city, state, country, postalCode, isDefault, applyToAllProducts } = req.body;
     
     const user = await User.findById(req.user?.id);
     
@@ -156,12 +210,23 @@ export class AddressController {
     
     await user.save();
 
+    // Vendor opted to ship every product from the new address
+    let productsUpdated = 0;
+    if (user.role === 'vendor' && applyToAllProducts === true) {
+      const result = await Product.updateMany(
+        { vendor: user._id },
+        { $set: { pickupAddress: pickupSnapshotFrom(newAddress) } },
+      );
+      productsUpdated = result.modifiedCount;
+    }
+
     res.status(201).json({
       success: true,
       message: 'Address created and validated successfully',
       data: {
         address: newAddress,
         validated: true,
+        productsUpdated,
       },
     });
   }
@@ -186,6 +251,7 @@ export class AddressController {
     }
 
     const address = user.addresses[addressIndex];
+    const previous = { _id: address._id, street: address.street, city: address.city, state: address.state };
 
     // Check if address details changed (requires revalidation)
     const addressChanged = 
@@ -259,10 +325,20 @@ export class AddressController {
     user.markModified('addresses');
     await user.save();
 
+    let productsUpdated = 0;
+    if (user.role === 'vendor') {
+      try {
+        productsUpdated = await syncProductPickupSnapshots(user._id, previous, user.addresses[addressIndex]);
+        if (productsUpdated > 0) logger.info(`Resynced pickup address on ${productsUpdated} product(s) after address update`, { userId: user._id });
+      } catch (err: any) {
+        logger.error('Failed to resync product pickup addresses after update', { error: err.message });
+      }
+    }
+
     res.json({
       success: true,
       message: 'Address updated successfully',
-      data: { address: user.addresses[addressIndex] },
+      data: { address: user.addresses[addressIndex], productsUpdated },
     });
   }
 
@@ -287,6 +363,9 @@ export class AddressController {
     // Note: ShipBubble doesn't have a delete address endpoint
     // The addresses remain in their system but won't be used
 
+    const removed = user.addresses[addressIndex];
+    const removedSnapshot = { _id: removed._id, street: removed.street, city: removed.city, state: removed.state };
+
     // Remove address
     user.addresses.splice(addressIndex, 1);
     
@@ -300,9 +379,53 @@ export class AddressController {
 
     await user.save();
 
+    // Products that shipped from the deleted address move to the address the
+    // vendor picked (?moveProductsTo=<id>), else their default address; with
+    // none left they fall back to the business address.
+    let productsUpdated = 0;
+    if (user.role === 'vendor') {
+      try {
+        const moveTo = typeof req.query.moveProductsTo === 'string' ? req.query.moveProductsTo : undefined;
+        const target =
+          (moveTo && user.addresses.find(addr => addr._id?.toString() === moveTo)) ||
+          user.addresses.find(addr => addr.isDefault) ||
+          null;
+        productsUpdated = await syncProductPickupSnapshots(user._id, removedSnapshot, target);
+        if (productsUpdated > 0) logger.info(`Re-pointed pickup address on ${productsUpdated} product(s) after address delete`, { userId: user._id });
+      } catch (err: any) {
+        logger.error('Failed to re-point product pickup addresses after delete', { error: err.message });
+      }
+    }
+
     res.json({
       success: true,
       message: 'Address deleted successfully',
+      data: { productsUpdated },
+    });
+  }
+
+  /**
+   * Count the vendor's products that ship from this saved address, so the app
+   * can warn before an edit or delete moves them.
+   */
+  async getAddressProductCount(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
+    const { id } = req.params;
+
+    const user = await User.findById(req.user?.id);
+    const address = user?.addresses?.find(addr => addr._id?.toString() === id);
+
+    if (!user || !address) {
+      throw new AppError('Address not found', 404);
+    }
+
+    const count = user.role === 'vendor'
+      ? await Product.countDocuments(pickupSnapshotFilter(user._id, address))
+      : 0;
+
+    res.json({
+      success: true,
+      message: 'Product count retrieved',
+      data: { count },
     });
   }
 
