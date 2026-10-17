@@ -5,6 +5,7 @@ import { logger } from './logger';
 import { OrderStatus, PaymentStatus, TransactionType, WalletPurpose } from '../types';
 import { notificationService } from '../services/notification.service';
 import { rewardController } from '../controllers/reward.controller';
+import { checkoutLinkRateFor } from '../services/payment-link.service';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const CHECK_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
@@ -65,7 +66,7 @@ async function runAutoComplete(): Promise<void> {
           });
           const subtotal = vendorItems.reduce((sum: number, item: any) => sum + item.price * item.quantity, 0);
 
-          const commissionRatePct = await getCommissionRate(vendorId);
+          const commissionRatePct = checkoutLinkRateFor(order, vendorId) ?? await getCommissionRate(vendorId);
           const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
           const vendorAmount = Math.max(0, Math.round((subtotal - commission) * 100) / 100);
 
@@ -102,7 +103,7 @@ async function runAutoComplete(): Promise<void> {
         }
 
         for (const [vendorId, subtotal] of vendorMap) {
-          const commissionRatePct = await getCommissionRate(vendorId);
+          const commissionRatePct = checkoutLinkRateFor(order, vendorId) ?? await getCommissionRate(vendorId);
           const commission = Math.round(subtotal * (commissionRatePct / 100) * 100) / 100;
           const vendorAmount = Math.max(0, Math.round((subtotal - commission) * 100) / 100);
 

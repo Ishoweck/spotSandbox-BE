@@ -26,6 +26,7 @@ import { setupVCreditsExpiry } from './utils/vcredits-expiry';
 import { setupVendorReminders } from './utils/vendor-reminders';
 import { setupQuestionReminders } from './utils/question-reminders';
 import { setupAutomatedEmails } from './utils/automated-emails';
+import { setupPaymentLinkRelease } from './utils/payment-link-release';
 import { backfillVendorSlugs } from './utils/vendor-slug-backfill';
 
 // Load environment variables
@@ -235,6 +236,8 @@ server.listen(PORT, () => {
   setupQuestionReminders();
   // Customer abandoned-cart (24h/72h), come-back (30d silent), weekly admin + ambassador digests
   setupAutomatedEmails();
+  // Move payment-link money into vendor wallets once the hold window ends
+  setupPaymentLinkRelease();
 });
 
 // SET SERVER TIMEOUT

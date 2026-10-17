@@ -602,6 +602,7 @@ import Product from '../models/Product';
 import User from '../models/User';
 import VendorProfile from '../models/VendorProfile';
 import { PendingPayment } from '../models/PendingPayment';
+import { fulfillPaymentLinkPayment, trustedCheckoutLink } from '../services/payment-link.service';
 import { paystackService } from '../services/paystack.service';
 import { emitNewOrder } from '../services/notification.service';
 import { PaymentStatus } from '../types';
@@ -682,6 +683,8 @@ export async function handlePaystackWebhook(req: Request, res: Response): Promis
 
       if (purpose === 'wallet_topup') {
         await _fulfillWalletTopUp(reference, metadata.userId as string, paidAmountNaira);
+      } else if (purpose === 'payment_link') {
+        await fulfillPaymentLinkPayment(reference, paidAmountNaira);
       } else {
         await _fulfillOrder(reference, paidAmountNaira, metadata);
       }
@@ -858,6 +861,7 @@ async function _fulfillOrder(reference: string, paidAmountNaira: number, metadat
       isPickup:         snapshot.deliveryType === 'pickup' || isDigitalOnly,
       vendorShipments,
       isDigital:        isDigitalOnly,
+      ...(snapshot.checkoutLink && { checkoutLink: await trustedCheckoutLink(snapshot.checkoutLink, orderItems) }),
     });
   } catch (createErr: any) {
     if (createErr.code === 11000) {

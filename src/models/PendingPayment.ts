@@ -3,7 +3,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IPendingPayment extends Document {
   reference: string;
   userId: string;
-  type: 'order' | 'wallet_topup';
+  type: 'order' | 'wallet_topup' | 'payment_link';
   amount: number;
   gateway: 'paystack' | 'flutterwave';
   status: 'pending' | 'completed' | 'failed';
@@ -17,7 +17,7 @@ const pendingPaymentSchema = new Schema<IPendingPayment>(
   {
     reference:    { type: String, required: true, unique: true, index: true },
     userId:       { type: String, required: true, index: true },
-    type:         { type: String, enum: ['order', 'wallet_topup'], required: true },
+    type:         { type: String, enum: ['order', 'wallet_topup', 'payment_link'], required: true },
     amount:       { type: Number, required: true },
     gateway:      { type: String, enum: ['paystack', 'flutterwave'], required: true },
     status:       { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending', index: true },

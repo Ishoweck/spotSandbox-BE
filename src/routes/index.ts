@@ -30,6 +30,7 @@ import contactRoutes from './contact.routes';
 import blogRoutes from './blog.routes';
 import deferredLinkRoutes from './deferred-link.routes';
 import ambassadorRoutes from './ambassador.routes';
+import paymentLinkRoutes from './payment-link.routes';
 import { getAppVersionConfig } from '../controllers/admin.controller';
 
 
@@ -66,6 +67,7 @@ router.use('/contact', contactRoutes);
 router.use('/blogs', blogRoutes);
 router.use('/deferred-link', deferredLinkRoutes);
 router.use('/ambassadors', ambassadorRoutes);
+router.use('/payment-links', paymentLinkRoutes);
 
 
 // Public app version check (no auth required — called by the mobile app on startup)

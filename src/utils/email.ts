@@ -2695,3 +2695,63 @@ export const sendAmbassadorWeeklySummaryEmail = async (
     </p>`;
   await sendEmail({ to, subject: `Your ambassador week — ${stats.weekLabel}`, html: wrapEmail('Weekly Ambassador Summary', body, 'ambassador') });
 };
+
+// ─── Payment links ───────────────────────────────────────────────────────────
+
+const naira = (n: number) => `&#8358;${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
+
+const escapeHtml = (v: string) =>
+  String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+const receiptRow = (label: string, value: string) =>
+  `<tr><td style="padding:6px 0;font-size:14px;color:#6b7280;">${label}</td><td style="padding:6px 0;font-size:14px;color:#111111;text-align:right;font-weight:600;">${value}</td></tr>`;
+
+export const sendPaymentLinkReceiptEmail = async (
+  email: string,
+  data: { payerName: string; vendorName: string; title: string; amount: number; reference: string },
+): Promise<void> => {
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${escapeHtml(data.payerName)},</p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">Your payment to <strong>${escapeHtml(data.vendorName)}</strong> was successful.</p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px 0;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">
+      ${receiptRow('For', escapeHtml(data.title))}
+      ${receiptRow('Amount', naira(data.amount))}
+      ${receiptRow('Reference', escapeHtml(data.reference))}
+    </table>
+    <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;line-height:1.6;">This was a direct payment to the vendor. It is not a Vendorspot marketplace order, so it is not covered by Vendorspot Buyer Protection. For anything about what you paid for, contact the vendor directly.</p>`;
+  await sendEmail({
+    to: email,
+    subject: `Payment receipt: ${naira(data.amount).replace('&#8358;', 'NGN ')} to ${data.vendorName}`,
+    html: wrapEmail('Payment successful', body, 'customer'),
+  });
+};
+
+export const sendPaymentLinkReceivedEmail = async (
+  email: string,
+  data: {
+    vendorName: string;
+    payerName: string;
+    title: string;
+    amount: number;
+    fee: number;
+    netAmount: number;
+    holdHours: number;
+    reference: string;
+  },
+): Promise<void> => {
+  const body = `
+    <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${escapeHtml(data.vendorName)},</p>
+    <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;"><strong>${escapeHtml(data.payerName)}</strong> just paid you through your payment link <strong>${escapeHtml(data.title)}</strong>.</p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px 0;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">
+      ${receiptRow('Amount paid', naira(data.amount))}
+      ${receiptRow('Vendorspot fee', naira(data.fee))}
+      ${receiptRow('You receive', naira(data.netAmount))}
+      ${receiptRow('Reference', escapeHtml(data.reference))}
+    </table>
+    <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">The money will be available to withdraw from your wallet in ${data.holdHours} hours.</p>`;
+  await sendEmail({
+    to: email,
+    subject: `You received ${naira(data.amount).replace('&#8358;', 'NGN ')} from ${data.payerName}`,
+    html: wrapEmail('Payment received', body, 'vendor'),
+  });
+};

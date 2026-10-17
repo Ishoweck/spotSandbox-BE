@@ -85,7 +85,8 @@ export enum WalletPurpose {
   COMMISSION = 'commission',
   REWARD = 'reward',
   CASHBACK = 'cashback',
-  TOP_UP = 'top_up'
+  TOP_UP = 'top_up',
+  PAYMENT_LINK = 'payment_link'
 }
 
 // Vendor Verification Status

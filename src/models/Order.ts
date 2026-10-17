@@ -86,6 +86,14 @@ export interface IOrder extends Document {
   affiliateCommission?: number;
   affiliateLinkId?: Types.ObjectId;
   affiliateCommissionPaid?: boolean;
+  // Set when the buyer arrived through a vendor's product checkout link; that
+  // vendor's items are charged commissionRate instead of the marketplace rate.
+  checkoutLink?: {
+    link: Types.ObjectId;
+    code: string;
+    vendor: Types.ObjectId;
+    commissionRate: number;
+  };
   cashbackAwarded?: boolean;
   pointsAwarded?: boolean;
   statusHistory: {
@@ -307,6 +315,12 @@ const orderSchema = new Schema<IOrder>({
   affiliateCommission: Number,
   affiliateLinkId: { type: Schema.Types.ObjectId, ref: 'AffiliateLink' },
   affiliateCommissionPaid: { type: Boolean, default: false },
+  checkoutLink: {
+    link: { type: Schema.Types.ObjectId, ref: 'PaymentLink' },
+    code: String,
+    vendor: { type: Schema.Types.ObjectId, ref: 'User' },
+    commissionRate: Number,
+  },
   cashbackAwarded: { type: Boolean, default: false },
   pointsAwarded: { type: Boolean, default: false },
   statusHistory: [{

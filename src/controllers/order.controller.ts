@@ -26,6 +26,7 @@
   import { logger } from '../utils/logger';
   import { trackEvent, SlackEvent } from '../utils/slack-events';
   import Conversation from '../models/Conversation';
+  import { resolveCheckoutLink, checkoutLinkRateFor, trustedCheckoutLink } from '../services/payment-link.service';
   import axios from 'axios';
 
   /** Buyer Protection Fee tiers */
@@ -925,6 +926,7 @@
       vendorBreakdown,
       vendorDeliveries,
       affiliateCode,
+      checkoutLinkCode,
     } = req.body;
 
       logger.info('🛒 ============================================');
@@ -958,6 +960,10 @@
       if (!cart || cart.items.length === 0) {
         throw new AppError('Cart is empty', 400);
       }
+
+      // Bought through a vendor's product checkout link: that vendor's items
+      // get the reduced checkout-link commission when escrow releases.
+      const checkoutLink = await resolveCheckoutLink(checkoutLinkCode, (cart.items as any[]).map((i: any) => (i.product?.vendor?._id || i.product?.vendor)?.toString()).filter(Boolean));
 
       // ✅ VALIDATE PAYMENT METHOD FOR CART CONTENTS
       this.validatePaymentMethod(cart.items, paymentMethod, deliveryType);
@@ -1306,6 +1312,7 @@
         vendorShipments,
         isDigital: isDigitalOnly,
         ...(walletAffiliateUserId && { affiliateUser: walletAffiliateUserId, affiliateCommission: walletAffiliateCommission, affiliateLinkId: walletAffiliateLinkId }),
+        ...(checkoutLink && { checkoutLink }),
       });
 
       logger.info(`✅ Order created: ${order._id}`);
@@ -1535,6 +1542,7 @@
         vendorDeliveries,
         vCreditsAmount = 0,
         affiliateCode,
+        checkoutLinkCode,
       } = req.body;
 
       logger.info('💳 ============================================');
@@ -1557,6 +1565,10 @@
       if (!cart || cart.items.length === 0) {
         throw new AppError('Cart is empty', 400);
       }
+
+      // Bought through a vendor's product checkout link: that vendor's items
+      // get the reduced checkout-link commission when escrow releases.
+      const checkoutLink = await resolveCheckoutLink(checkoutLinkCode, (cart.items as any[]).map((i: any) => (i.product?.vendor?._id || i.product?.vendor)?.toString()).filter(Boolean));
 
       // Validate payment method for cart contents
       this.validatePaymentMethod(cart.items, paymentMethod, deliveryType);
@@ -1662,6 +1674,7 @@
         paymentReference,
         cartId: cart._id.toString(),
         affiliateCode: affiliateCode || undefined,
+        checkoutLink,
         provider: paymentMethod === PaymentMethod.PAYSTACK ? 'paystack' : 'flutterwave',
         createdAt: new Date().toISOString(),
       };
@@ -2193,6 +2206,7 @@
         vendorShipments,
         isDigital: isDigitalOnly,
         ...(affiliateUserId && { affiliateUser: affiliateUserId, affiliateCommission: affiliateCommissionAmount, affiliateLinkId }),
+        ...(snapshot.checkoutLink && { checkoutLink: await trustedCheckoutLink(snapshot.checkoutLink, orderItems) }),
       });
 
       logger.info(`✅ Order created with verified payment: ${order._id}`);
@@ -3091,6 +3105,7 @@
           deliveryType:     isDigitalOnly ? 'digital' : snapshot.deliveryType,
           isPickup:         snapshot.deliveryType === 'pickup' || isDigitalOnly,
           isDigital:        isDigitalOnly,
+          ...(snapshot.checkoutLink && { checkoutLink: await trustedCheckoutLink(snapshot.checkoutLink, orderItems) }),
         });
 
         await PendingPayment.findOneAndUpdate(
@@ -4800,7 +4815,7 @@
 
         // Credit each vendor's wallet using tiered commission rate, minus their affiliate share
         for (const [vendorId, amount] of vendorEarnings) {
-          const commissionRatePct = await getVendorCommissionRate(vendorId);
+          const commissionRatePct = checkoutLinkRateFor(order, vendorId) ?? await getVendorCommissionRate(vendorId);
           const commissionRate = commissionRatePct / 100;
           const commission = Math.round(amount * commissionRate * 100) / 100;
           const affiliateDeduction = affiliateVendorDeductions.get(vendorId) || 0;
@@ -4977,7 +4992,7 @@
 
       try {
         const vendorProfile = await VendorProfile.findOne({ user: vendorId }).select('commissionRate');
-        const commissionRate = (vendorProfile?.commissionRate ?? 8) / 100;
+        const commissionRate = (checkoutLinkRateFor(order, vendorId) ?? vendorProfile?.commissionRate ?? 8) / 100;
         const commission = Math.round(vendorSubtotal * commissionRate * 100) / 100;
 
         // Determine this vendor's affiliate deduction — vendor absorbs it, not platform
