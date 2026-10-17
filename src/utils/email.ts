@@ -2708,20 +2708,23 @@ const receiptRow = (label: string, value: string) =>
 
 export const sendPaymentLinkReceiptEmail = async (
   email: string,
-  data: { payerName: string; vendorName: string; title: string; amount: number; reference: string },
+  data: { payerName: string; vendorName: string; title: string; amount: number; chargedAmount: number; reference: string },
 ): Promise<void> => {
+  const processingFee = Math.max(0, Math.round((data.chargedAmount - data.amount) * 100) / 100);
   const body = `
     <p style="margin:0 0 16px 0;font-size:15px;color:#374151;">Hi ${escapeHtml(data.payerName)},</p>
     <p style="margin:0 0 20px 0;font-size:15px;color:#374151;line-height:1.6;">Your payment to <strong>${escapeHtml(data.vendorName)}</strong> was successful.</p>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px 0;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">
       ${receiptRow('For', escapeHtml(data.title))}
       ${receiptRow('Amount', naira(data.amount))}
+      ${processingFee > 0 ? receiptRow('Paystack processing fee', naira(processingFee)) : ''}
+      ${receiptRow('Total paid', naira(data.chargedAmount))}
       ${receiptRow('Reference', escapeHtml(data.reference))}
     </table>
     <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;line-height:1.6;">This was a direct payment to the vendor. It is not a Vendorspot marketplace order, so it is not covered by Vendorspot Buyer Protection. For anything about what you paid for, contact the vendor directly.</p>`;
   await sendEmail({
     to: email,
-    subject: `Payment receipt: ${naira(data.amount).replace('&#8358;', 'NGN ')} to ${data.vendorName}`,
+    subject: `Payment receipt: ${naira(data.chargedAmount).replace('&#8358;', 'NGN ')} to ${data.vendorName}`,
     html: wrapEmail('Payment successful', body, 'customer'),
   });
 };

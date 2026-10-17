@@ -13,7 +13,8 @@ export interface IPaymentLinkPayment extends Document {
   payerEmail: string;
   payerPhone?: string;
   note?: string;
-  amount: number; // gross naira paid
+  amount: number; // naira the vendor asked for (our fee is taken from this)
+  chargedAmount?: number; // what the customer was actually charged, incl. Paystack's passed-on fee
   fee: number;
   netAmount: number;
   reference: string;
@@ -38,6 +39,7 @@ const paymentLinkPaymentSchema = new Schema<IPaymentLinkPayment>(
     payerPhone: { type: String, trim: true },
     note: { type: String, trim: true, maxlength: 300 },
     amount: { type: Number, required: true },
+    chargedAmount: Number,
     fee: { type: Number, required: true },
     netAmount: { type: Number, required: true },
     // Unique: the webhook and the buyer's verify call can both try to record

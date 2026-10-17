@@ -327,7 +327,16 @@ export class PaymentLinkController {
       }
     }
 
-    const payment = await PaymentLinkPayment.findOne({ reference }).populate('link', 'title code');
+    let payment = await PaymentLinkPayment.findOne({ reference }).populate('link', 'title code');
+
+    // Payments recorded before chargedAmount existed: fill it from Paystack once
+    if (payment && payment.chargedAmount == null) {
+      const verification = await paystackService.verifyPayment(reference).catch(() => null);
+      if (verification?.data?.status === 'success') {
+        payment.chargedAmount = verification.data.amount / 100;
+        await payment.save();
+      }
+    }
     const vendorProfile = payment
       ? await VendorProfile.findOne({ user: payment.vendor }).select('businessName slug businessLogo')
       : null;
@@ -339,6 +348,7 @@ export class PaymentLinkController {
         paid: !!payment,
         reference,
         amount: payment?.amount ?? pending.amount,
+        chargedAmount: payment?.chargedAmount ?? null,
         title: (payment?.link as any)?.title,
         vendorName: vendorProfile?.businessName,
         vendorSlug: vendorProfile?.slug,

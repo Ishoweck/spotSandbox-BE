@@ -166,6 +166,7 @@ export async function fulfillPaymentLinkPayment(reference: string, paidAmountNai
       payerPhone: snap.payerPhone,
       note: snap.note,
       amount: snap.amount,
+      chargedAmount: Math.round(paidAmountNaira * 100) / 100,
       fee,
       netAmount,
       reference,
@@ -228,6 +229,7 @@ export async function fulfillPaymentLinkPayment(reference: string, paidAmountNai
     vendorName,
     title: link.title,
     amount: snap.amount,
+    chargedAmount: Math.round(paidAmountNaira * 100) / 100,
     reference,
   }).catch((e: any) => logger.error('[PaymentLink] payer receipt failed', { error: e.message }));
 
