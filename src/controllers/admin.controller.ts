@@ -47,6 +47,14 @@ import AppVersion from '../models/AppVersion';
 import { orderController } from './order.controller';
 import CompanyExpense, { ExpenseStatus } from '../models/CompanyExpense';
 import { trackEvent, SlackEvent } from '../utils/slack-events';
+import {
+  PLACEHOLDERS,
+  PersonalizeRecipient,
+  escapeHtml,
+  findUnknownPlaceholders,
+  hasPlaceholders,
+  personalize,
+} from '../utils/personalize';
 
 // ================================================================
 // DASHBOARD & ANALYTICS
@@ -4611,6 +4619,15 @@ export const broadcastNotification = asyncHandler(
       return;
     }
 
+    const unknownPlaceholders = findUnknownPlaceholders(title, message);
+    if (unknownPlaceholders.length > 0) {
+      res.status(400).json({
+        success: false,
+        message: `Unknown placeholder(s): ${unknownPlaceholders.map((p) => `{{${p}}}`).join(', ')}. Allowed: ${PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}`,
+      });
+      return;
+    }
+
     // Build user filter based on segment
     const userFilter: any = { status: UserStatus.ACTIVE };
     if (rawSegment === 'customers') userFilter.role = UserRole.CUSTOMER;
@@ -4619,7 +4636,7 @@ export const broadcastNotification = asyncHandler(
 
     // Fetch all fields we might need across channels
     const users = await User.find(userFilter)
-      .select('_id email firstName lastName fcmTokens')
+      .select('_id email firstName lastName role fcmTokens')
       .lean();
 
     if (users.length === 0) {
@@ -4629,42 +4646,87 @@ export const broadcastNotification = asyncHandler(
 
     const userIds = users.map((u) => u._id.toString());
     const recipientCount = users.length;
+    const personalized = hasPlaceholders(title, message);
 
     // Respond immediately — all channel sends are fire-and-forget
     res.json({
       success: true,
       message: `Notification broadcast queued for ${recipientCount} user(s)`,
-      data: { recipientCount, segment: rawSegment, type, channels },
+      data: { recipientCount, segment: rawSegment, type, channels, personalized },
     });
+
+    // Mail-merge data: vendors are addressed by business name
+    const recipients = new Map<string, PersonalizeRecipient>();
+    if (personalized) {
+      const vendorIds = users.filter((u: any) => u.role === UserRole.VENDOR).map((u) => u._id);
+      const profiles = vendorIds.length
+        ? await VendorProfile.find({ user: { $in: vendorIds } }).select('user businessName').lean()
+        : [];
+      const businessNames = new Map(profiles.map((p: any) => [p.user.toString(), p.businessName]));
+      for (const u of users as any[]) {
+        const id = u._id.toString();
+        recipients.set(id, {
+          firstName: u.firstName,
+          lastName: u.lastName,
+          email: u.email,
+          role: u.role,
+          businessName: businessNames.get(id),
+        });
+      }
+    }
+    const fill = (text: string, userId: string, encode?: (v: string) => string) =>
+      personalized ? personalize(text, recipients.get(userId) || {}, encode) : text;
 
     // ── IN-APP channel (DB insert + socket emit) ──
     if (channels.includes('inapp')) {
       notificationService
-        .sendToMany({ userIds, type, title, message, link, skipPush: true })
+        .sendToMany({
+          userIds, type, title, message, link, skipPush: true,
+          render: personalized
+            ? (id) => ({ title: fill(title, id), message: fill(message, id) })
+            : undefined,
+        })
         .catch((err: any) => logger.error('Broadcast in-app failed:', err?.message));
     }
 
     // ── PUSH channel (Expo push tokens) ──
     if (channels.includes('push')) {
-      const allTokens: string[] = users
-        .flatMap((u: any) => u.fcmTokens || [])
-        .filter((t: string) => typeof t === 'string' && t.startsWith('ExponentPushToken'));
+      const pushData: Record<string, string> = {
+        type,
+        ...(link ? { link } : {}),
+      };
+      const expoTokens = (u: any): string[] =>
+        (u.fcmTokens || []).filter((t: string) => typeof t === 'string' && t.startsWith('ExponentPushToken'));
 
-      if (allTokens.length > 0) {
-        const pushData: Record<string, string> = {
-          type,
-          ...(link ? { link } : {}),
+      if (personalized) {
+        // Each user gets their own text, so push per user (batched like email)
+        const sendPushBatch = async () => {
+          const withTokens = (users as any[]).filter((u) => expoTokens(u).length > 0);
+          for (let i = 0; i < withTokens.length; i += 20) {
+            await Promise.allSettled(
+              withTokens.slice(i, i + 20).map((u) => {
+                const id = u._id.toString();
+                return sendPushNotification(expoTokens(u), fill(title, id), fill(message, id), pushData);
+              })
+            );
+          }
+          logger.info(`Broadcast push (personalized): sent to ${withTokens.length} users`);
         };
-        sendPushNotification(allTokens, title, message, pushData)
-          .catch((err: any) => logger.error('Broadcast push failed:', err?.message));
+        sendPushBatch().catch((err: any) => logger.error('Broadcast push failed:', err?.message));
       } else {
-        logger.info('Broadcast push: no valid Expo tokens found');
+        const allTokens: string[] = users.flatMap(expoTokens);
+        if (allTokens.length > 0) {
+          sendPushNotification(allTokens, title, message, pushData)
+            .catch((err: any) => logger.error('Broadcast push failed:', err?.message));
+        } else {
+          logger.info('Broadcast push: no valid Expo tokens found');
+        }
       }
     }
 
     // ── EMAIL channel (Resend) ──
     if (channels.includes('email')) {
-      const html = buildBroadcastEmailHtml(title, message, link);
+      const sharedHtml = personalized ? '' : buildBroadcastEmailHtml(title, message, link);
 
       // Send concurrently in batches of 20 to avoid flooding Resend
       const batchSize = 20;
@@ -4672,11 +4734,16 @@ export const broadcastNotification = asyncHandler(
         for (let i = 0; i < users.length; i += batchSize) {
           const batch = users.slice(i, i + batchSize);
           await Promise.allSettled(
-            batch.map((u: any) =>
-              sendEmail({ to: u.email, subject: title, html }).catch((err: any) =>
+            batch.map((u: any) => {
+              const id = u._id.toString();
+              // Values are escaped in the HTML body; the subject is plain text
+              const html = personalized
+                ? buildBroadcastEmailHtml(fill(title, id, escapeHtml), fill(message, id, escapeHtml), link)
+                : sharedHtml;
+              return sendEmail({ to: u.email, subject: fill(title, id), html }).catch((err: any) =>
                 logger.warn(`Broadcast email failed for ${u.email}:`, err?.message)
-              )
-            )
+              );
+            })
           );
         }
         logger.info(`Broadcast email: sent to ${users.length} users`);

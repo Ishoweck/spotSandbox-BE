@@ -50,6 +50,8 @@ interface NotifyManyOptions {
   link?: string;
   skipPush?: boolean;
   referenceId?: string;
+  /** Per-recipient title/message (mail-merge). Falls back to title/message. */
+  render?: (userId: string) => { title: string; message: string };
 }
 
 function makeReferenceId(userId: string, type: string, extra?: string): string {
@@ -128,17 +130,18 @@ class NotificationService {
    * Push is queued per user (async).
    */
   async sendToMany(options: NotifyManyOptions): Promise<void> {
-    const { userIds, type, title, message, data, link, skipPush, referenceId } = options;
+    const { userIds, type, title, message, data, link, skipPush, referenceId, render } = options;
 
     const uniqueIds = [...new Set(userIds)];
     if (uniqueIds.length === 0) return;
+
+    const contentFor = (userId: string) => (render ? render(userId) : { title, message });
 
     // Batch create in-app notifications
     const docs = uniqueIds.map((userId) => ({
       user: userId,
       type,
-      title,
-      message,
+      ...contentFor(userId),
       data,
       link,
       pushStatus: 'pending' as const,
@@ -155,7 +158,7 @@ class NotificationService {
       for (const userId of uniqueIds) {
         try {
           ioInstance.to(`user_${userId}`).emit('new_notification', {
-            notification: { type, title, message, data, link, read: false, createdAt: new Date() },
+            notification: { type, ...contentFor(userId), data, link, read: false, createdAt: new Date() },
           });
         } catch {
           // Non-critical
@@ -173,8 +176,7 @@ class NotificationService {
           notificationId: '',
           userId,
           type,
-          title,
-          message,
+          ...contentFor(userId),
           data,
           link,
           referenceId: referenceId ?? makeReferenceId(userId, type, data?.eventId),
