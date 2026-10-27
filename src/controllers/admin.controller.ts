@@ -659,6 +659,45 @@ export const removeAdmin = asyncHandler(
 // ================================================================
 
 /**
+ * Page of _ids for the default admin list order: entries with unseen
+ * sensitive changes first (newest change first), then everyone else by
+ * createdAt desc. Can't sort on sensitiveChangesSeen directly - docs created
+ * before that field existed have it missing, and Mongo sorts missing before
+ * false/true, which buried every new signup behind all legacy records.
+ * Only _ids come back so select:false fields never leak through aggregate.
+ */
+const findIdsModifiedFirst = async (
+  Model: mongoose.Model<any>,
+  filter: any,
+  skip: number,
+  limit: number
+): Promise<mongoose.Types.ObjectId[]> => {
+  const rows = await Model.aggregate([
+    { $match: filter },
+    {
+      $addFields: {
+        _unseen: { $cond: [{ $eq: ['$sensitiveChangesSeen', false] }, 1, 0] },
+      },
+    },
+    {
+      $addFields: {
+        _changedAt: { $cond: [{ $eq: ['$_unseen', 1] }, '$sensitiveChangesAt', null] },
+      },
+    },
+    { $sort: { _unseen: -1, _changedAt: -1, createdAt: -1, _id: -1 } },
+    { $skip: skip },
+    { $limit: limit },
+    { $project: { _id: 1 } },
+  ]);
+  return rows.map((r: any) => r._id);
+};
+
+const orderByIds = <T extends { _id: any }>(docs: T[], ids: mongoose.Types.ObjectId[]): T[] => {
+  const byId = new Map(docs.map((d) => [d._id.toString(), d]));
+  return ids.map((id) => byId.get(id.toString())).filter(Boolean) as T[];
+};
+
+/**
  * GET /admin/users
  * List all users with filtering, pagination, search
  */
@@ -690,19 +729,26 @@ export const getAllUsers = asyncHandler(
     }
 
     // Default sort bumps users with unseen sensitive changes to the top.
-    // Clients that pass an explicit sort= still get what they asked for, but
-    // the "modified" flag always wins on top first.
+    // Clients that pass an explicit sort= still get what they asked for.
     const explicitSort = typeof req.query.sort === 'string' && req.query.sort.length > 0;
-    const sortObj: any = explicitSort
-      ? { [sort as string]: order === 'asc' ? 1 : -1 }
-      : { sensitiveChangesSeen: 1, sensitiveChangesAt: -1, createdAt: -1 };
+    const skip = (pageNum - 1) * limitNum;
+    const userSelect = '-password -otp -resetPasswordToken -resetPasswordExpires';
+
+    const fetchUsers = async () => {
+      if (explicitSort) {
+        return User.find(filter)
+          .select(userSelect)
+          .sort({ [sort as string]: order === 'asc' ? 1 : -1 })
+          .skip(skip)
+          .limit(limitNum);
+      }
+      const ids = await findIdsModifiedFirst(User, filter, skip, limitNum);
+      const docs = await User.find({ _id: { $in: ids } }).select(userSelect);
+      return orderByIds(docs, ids);
+    };
 
     const [users, total] = await Promise.all([
-      User.find(filter)
-        .select('-password -otp -resetPasswordToken -resetPasswordExpires')
-        .sort(sortObj)
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
+      fetchUsers(),
       User.countDocuments(filter),
     ]);
 
@@ -1102,16 +1148,24 @@ export const getAllVendors = asyncHandler(
 
     // Default sort bumps vendors with unseen sensitive changes to the top.
     const explicitSort = typeof req.query.sort === 'string' && req.query.sort.length > 0;
-    const sortObj: any = explicitSort
-      ? { [sort as string]: order === 'asc' ? 1 : -1 }
-      : { sensitiveChangesSeen: 1, sensitiveChangesAt: -1, createdAt: -1 };
+    const skip = (pageNum - 1) * limitNum;
+    const userFields = 'firstName lastName email phone status';
+
+    const fetchVendors = async () => {
+      if (explicitSort) {
+        return VendorProfile.find(filter)
+          .populate('user', userFields)
+          .sort({ [sort as string]: order === 'asc' ? 1 : -1 })
+          .skip(skip)
+          .limit(limitNum);
+      }
+      const ids = await findIdsModifiedFirst(VendorProfile, filter, skip, limitNum);
+      const docs = await VendorProfile.find({ _id: { $in: ids } }).populate('user', userFields);
+      return orderByIds(docs, ids);
+    };
 
     const [vendors, total] = await Promise.all([
-      VendorProfile.find(filter)
-        .populate('user', 'firstName lastName email phone status')
-        .sort(sortObj)
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
+      fetchVendors(),
       VendorProfile.countDocuments(filter),
     ]);
 
