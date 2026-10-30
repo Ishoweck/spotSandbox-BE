@@ -4832,7 +4832,7 @@
                   amount: vendorAmount,
                   purpose: WalletPurpose.COMMISSION,
                   reference: `order_${order.orderNumber}_${vendorId}`,
-                  description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee${affiliateDeduction > 0 ? `, ₦${affiliateDeduction} affiliate commission` : ''} deducted)`,
+                  description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 10000) / 100}% platform fee${affiliateDeduction > 0 ? `, ₦${affiliateDeduction} affiliate commission` : ''} deducted)`,
                   relatedOrder: order._id,
                   status: 'completed',
                   timestamp: new Date(),
@@ -4841,7 +4841,7 @@
             },
             { upsert: true }
           );
-          logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for order ${order.orderNumber} (commission: ₦${commission} at ${Math.round(commissionRate * 100)}%, original: ₦${amount})`);
+          logger.info(`Credited ₦${vendorAmount} to vendor ${vendorId} for order ${order.orderNumber} (commission: ₦${commission} at ${Math.round(commissionRate * 10000) / 100}%, original: ₦${amount})`);
 
           // Notify vendor their funds have been released
           notificationService.vendorSaleCompleted(vendorId, order.orderNumber, amount, vendorAmount).catch(() => {});
@@ -5028,7 +5028,7 @@
                 amount: vendorAmount,
                 purpose: WalletPurpose.COMMISSION,
                 reference: `order_${order.orderNumber}_vendor_${vendorId}`,
-                description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 100)}% platform fee${affiliateDeduction > 0 ? `, ₦${affiliateDeduction} affiliate commission` : ''} deducted)`,
+                description: `Payment for Order #${order.orderNumber} (${Math.round(commissionRate * 10000) / 100}% platform fee${affiliateDeduction > 0 ? `, ₦${affiliateDeduction} affiliate commission` : ''} deducted)`,
                 relatedOrder: order._id,
                 status: 'completed',
                 timestamp: new Date(),

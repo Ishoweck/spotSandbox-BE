@@ -6,8 +6,9 @@
 export const PAYMENT_LINK_FEE_PERCENT = 3.5;
 
 // Commission on product sales that came through a vendor's checkout link,
-// instead of the vendor's normal marketplace rate (8 / 6 / 5%).
-export const CHECKOUT_LINK_COMMISSION_PERCENT = 4;
+// instead of the vendor's normal marketplace rate (8 / 6 / 5%). Kept equal to the
+// payment-link fee so vendors see one rate for every kind of link.
+export const CHECKOUT_LINK_COMMISSION_PERCENT = PAYMENT_LINK_FEE_PERCENT;
 
 // Payment-link money is held this long before it becomes withdrawable, so it
 // lines up with Paystack settling to us and leaves a window to catch fraud.
