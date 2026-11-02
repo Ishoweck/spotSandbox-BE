@@ -6,6 +6,9 @@ interface ICartItem {
   quantity: number;
   price: number;
   variant?: string;
+  // Set when the item came through a vendor's product checkout link
+  linkCode?: string;
+  linkPrice?: number;
 }
 
 interface ICart extends Document {
@@ -33,6 +36,8 @@ const cartItemSchema = new Schema({
     required: true,
   },
   variant: String,
+  linkCode: String,
+  linkPrice: Number,
 }, { _id: true }); // Make sure this is true to generate _id for subdocuments
 
 const cartSchema = new Schema<ICart>({

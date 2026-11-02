@@ -26,7 +26,7 @@
   import { logger } from '../utils/logger';
   import { trackEvent, SlackEvent } from '../utils/slack-events';
   import Conversation from '../models/Conversation';
-  import { resolveCheckoutLink, checkoutLinkRateFor, trustedCheckoutLink } from '../services/payment-link.service';
+  import { resolveCheckoutLink, checkoutLinkRateFor, trustedCheckoutLink, syncCartLinkPrices, checkoutLinkCodeFor } from '../services/payment-link.service';
   import axios from 'axios';
 
   /** Buyer Protection Fee tiers */
@@ -963,7 +963,8 @@
 
       // Bought through a vendor's product checkout link: that vendor's items
       // get the reduced checkout-link commission when escrow releases.
-      const checkoutLink = await resolveCheckoutLink(checkoutLinkCode, (cart.items as any[]).map((i: any) => (i.product?.vendor?._id || i.product?.vendor)?.toString()).filter(Boolean));
+      if (await syncCartLinkPrices(cart)) await cart.save();
+      const checkoutLink = await resolveCheckoutLink(checkoutLinkCodeFor(checkoutLinkCode, cart), (cart.items as any[]).map((i: any) => (i.product?.vendor?._id || i.product?.vendor)?.toString()).filter(Boolean));
 
       // ✅ VALIDATE PAYMENT METHOD FOR CART CONTENTS
       this.validatePaymentMethod(cart.items, paymentMethod, deliveryType);
@@ -1210,7 +1211,8 @@
       let subtotal = 0;
       for (const cartItem of cart.items) {
         const liveProduct = await Product.findById(cartItem.product).select('price');
-        subtotal += (liveProduct?.price || (cartItem as any).price || 0) * cartItem.quantity;
+        const unitPrice = (cartItem as any).linkPrice ?? liveProduct?.price ?? (cartItem as any).price ?? 0;
+        subtotal += unitPrice * cartItem.quantity;
       }
       if (subtotal === 0) subtotal = cart.subtotal; // fallback if product lookup fails
       const discount = Math.min(cart.discount, subtotal); // cap stale coupon discount to actual subtotal
@@ -1568,7 +1570,8 @@
 
       // Bought through a vendor's product checkout link: that vendor's items
       // get the reduced checkout-link commission when escrow releases.
-      const checkoutLink = await resolveCheckoutLink(checkoutLinkCode, (cart.items as any[]).map((i: any) => (i.product?.vendor?._id || i.product?.vendor)?.toString()).filter(Boolean));
+      if (await syncCartLinkPrices(cart)) await cart.save();
+      const checkoutLink = await resolveCheckoutLink(checkoutLinkCodeFor(checkoutLinkCode, cart), (cart.items as any[]).map((i: any) => (i.product?.vendor?._id || i.product?.vendor)?.toString()).filter(Boolean));
 
       // Validate payment method for cart contents
       this.validatePaymentMethod(cart.items, paymentMethod, deliveryType);

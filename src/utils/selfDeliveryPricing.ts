@@ -19,9 +19,16 @@ export function readSelfDeliveryPricing(vendorProfile: any): SelfDeliveryRow[] {
     .filter((row: SelfDeliveryRow) => !!row.state);
 }
 
+// Buyers type their state freely on the website: "Lagos State" and "lagos" must
+// both match a "Lagos" row, and "Abuja" must match "FCT".
+function normalizeState(state: string): string {
+  const key = String(state || '').trim().toLowerCase().replace(/\s+state$/, '').trim();
+  return ['abuja', 'fct abuja', 'abuja fct', 'federal capital territory'].includes(key) ? 'fct' : key;
+}
+
 export function findFeeForState(pricing: SelfDeliveryRow[], state: string): number | null {
-  const key = String(state || '').trim().toLowerCase();
+  const key = normalizeState(state);
   if (!key) return null;
-  const match = pricing.find((row) => row.state.trim().toLowerCase() === key);
+  const match = pricing.find((row) => normalizeState(row.state) === key);
   return match ? match.fee : null;
 }

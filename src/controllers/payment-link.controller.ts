@@ -61,13 +61,29 @@ export class PaymentLinkController {
       if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
         throw new AppError('Choose a product for this checkout link', 400);
       }
-      const product = await Product.findOne({ _id: productId, vendor: vendorId }).select('name status');
+      const product = await Product.findOne({ _id: productId, vendor: vendorId }).select('name status price');
       if (!product) throw new AppError('Product not found in your store', 404);
       if (product.status !== ProductStatus.ACTIVE) {
         throw new AppError('Only approved, active products can have a checkout link', 400);
       }
-      // One reusable link per product is enough; hand back the existing one
-      const existing = await PaymentLink.findOne({ vendor: vendorId, type: 'PRODUCT', product: product._id, status: 'ACTIVE' });
+      // One reusable link per product and price is enough; hand back the existing one
+      let linkPrice: number | undefined;
+      if (amount !== undefined && amount !== null && amount !== '') {
+        linkPrice = Number(amount);
+        if (!Number.isFinite(linkPrice) || linkPrice < PAYMENT_LINK_MIN_AMOUNT || linkPrice > PAYMENT_LINK_MAX_AMOUNT) {
+          throw new AppError(`Amount must be between ₦${PAYMENT_LINK_MIN_AMOUNT.toLocaleString()} and ₦${PAYMENT_LINK_MAX_AMOUNT.toLocaleString()}`, 400);
+        }
+        linkPrice = Math.round(linkPrice * 100) / 100;
+        // Same as the listed price: leave it unset so the link follows later price edits
+        if (linkPrice === product.price) linkPrice = undefined;
+      }
+      const existing = await PaymentLink.findOne({
+        vendor: vendorId,
+        type: 'PRODUCT',
+        product: product._id,
+        status: 'ACTIVE',
+        amount: linkPrice ?? null,
+      });
       if (existing) {
         res.json({ success: true, message: 'Checkout link ready', data: { link: serializeLink(existing) } });
         return;
@@ -79,6 +95,7 @@ export class PaymentLinkController {
         title: (title || product.name).toString().slice(0, 120),
         description,
         product: product._id,
+        amount: linkPrice,
         singleUse: false,
       });
       res.status(201).json({ success: true, message: 'Checkout link created', data: { link: serializeLink(link) } });
@@ -232,8 +249,9 @@ export class PaymentLinkController {
               name: product.name,
               slug: product.slug,
               description: product.description,
-              price: product.price,
-              compareAtPrice: product.compareAtPrice,
+              // The vendor's agreed price for this link replaces the listed price
+              price: link.amount ?? product.price,
+              compareAtPrice: link.amount != null ? null : product.compareAtPrice,
               images: product.images,
               inStock: product.productType?.toUpperCase() === 'DIGITAL' || product.quantity > 0,
               hasVariants: Array.isArray(product.variants) && product.variants.length > 0,

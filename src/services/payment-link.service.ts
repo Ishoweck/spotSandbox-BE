@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import PaymentLink, { IPaymentLink } from '../models/PaymentLink';
 import PaymentLinkPayment from '../models/PaymentLinkPayment';
 import { PendingPayment } from '../models/PendingPayment';
+import Product from '../models/Product';
 import User from '../models/User';
 import Wallet from '../models/Wallet';
 import VendorProfile from '../models/VendorProfile';
@@ -373,6 +374,56 @@ export async function resolveCheckoutLink(
   const vendorId = link.vendor.toString();
   if (!cartVendorIds.includes(vendorId)) return undefined;
   return { link: link._id.toString(), code: link.code, vendor: vendorId, commissionRate: CHECKOUT_LINK_COMMISSION_PERCENT };
+}
+
+/** The active product checkout link for this code and product, if any. */
+export async function findProductLink(code: unknown, productId: string): Promise<IPaymentLink | null> {
+  if (!code) return null;
+  return PaymentLink.findOne({
+    code: String(code).toLowerCase(),
+    type: 'PRODUCT',
+    status: 'ACTIVE',
+    product: productId,
+  });
+}
+
+/**
+ * Keep link-priced cart items honest. An item keeps the vendor's link price only
+ * while that link is active; otherwise it falls back to the product's live price.
+ * Returns true when the cart changed, so the caller can save it.
+ */
+export async function syncCartLinkPrices(cart: any): Promise<boolean> {
+  let changed = false;
+  for (const item of cart.items) {
+    if (!item.linkCode) continue;
+    const productId = (item.product?._id || item.product).toString();
+    const link = await findProductLink(item.linkCode, productId);
+    if (link?.amount != null) {
+      if (item.price !== link.amount || item.linkPrice !== link.amount) {
+        item.price = link.amount;
+        item.linkPrice = link.amount;
+        changed = true;
+      }
+      continue;
+    }
+    if (!link) {
+      item.linkCode = undefined;
+      changed = true;
+    }
+    if (item.linkPrice != null) {
+      const product = await Product.findById(productId).select('price');
+      if (product) item.price = product.price;
+      item.linkPrice = undefined;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** The checkout link code for an order: from the request, else from the cart. */
+export function checkoutLinkCodeFor(requestCode: unknown, cart: any): string | undefined {
+  if (requestCode) return String(requestCode);
+  return cart.items.find((i: any) => i.linkCode)?.linkCode;
 }
 
 /**

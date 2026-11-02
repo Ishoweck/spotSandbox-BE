@@ -6,6 +6,7 @@ import VendorProfile from '../models/VendorProfile';
 import { Coupon } from '../models/Additional';
 import { AppError } from '../middleware/error';
 import { calculateDiscount } from '../utils/helpers';
+import { findProductLink, syncCartLinkPrices } from '../services/payment-link.service';
 
 export class CartController {
   /**
@@ -53,7 +54,9 @@ export class CartController {
     // always reflects what the vendor is actually charging. Users see the updated
     // price here — on the cart screen — rather than getting a surprise at payment.
     const priceChanges: Array<{ name: string; oldPrice: number; newPrice: number }> = [];
+    const linkPricesChanged = await syncCartLinkPrices(cart);
     for (const item of cart.items as any[]) {
+      if (item.linkPrice != null) continue; // price set by the vendor's checkout link
       const livePrice = item.product?.price;
       if (livePrice !== undefined && livePrice !== item.price) {
         priceChanges.push({ name: item.product.name, oldPrice: item.price, newPrice: livePrice });
@@ -61,7 +64,7 @@ export class CartController {
       }
     }
 
-    if (validItems.length !== cart.items.length || priceChanges.length > 0) {
+    if (validItems.length !== cart.items.length || priceChanges.length > 0 || linkPricesChanged) {
       await cart.save();
     }
 
@@ -109,7 +112,7 @@ export class CartController {
    * Add item to cart
    */
   async addToCart(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
-    const { productId, variant } = req.body;
+    const { productId, variant, checkoutLinkCode } = req.body;
     const quantity = parseInt(req.body.quantity, 10);
 
     if (!quantity || quantity < 1 || quantity > 1000) {
@@ -170,6 +173,12 @@ export class CartController {
       });
     }
 
+    // Bought through a vendor's checkout link: the link can set the price
+    const link = await findProductLink(checkoutLinkCode, productId);
+    const linkFields = link
+      ? { linkCode: link.code, ...(link.amount != null ? { linkPrice: link.amount } : {}) }
+      : {};
+
     // Check if item already exists
     const existingItemIndex = cart.items.findIndex(
       (item: any) => 
@@ -179,20 +188,28 @@ export class CartController {
 
     if (existingItemIndex > -1) {
       // Update quantity
-      const newQuantity = cart.items[existingItemIndex].quantity + quantity;
+      // Reopening a link and tapping Buy now again must not double the order
+      const existingQuantity = cart.items[existingItemIndex].quantity;
+      const newQuantity = link ? Math.max(existingQuantity, quantity) : existingQuantity + quantity;
       
       if (newQuantity > product.quantity) {
         throw new AppError('Quantity exceeds available stock', 400);
       }
 
       cart.items[existingItemIndex].quantity = newQuantity;
+      if (link) {
+        cart.items[existingItemIndex].linkCode = link.code;
+        cart.items[existingItemIndex].linkPrice = link.amount ?? undefined;
+        cart.items[existingItemIndex].price = link.amount ?? product.price;
+      }
     } else {
       // Add new item
       cart.items.push({
         product: product._id,
         variant,
         quantity,
-        price: product.price,
+        price: link?.amount ?? product.price,
+        ...linkFields,
       });
     }
 
