@@ -1,12 +1,10 @@
-import { Resend } from 'resend';
-import { logger } from './logger';
-import { isAutomatedContext } from './email-context';
-
 import dotenv from "dotenv"
 
 dotenv.config()
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+import { logger } from './logger';
+import { isAutomatedContext } from './email-context';
+import { deliverEmail } from '../services/email-provider.service';
 
 // Vendorspot logo served from the backend's public/ folder
 const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
@@ -147,14 +145,10 @@ export const sendEmail = async (options: EmailOptions): Promise<void> => {
       payload.bcc = AUDIT_BCC;
     }
 
-    const { data, error } = await resend.emails.send(payload);
+    // Resend first, Brevo as soon as Resend is out for the day or errors
+    const { provider, id } = await deliverEmail(payload);
 
-    if (error) {
-      logger.error('Resend error:', error);
-      throw new Error(`Failed to send email: ${error.message}`);
-    }
-
-    logger.info(`Email sent to ${options.to}`, { emailId: data?.id, audited: !!payload.bcc });
+    logger.info(`Email sent to ${options.to}`, { provider, emailId: id, audited: !!payload.bcc });
   } catch (error) {
     logger.error('Email sending error:', error);
     throw new Error('Failed to send email');

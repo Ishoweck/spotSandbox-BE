@@ -4,6 +4,7 @@ import { UserRole } from '../types';
 import {
   // Dashboard & Analytics
   getDashboard,
+  getEmailUsage,
   getRevenueAnalytics,
   getUserAnalytics,
   getOrderAnalytics,
@@ -222,6 +223,7 @@ const marketingAdmins = [SA, A, MA];
 // DASHBOARD & ANALYTICS
 // ================================================================
 router.get('/dashboard', authorize(...allAdmins), getDashboard);
+router.get('/email-usage', authorize(...allAdmins), getEmailUsage);
 router.get('/analytics/revenue', authorize(SA, A, FA), getRevenueAnalytics);
 router.get('/analytics/users', authorize(SA, A, SPA), getUserAnalytics);
 router.get('/analytics/orders', authorize(SA, A, FA, SPA), getOrderAnalytics);

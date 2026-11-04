@@ -47,6 +47,7 @@ import AppVersion from '../models/AppVersion';
 import { orderController } from './order.controller';
 import CompanyExpense, { ExpenseStatus } from '../models/CompanyExpense';
 import { trackEvent, SlackEvent } from '../utils/slack-events';
+import { getEmailUsage as readEmailUsage } from '../services/email-provider.service';
 import {
   PLACEHOLDERS,
   PersonalizeRecipient,
@@ -6629,4 +6630,16 @@ export const sendCartFollowUp = asyncHandler(
       message: `Follow-up email queued for ${cart.user.email}`,
     });
   },
+);
+
+/**
+ * GET /admin/email-usage?days=14
+ * Emails sent per provider per UTC day (Resend primary, Brevo fallback) against the daily limits.
+ */
+export const getEmailUsage = asyncHandler(
+  async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const days = Math.min(Math.max(parseInt(String(req.query.days || '14'), 10) || 14, 1), 90);
+    const data = await readEmailUsage(days);
+    res.json({ success: true, message: 'Email usage retrieved', data });
+  }
 );
