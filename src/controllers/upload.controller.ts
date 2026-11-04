@@ -4,6 +4,7 @@ import { AppError } from '../middleware/error';
 import cloudinary from '../utils/cloudinary';
 import { logger } from '../utils/logger';
 import VendorProfile from '../models/VendorProfile';
+import { markKycSubmitted, notifyKycUploaded } from '../utils/kycReview';
 
 export class UploadController {
   /**
@@ -118,8 +119,10 @@ export class UploadController {
           documentUrl: cloudinaryResult.secure_url,
           verificationStatus: 'pending',
         });
+        markKycSubmitted(vendorProfile, [type]);
         await vendorProfile.save();
         logger.info(`KYC document saved to vendor profile: ${type}`);
+        notifyKycUploaded(vendorProfile, [type], { id: req.user?.id, email: (req.user as any)?.email });
       }
 
       res.json({

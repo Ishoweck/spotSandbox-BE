@@ -168,6 +168,8 @@ export interface ApiResponse<T = any> {
     totalPages?: number;
     hasNextPage?: boolean;
     hasPrevPage?: boolean;
+    /** Admin vendor list: vendors with an uploaded KYC document awaiting review */
+    awaitingKycReview?: number;
   };
 }
 
@@ -287,6 +289,7 @@ export interface IKYCDocument {
   verificationStatus: 'pending' | 'verified' | 'rejected';
   verifiedAt?: Date;
   rejectionReason?: string;
+  uploadedAt?: Date;
 }
 
 // Commission Structure

@@ -48,6 +48,7 @@ import { orderController } from './order.controller';
 import CompanyExpense, { ExpenseStatus } from '../models/CompanyExpense';
 import { trackEvent, SlackEvent } from '../utils/slack-events';
 import { getEmailUsage as readEmailUsage } from '../services/email-provider.service';
+import { AWAITING_KYC_REVIEW_FILTER } from '../utils/kycReview';
 import {
   PLACEHOLDERS,
   PersonalizeRecipient,
@@ -1148,6 +1149,10 @@ export const getAllVendors = asyncHandler(
     if (req.query.hasKyc === 'true') {
       filter['kycDocuments.0'] = { $exists: true };
     }
+    // ?review=kyc: vendors with an uploaded document still waiting for a decision,
+    // whatever their account status, newest upload first.
+    const reviewKyc = req.query.review === 'kyc';
+    if (reviewKyc) Object.assign(filter, AWAITING_KYC_REVIEW_FILTER);
     if (search) {
       filter.$or = [
         { businessName: { $regex: escapeRegex(search), $options: 'i' } },
@@ -1161,6 +1166,13 @@ export const getAllVendors = asyncHandler(
     const userFields = 'firstName lastName email phone status';
 
     const fetchVendors = async () => {
+      if (reviewKyc && !explicitSort) {
+        return VendorProfile.find(filter)
+          .populate('user', userFields)
+          .sort({ kycSubmittedAt: -1, updatedAt: -1 })
+          .skip(skip)
+          .limit(limitNum);
+      }
       if (explicitSort) {
         return VendorProfile.find(filter)
           .populate('user', userFields)
@@ -1173,15 +1185,16 @@ export const getAllVendors = asyncHandler(
       return orderByIds(docs, ids);
     };
 
-    const [vendors, total] = await Promise.all([
+    const [vendors, total, awaitingKycReview] = await Promise.all([
       fetchVendors(),
       VendorProfile.countDocuments(filter),
+      VendorProfile.countDocuments(AWAITING_KYC_REVIEW_FILTER),
     ]);
 
     res.json({
       success: true,
       data: vendors,
-      meta: getPaginationMeta(total, pageNum, limitNum),
+      meta: { ...getPaginationMeta(total, pageNum, limitNum), awaitingKycReview },
     });
   }
 );

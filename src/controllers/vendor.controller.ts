@@ -22,6 +22,7 @@ import { generateSlug } from '../utils/helpers';
 import { readSelfDeliveryPricing } from '../utils/selfDeliveryPricing';
 import { verifyNINWithSelfie } from '../services/dojah.service';
 import { trackEvent, SlackEvent } from '../utils/slack-events';
+import { markKycSubmitted, notifyKycUploaded } from '../utils/kycReview';
 
 const LOGO_URL = `${process.env.BACKEND_URL || 'https://vapp-be.onrender.com'}/logo.png`;
 import { logger } from '../utils/logger';
@@ -947,9 +948,19 @@ export class VendorController {
       });
     }
 
+    // Only documents whose file actually changed count as a new submission; the app
+    // re-sends already-saved documents on "Submit for Verification".
+    const changedTypes: string[] = vendorProfile.kycDocuments
+      .filter((d: any) => d.isModified('documentUrl') || d.isNew)
+      .map((d: any) => d.type);
+    if (changedTypes.length) markKycSubmitted(vendorProfile, changedTypes);
+
     await vendorProfile.save();
 
     logger.info(`KYC documents uploaded: ${req.user?.id}`);
+    if (changedTypes.length) {
+      notifyKycUploaded(vendorProfile, changedTypes, { id: req.user?.id, email: (req.user as any)?.email });
+    }
 
     res.json({
       success: true,

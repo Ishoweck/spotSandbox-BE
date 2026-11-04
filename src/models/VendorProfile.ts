@@ -91,6 +91,7 @@ export interface IVendorProfile extends Document {
   }>;
   sensitiveChangesSeen?: boolean;
   sensitiveChangesAt?: Date;
+  kycSubmittedAt?: Date;
   ninVerification?: {
     nin?: string;
     provider?: 'dojah' | 'manual';
@@ -200,7 +201,10 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
     },
     verifiedAt: Date,
     rejectionReason: String,
+    uploadedAt: Date,
   }],
+  // Last time the vendor uploaded a KYC document; drives the admin "KYC to review" list.
+  kycSubmittedAt: Date,
   verificationStatus: {
     type: String,
     enum: Object.values(VendorVerificationStatus),
@@ -403,6 +407,7 @@ const vendorProfileSchema = new Schema<IVendorProfile>({
 vendorProfileSchema.index({ user: 1 });
 vendorProfileSchema.index({ slug: 1 }, { unique: true, sparse: true });
 vendorProfileSchema.index({ verificationStatus: 1 });
+vendorProfileSchema.index({ kycSubmittedAt: -1 });
 vendorProfileSchema.index({ isActive: 1 });
 vendorProfileSchema.index({ followers: 1 });
 
