@@ -140,7 +140,7 @@ Here's everything you know about VendorSpot:
 
 **PRODUCT MANAGEMENT:**
 - Add physical or digital products with images (up to 5), description, pricing
-- AI-powered title and description generation (4 uses per product)
+- AI-powered title and description generation (2 uses each per product)
 - Set compare-at prices for discounts
 - Toggle flash sale (requires 10%+ discount)
 - Enable affiliate promotion with custom commission rates
