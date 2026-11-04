@@ -33,14 +33,7 @@ import {
 } from '../utils/email';
 import { EmailJobType, type EmailJobData } from '../queues/email.queue';
 import { logger } from '../utils/logger';
-import { emailContext } from '../utils/email-context';
-
 async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
-  // Mark this async context as "automated" so sendEmail() adds the audit BCC.
-  return emailContext.run({ automated: true }, () => processEmailJobInner(job));
-}
-
-async function processEmailJobInner(job: Job<EmailJobData>): Promise<void> {
   const { type, to, firstName, meta } = job.data;
 
   switch (type) {

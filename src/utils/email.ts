@@ -3,7 +3,6 @@ import dotenv from "dotenv"
 dotenv.config()
 
 import { logger } from './logger';
-import { isAutomatedContext } from './email-context';
 import { deliverEmail } from '../services/email-provider.service';
 
 // Vendorspot logo served from the backend's public/ folder
@@ -111,19 +110,12 @@ interface EmailOptions {
   text?: string;
   html?: string;
   attachments?: Array<{ filename: string; content: Buffer }>;
-  /** Skip the audit BCC (rarely needed — e.g. an email TO the audit inbox itself). */
-  skipAudit?: boolean;
 }
 
-// Automated/scheduled emails are BCC'd to the audit inbox for an internal audit trail.
-// Transactional emails (OTP, welcome, order confirmations) are NOT audited.
-// The "automated" flag is set by the email worker via AsyncLocalStorage — see email-context.ts.
-// Override the address with EMAIL_AUDIT_BCC in .env; set to empty string to disable entirely.
-const AUDIT_BCC = process.env.EMAIL_AUDIT_BCC ?? 'support@vendorspotng.com';
-
+// Emails go only to the recipient: no BCC copies (each copy also used up provider quota).
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
   try {
-    const payload: any = {
+    const payload = {
       from: process.env.EMAIL_FROM || 'VendorSpot <noreply@vendorspotng.com>',
       to: options.to,
       subject: options.subject,
@@ -132,23 +124,10 @@ export const sendEmail = async (options: EmailOptions): Promise<void> => {
       attachments: options.attachments,
     };
 
-    // Audit BCC — only when the send happens inside the email worker (automated context).
-    // Skipped when: (a) not in an automated context, (b) recipient IS the audit inbox,
-    // (c) caller explicitly opts out via skipAudit.
-    const shouldAudit =
-      AUDIT_BCC &&
-      isAutomatedContext() &&
-      !options.skipAudit &&
-      options.to.toLowerCase() !== AUDIT_BCC.toLowerCase();
-
-    if (shouldAudit) {
-      payload.bcc = AUDIT_BCC;
-    }
-
     // Resend first, Brevo as soon as Resend is out for the day or errors
     const { provider, id } = await deliverEmail(payload);
 
-    logger.info(`Email sent to ${options.to}`, { provider, emailId: id, audited: !!payload.bcc });
+    logger.info(`Email sent to ${options.to}`, { provider, emailId: id });
   } catch (error) {
     logger.error('Email sending error:', error);
     throw new Error('Failed to send email');

@@ -3,7 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export type EmailProvider = 'resend' | 'brevo';
 
 // One row per provider per UTC day. `units` is what the provider bills against its daily
-// quota: every To/BCC recipient counts, so an automated email with the audit BCC is 2 units.
+// quota: every To/BCC recipient counts (sendEmail no longer adds BCC copies, so normally 1).
 export interface IEmailUsage extends Document {
   day: string; // YYYY-MM-DD (UTC)
   provider: EmailProvider;
