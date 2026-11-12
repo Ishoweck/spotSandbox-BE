@@ -1,4 +1,13 @@
 import { Router } from 'express';
+import {
+  adminListEvents,
+  adminGetEvent,
+  adminCreateEvent,
+  adminUpdateEvent,
+  adminDeleteEvent,
+  adminListListings,
+  adminReviewListings,
+} from '../controllers/sales-event.controller';
 import { authenticate, authorize } from '../middleware/auth';
 import { UserRole } from '../types';
 import {
@@ -363,6 +372,17 @@ router.delete('/categories/:id', authorize(SA, A), deleteCategory);
 // ================================================================
 router.post('/notifications/broadcast', authorize(...marketingAdmins), broadcastNotification);
 router.get('/notifications', authorize(...marketingAdmins), getNotificationHistory);
+
+// ================================================================
+// SALES EVENTS (Black Friday, Christmas Sale, ...) — marketing
+// ================================================================
+router.get('/sales-events', authorize(...marketingAdmins), asyncHandler(adminListEvents));
+router.post('/sales-events', authorize(...marketingAdmins), asyncHandler(adminCreateEvent));
+router.patch('/sales-events/listings/review', authorize(...marketingAdmins), asyncHandler(adminReviewListings));
+router.get('/sales-events/:id', authorize(...marketingAdmins), asyncHandler(adminGetEvent));
+router.patch('/sales-events/:id', authorize(...marketingAdmins), asyncHandler(adminUpdateEvent));
+router.delete('/sales-events/:id', authorize(SA, A), asyncHandler(adminDeleteEvent));
+router.get('/sales-events/:id/listings', authorize(...marketingAdmins), asyncHandler(adminListListings));
 
 // ================================================================
 // ACCOUNT DELETION MANAGEMENT — super admin only

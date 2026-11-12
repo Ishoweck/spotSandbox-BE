@@ -212,6 +212,11 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
     if (req.query.category) filter.category = req.query.category;
     if (req.query.vendor) filter.vendor = req.query.vendor;
     if (req.query.productType) filter.productType = req.query.productType;
+    if (req.query.salesEvent) {
+      const { approvedProductIdsForEvent } = await import('./sales-event.controller');
+      const ids = await approvedProductIdsForEvent(String(req.query.salesEvent));
+      filter._id = { $in: ids || [] };
+    }
     if (req.query.state) {
       const stateRegex = new RegExp(req.query.state as string, 'i');
       const vendorsInState = await VendorProfile.find({
@@ -1053,6 +1058,24 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
 
     const oldPrice = product.price;
 
+    // While a sales event is live, product.price holds the event price and the
+    // real price is restored when the event ends. Editing price now would be
+    // overwritten (or restore the wrong value), so block it.
+    const liveEvent: any = (product as any).salesEvent;
+    if (
+      liveEvent?.event &&
+      ((req.body.price !== undefined && Number(req.body.price) !== product.price) ||
+        (req.body.compareAtPrice !== undefined && Number(req.body.compareAtPrice) !== (product.compareAtPrice ?? 0)))
+    ) {
+      throw new AppError(
+        `This product is in the ${liveEvent.name} sale until ${new Date(liveEvent.endsAt).toDateString()}. Price changes are locked until it ends, or remove it from the event first.`,
+        400
+      );
+    }
+    delete req.body.salesEvent;
+    delete req.body.isFlashSale;
+    delete req.body.flashSaleEndsAt;
+
     // Validate price and quantity when supplied
     if (req.body.price !== undefined && req.body.price <= 0) {
       throw new AppError('Price must be greater than 0', 400);
@@ -1207,6 +1230,8 @@ async getProducts(req: AuthRequest, res: Response<ApiResponse>): Promise<void> {
       weight: product.weight,
       sku: product.sku || '',
       isFlashSale: product.isFlashSale || false,
+      flashSaleEndsAt: product.flashSaleEndsAt || null,
+      salesEvent: product.salesEvent || null,
       colors: product.colors || [],
       sizes: product.sizes || [],
       status: product.status || 'pending_approval',

@@ -23,6 +23,17 @@ export interface IProduct extends Document {
   status: ProductStatus;
   isFlashSale: boolean;
   flashSaleEndsAt?: Date;
+  // Snapshot of the live sales event this product is priced for (badge data).
+  // Written/cleared only by services/sales-event.service.ts.
+  salesEvent?: {
+    event: Types.ObjectId;
+    name: string;
+    slug: string;
+    badgeText: string;
+    themeColor: string;
+    textColor: string;
+    endsAt: Date;
+  } | null;
   isFeatured: boolean;
   isAffiliate: boolean;
   affiliateCommission: number;
@@ -183,6 +194,21 @@ const productSchema = new Schema<IProduct>({
   },
   flashSaleEndsAt: {
     type: Date,
+    default: null,
+  },
+  salesEvent: {
+    type: new Schema(
+      {
+        event: { type: Schema.Types.ObjectId, ref: 'SalesEvent' },
+        name: String,
+        slug: String,
+        badgeText: String,
+        themeColor: String,
+        textColor: String,
+        endsAt: Date,
+      },
+      { _id: false }
+    ),
     default: null,
   },
   isFeatured: {

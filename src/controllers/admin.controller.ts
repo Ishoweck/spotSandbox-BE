@@ -4616,6 +4616,12 @@ export const broadcastNotification = asyncHandler(
     const rawSegment: string = req.body.segment || req.body.targetAudience || 'all';
     const rawType = req.body.type;
     const { title, message, link } = req.body;
+    // Lets the app open a sales event when the notification is tapped
+    const salesEventSlug: string | undefined =
+      typeof req.body.salesEventSlug === 'string' && /^[a-z0-9-]{1,100}$/.test(req.body.salesEventSlug)
+        ? req.body.salesEventSlug
+        : undefined;
+    const extraData: Record<string, string> | undefined = salesEventSlug ? { salesEventSlug } : undefined;
 
     // channels: which delivery methods to use (defaults to inapp + push for backwards compat)
     const channels: string[] = Array.isArray(req.body.channels) && req.body.channels.length > 0
@@ -4695,7 +4701,7 @@ export const broadcastNotification = asyncHandler(
     if (channels.includes('inapp')) {
       notificationService
         .sendToMany({
-          userIds, type, title, message, link, skipPush: true,
+          userIds, type, title, message, link, skipPush: true, data: extraData,
           render: personalized
             ? (id) => ({ title: fill(title, id), message: fill(message, id) })
             : undefined,
@@ -4708,6 +4714,7 @@ export const broadcastNotification = asyncHandler(
       const pushData: Record<string, string> = {
         type,
         ...(link ? { link } : {}),
+        ...(extraData || {}),
       };
       const expoTokens = (u: any): string[] =>
         (u.fcmTokens || []).filter((t: string) => typeof t === 'string' && t.startsWith('ExponentPushToken'));

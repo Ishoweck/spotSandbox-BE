@@ -23,6 +23,7 @@ import questionRoutes from "./question.routes"
 import disputeRoutes from "./dispute.routes"
 import messageRoutes from './message.routes';
 import ticketRoutes from './ticket.routes';
+import salesEventRoutes from './sales-event.routes';
 import adminRoutes from './admin.routes';
 import auditRoutes from './audit.routes';
 import aiChatRoutes from './ai-chat.routes';
@@ -68,6 +69,7 @@ router.use('/blogs', blogRoutes);
 router.use('/deferred-link', deferredLinkRoutes);
 router.use('/ambassadors', ambassadorRoutes);
 router.use('/payment-links', paymentLinkRoutes);
+router.use('/sales-events', salesEventRoutes);
 
 
 // Public app version check (no auth required — called by the mobile app on startup)

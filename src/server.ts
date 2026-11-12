@@ -27,6 +27,7 @@ import { setupVendorReminders } from './utils/vendor-reminders';
 import { setupQuestionReminders } from './utils/question-reminders';
 import { setupAutomatedEmails } from './utils/automated-emails';
 import { setupPaymentLinkRelease } from './utils/payment-link-release';
+import { setupSalesEventScheduler } from './services/sales-event.service';
 import { backfillVendorSlugs } from './utils/vendor-slug-backfill';
 
 // Load environment variables
@@ -238,6 +239,7 @@ server.listen(PORT, () => {
   setupAutomatedEmails();
   // Move payment-link money into vendor wallets once the hold window ends
   setupPaymentLinkRelease();
+  setupSalesEventScheduler();
 });
 
 // SET SERVER TIMEOUT
