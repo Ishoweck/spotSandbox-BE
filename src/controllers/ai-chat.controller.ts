@@ -1,3 +1,4 @@
+import { GROQ_MODEL, GROQ_REASONING_EFFORT } from '../config/ai';
 import { Response } from 'express';
 import { AuthRequest, ApiResponse } from '../types';
 import { AppError } from '../middleware/error';
@@ -281,7 +282,8 @@ class AIChatController {
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
       const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: GROQ_MODEL,
+        reasoning_effort: GROQ_REASONING_EFFORT,
         messages: [
           { role: 'system', content: ADMIN_SUGGEST_SYSTEM_PROMPT },
           {
@@ -365,9 +367,10 @@ class AIChatController {
       messages.push({ role: 'user', content: message.trim() });
 
       const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: GROQ_MODEL,
+        reasoning_effort: GROQ_REASONING_EFFORT,
         messages,
-        max_tokens: 600,
+        max_tokens: 1000,
         temperature: 0.7,
       });
 

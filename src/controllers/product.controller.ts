@@ -1,3 +1,4 @@
+import { GROQ_MODEL, GROQ_REASONING_EFFORT } from '../config/ai';
 import { Response } from 'express';
 import { AuthRequest, ApiResponse, ProductStatus, VendorVerificationStatus } from '../types';
 import Product from '../models/Product';
@@ -1285,7 +1286,8 @@ Return ONLY the description text, no headers or labels.`;
       }
 
       const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: GROQ_MODEL,
+        reasoning_effort: GROQ_REASONING_EFFORT,
         messages: [{ role: 'user', content: prompt }],
         max_tokens: type === 'title' ? 100 : 500,
         temperature: 0.7,

@@ -1,3 +1,4 @@
+import { GROQ_MODEL, GROQ_REASONING_EFFORT } from '../config/ai';
 import Groq from 'groq-sdk';
 import Ticket from '../models/Ticket';
 import { ChatMessage } from '../models/Additional';
@@ -66,7 +67,8 @@ ${transcript}`;
 
   try {
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: GROQ_MODEL,
+      reasoning_effort: GROQ_REASONING_EFFORT,
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 300,
       temperature: 0.3,
